@@ -196,6 +196,7 @@ public static class FinancePermissionPolicyMap
             "GLIntegrationTest" => One(FinancePermissions.AdministerFinance),
             "JournalBatch" => JournalBatchPolicy(action),
             "JournalEntry" => JournalEntryPolicy(action),
+            "RecurringJournal" => RecurringJournalPolicy(action, methods),
             "LeaseAccounting" => LeaseAccountingPolicy(action, methods),
             "MigrationSignOff" => MigrationSignOffPolicy(action),
             "OpeningBalances" => OpeningBalancePolicy(action),
@@ -296,6 +297,20 @@ public static class FinancePermissionPolicyMap
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ProcessApPayments)
         };
 
+    private static IReadOnlyList<string> RecurringJournalPolicy(
+        string action,
+        IReadOnlyCollection<string> methods)
+        => action switch
+        {
+            "Create" or "CreateNewVersion" or "ProcessDue" => One(FinancePermissions.CreateJournalEntries),
+            "Update" or "Pause" or "Resume" or "Cancel" or "RequestOccurrenceWaiver" => One(FinancePermissions.EditJournalEntries),
+            "Submit" => One(FinancePermissions.SubmitJournalEntries),
+            "Approve" or "ApproveOccurrence" => One(FinancePermissions.WorkflowApprove),
+            "Reject" or "RejectOccurrence" => One(FinancePermissions.WorkflowReject),
+            "ProcessDueReversals" or "RetryReversal" or "PostOccurrence" => One(FinancePermissions.PostJournalEntries),
+            _ => IsRead(action, methods) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.EditJournalEntries)
+        };
+
     private static IReadOnlyList<string> ArInvoicePolicy(string action)
         => action switch
         {
@@ -373,7 +388,7 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> CashierTillPolicy(string action)
         => action switch
         {
-            "OpenSession" or "SubmitCount" => One(FinancePermissions.OperateCashTills),
+            "OpenSession" or "UpdateOpening" or "CancelSession" or "SubmitCount" => One(FinancePermissions.OperateCashTills),
             "ApproveClosure" or "ReturnForRecount" => One(FinancePermissions.ReviewCashTillClosures),
             "ReopenAsCorrection" => One(FinancePermissions.ReopenCashTillSessions),
             _ => One(FinancePermissions.ViewFinance)

@@ -3565,6 +3565,49 @@ public sealed class DocumentManagementController : ControllerBase
         return Ok(new { success = true, data = ToTemplateDto(template) });
     }
 
+    [HttpPut("metadata-templates/{id:guid}")]
+    public async Task<IActionResult> UpdateMetadataTemplate(
+        Guid id,
+        [FromBody] UpsertMetadataTemplateRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsDmsAccessAdministrator())
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Module) || string.IsNullOrWhiteSpace(request.DocumentType) || string.IsNullOrWhiteSpace(request.TemplateCode))
+        {
+            return BadRequest(new { success = false, message = "Module, document type, and template code are required." });
+        }
+
+        var tenantId = GetTenantId();
+        var template = await _db.CentralDocumentMetadataTemplates
+            .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (template is null)
+        {
+            return NotFound(new { success = false, message = "Metadata template was not found." });
+        }
+
+        template.Module = request.Module.Trim();
+        template.DocumentType = request.DocumentType.Trim();
+        template.TemplateCode = request.TemplateCode.Trim();
+        template.SourceLabel = string.IsNullOrWhiteSpace(request.SourceLabel)
+            ? $"Source: {request.Module.Trim()} -> Central DMS"
+            : request.SourceLabel.Trim();
+        template.RequiredFieldsJson = JsonSerializer.Serialize(request.RequiredFields ?? []);
+        template.RelationshipsJson = JsonSerializer.Serialize(request.Relationships ?? []);
+        template.RetentionRule = request.RetentionRule ?? string.Empty;
+        template.AccessProfile = request.AccessProfile ?? string.Empty;
+        template.IsActive = request.IsActive ?? template.IsActive;
+        template.UpdatedAt = DateTime.UtcNow;
+        template.UpdatedBy = _currentUserService.UserName ?? "System";
+        template.LastModifiedById = GetUserId();
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return Ok(new { success = true, data = ToTemplateDto(template) });
+    }
+
     [HttpPost("access-rules")]
     public async Task<IActionResult> CreateAccessRule([FromBody] UpsertAccessRuleRequest request, CancellationToken cancellationToken)
     {
@@ -3593,6 +3636,43 @@ public sealed class DocumentManagementController : ControllerBase
         };
 
         _db.CentralDocumentAccessRules.Add(rule);
+        await _db.SaveChangesAsync(cancellationToken);
+        return Ok(new { success = true, data = rule });
+    }
+
+    [HttpPut("access-rules/{id:guid}")]
+    public async Task<IActionResult> UpdateAccessRule(
+        Guid id,
+        [FromBody] UpsertAccessRuleRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsDmsAccessAdministrator())
+        {
+            return Forbid();
+        }
+
+        var tenantId = GetTenantId();
+        var rule = await _db.CentralDocumentAccessRules
+            .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (rule is null)
+        {
+            return NotFound(new { success = false, message = "Access rule was not found." });
+        }
+
+        rule.AccessProfile = string.IsNullOrWhiteSpace(request.AccessProfile) ? "Module restricted" : request.AccessProfile.Trim();
+        rule.Module = TrimToNull(request.Module);
+        rule.RoleName = TrimToNull(request.RoleName);
+        rule.PermissionKey = TrimToNull(request.PermissionKey);
+        rule.CanView = request.CanView ?? rule.CanView;
+        rule.CanUpload = request.CanUpload ?? rule.CanUpload;
+        rule.CanAnnotate = request.CanAnnotate ?? rule.CanAnnotate;
+        rule.CanApprove = request.CanApprove ?? rule.CanApprove;
+        rule.CanArchive = request.CanArchive ?? rule.CanArchive;
+        rule.IsActive = request.IsActive ?? rule.IsActive;
+        rule.UpdatedAt = DateTime.UtcNow;
+        rule.UpdatedBy = _currentUserService.UserName ?? "System";
+        rule.LastModifiedById = GetUserId();
+
         await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { success = true, data = rule });
     }
@@ -3648,6 +3728,48 @@ public sealed class DocumentManagementController : ControllerBase
         };
 
         _db.CentralDocumentRetentionPolicies.Add(policy);
+        await _db.SaveChangesAsync(cancellationToken);
+        return Ok(new { success = true, data = policy });
+    }
+
+    [HttpPut("retention-policies/{id:guid}")]
+    public async Task<IActionResult> UpdateRetentionPolicy(
+        Guid id,
+        [FromBody] UpsertRetentionPolicyRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsDmsAccessAdministrator())
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.PolicyCode) || string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new { success = false, message = "Policy code and name are required." });
+        }
+
+        var tenantId = GetTenantId();
+        var policy = await _db.CentralDocumentRetentionPolicies
+            .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (policy is null)
+        {
+            return NotFound(new { success = false, message = "Retention policy was not found." });
+        }
+
+        policy.PolicyCode = request.PolicyCode.Trim();
+        policy.Name = request.Name.Trim();
+        policy.Module = TrimToNull(request.Module);
+        policy.DocumentType = TrimToNull(request.DocumentType);
+        policy.RetentionDays = Math.Clamp(request.RetentionDays ?? policy.RetentionDays, 1, 36500);
+        policy.RequiresLegalHoldReview = request.RequiresLegalHoldReview ?? policy.RequiresLegalHoldReview;
+        policy.AllowArchive = request.AllowArchive ?? policy.AllowArchive;
+        policy.AllowDestruction = request.AllowDestruction ?? policy.AllowDestruction;
+        policy.IsActive = request.IsActive ?? policy.IsActive;
+        policy.Notes = TrimToNull(request.Notes);
+        policy.UpdatedAt = DateTime.UtcNow;
+        policy.UpdatedBy = _currentUserService.UserName ?? "System";
+        policy.LastModifiedById = GetUserId();
+
         await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { success = true, data = policy });
     }

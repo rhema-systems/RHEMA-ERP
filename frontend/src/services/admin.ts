@@ -81,6 +81,7 @@ export interface EmailSettings {
   smtpPort: number;
   smtpUsername: string;
   smtpPassword: string;
+  smtpPasswordConfigured?: boolean;
   useTLS: boolean;
   fromAddress: string;
   fromName: string;

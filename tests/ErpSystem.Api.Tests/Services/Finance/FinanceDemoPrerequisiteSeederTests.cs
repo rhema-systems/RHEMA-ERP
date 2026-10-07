@@ -21,8 +21,15 @@ public sealed class FinanceDemoPrerequisiteSeederTests
         var seedMethod = typeof(FinanceDataSeeder).GetMethod(
             "SeedTaxConfigurationAsync",
             BindingFlags.Instance | BindingFlags.NonPublic);
+        var chartMethod = typeof(FinanceDataSeeder).GetMethod(
+            "GetStandardChartOfAccounts",
+            BindingFlags.Instance | BindingFlags.NonPublic);
 
         seedMethod.Should().NotBeNull();
+        chartMethod.Should().NotBeNull();
+        var accounts = (List<Account>)chartMethod!.Invoke(seeder, new object[] { tenantId, DateTime.UtcNow })!;
+        context.Accounts.AddRange(accounts);
+        await context.SaveChangesAsync();
         await (Task)seedMethod!.Invoke(seeder, new object[] { tenantId, DateTime.UtcNow })!;
 
         var purchaseGroup = await context.TaxGroups.SingleAsync(group =>
@@ -48,6 +55,17 @@ public sealed class FinanceDemoPrerequisiteSeederTests
         salesTaxes.Should().HaveCount(3);
         salesTaxes.Should().OnlyContain(tax => tax.TaxPayableAccountId.HasValue,
             "every sales tax component must have an output-tax control account before AR approval can post it");
+        var outputTaxAccount = accounts.Single(account => account.AccountCode == "2200");
+        salesTaxes.Should().OnlyContain(tax => tax.TaxPayableAccountId == outputTaxAccount.Id);
+        componentTaxes.Should().OnlyContain(tax =>
+            tax.TaxReceivableAccountId == accounts.Single(account => account.AccountCode == "1140").Id);
+
+        var tenantOverrideId = Guid.NewGuid();
+        salesTaxes[0].TaxPayableAccountId = tenantOverrideId;
+        await context.SaveChangesAsync();
+        await new FinanceTaxAccountProvisioningSeeder(context, NullLogger.Instance).SeedAsync(tenantId);
+        salesTaxes[0].TaxPayableAccountId.Should().Be(tenantOverrideId,
+            "provisioning must not overwrite an explicit tenant mapping");
 
         var withholdingGroup = await context.TaxGroups.SingleAsync(group =>
             group.TenantId == tenantId && group.Code == "WHT-SERVICES");
@@ -128,9 +146,17 @@ public sealed class FinanceDemoPrerequisiteSeederTests
         accounts.Select(account => account.AccountCode).Should().Contain(new[]
         {
             "1030", "1090", "1210", "1540", "1545", "1580", "1595",
-            "2050", "2510", "3200", "4930", "4935", "4940", "5010",
-            "6310", "6320", "6330", "6610", "6700"
+            "2050", "2510", "3200", "4930", "4935", "4940", "4950", "5010",
+            "6310", "6320", "6330", "6610", "6700", "6710"
         });
+        var roundingGain = accounts.Single(account => account.AccountCode == "4950");
+        roundingGain.AccountType.Should().Be(AccountType.Revenue);
+        roundingGain.AllowDirectPosting.Should().BeTrue();
+        roundingGain.IsControlAccount.Should().BeFalse();
+        var roundingLoss = accounts.Single(account => account.AccountCode == "6710");
+        roundingLoss.AccountType.Should().Be(AccountType.Expense);
+        roundingLoss.AllowDirectPosting.Should().BeTrue();
+        roundingLoss.IsControlAccount.Should().BeFalse();
 
         await (Task)categoryMethod!.Invoke(seeder, new object[] { tenantId, baseDate })!;
         await (Task)settingsMethod!.Invoke(seeder, new object[] { tenantId, baseDate })!;
@@ -180,6 +206,22 @@ public sealed class FinanceDemoPrerequisiteSeederTests
         settings.LeaseInterestExpenseAccountId.Should().NotBeNull();
         settings.WriteOffExpenseAccountId.Should().NotBeNull();
         settings.WriteOffRecoveryAccountId.Should().NotBeNull();
+        settings.InvoiceRoundingGainAccountId.Should().Be(roundingGain.Id);
+        settings.InvoiceRoundingLossAccountId.Should().Be(roundingLoss.Id);
+
+        var deliberateGainMapping = Guid.NewGuid();
+        var deliberateLossMapping = Guid.NewGuid();
+        settings.InvoiceRoundingGainAccountId = deliberateGainMapping;
+        settings.InvoiceRoundingLossAccountId = deliberateLossMapping;
+        await context.SaveChangesAsync();
+
+        await (Task)settingsMethod.Invoke(seeder, new object[] { tenantId, baseDate })!;
+        await context.SaveChangesAsync();
+
+        settings.InvoiceRoundingGainAccountId.Should().Be(deliberateGainMapping,
+            "idempotent provisioning must preserve an existing tenant mapping");
+        settings.InvoiceRoundingLossAccountId.Should().Be(deliberateLossMapping,
+            "idempotent provisioning must preserve an existing tenant mapping");
     }
 
     [Fact]

@@ -97,7 +97,7 @@ export interface PublicEnquiryContactChallenge {
 }
 
 export interface PublicEnquiryContactProfile {
-  contactName: string;
+  contactName: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
   requiresPortalLogin: boolean;

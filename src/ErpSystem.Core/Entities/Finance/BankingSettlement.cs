@@ -192,6 +192,12 @@ public class CashierTillSession : TenantEntity
 
     public DateTime? ClosedAt { get; set; }
 
+    public DateTime? CancelledAt { get; set; }
+    public Guid? CancelledById { get; set; }
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+
     /// <summary>
     /// A correction/reopen never mutates the closed source. It creates a linked replacement
     /// session, retaining the original count and approval evidence for audit.
@@ -272,9 +278,9 @@ public class BankDepositBatch : TenantEntity
     public Guid? PostedById { get; set; }
 
     /// <summary>
-    /// Bank acknowledgement is captured after the approved deposit has posted. It must not be
-    /// inferred from the preparer's slip reference because a lodged slip and bank acceptance are
-    /// distinct evidence points in TDC's cash-to-bank chain.
+    /// Bank acknowledgement is captured after approval and before final GL posting. It must not
+    /// be inferred from the preparer's slip reference because a lodged slip and bank acceptance
+    /// are distinct evidence points in TDC's cash-to-bank chain.
     /// </summary>
     public BankDepositConfirmationStatus ConfirmationStatus { get; set; } = BankDepositConfirmationStatus.Pending;
 

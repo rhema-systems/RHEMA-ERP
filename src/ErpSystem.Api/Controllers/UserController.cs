@@ -49,7 +49,9 @@ public partial class UserController : ControllerBase
     {
         try
         {
-            var users = await _userService.GetAllUsersAsync();
+            var tenantId = RequireTenantId();
+            if (!tenantId.HasValue) return MissingTenant();
+            var users = await _userService.GetUsersForTenantAsync(tenantId.Value);
             var userDtos = users.Select(u => new UserDto
             {
                 Id = u.Id.ToString(),
@@ -95,7 +97,9 @@ public partial class UserController : ControllerBase
     {
         try
         {
-            var users = await _userService.GetAllUsersAsync();
+            var tenantId = RequireTenantId();
+            if (!tenantId.HasValue) return MissingTenant();
+            var users = await _userService.GetUsersForTenantAsync(tenantId.Value);
 
             // Filter users based on query
             if (!string.IsNullOrWhiteSpace(query))
@@ -155,7 +159,9 @@ public partial class UserController : ControllerBase
     {
         try
         {
-            var user = await _userService.GetUserByIdAsync(id);
+            var tenantId = RequireTenantId();
+            if (!tenantId.HasValue) return MissingTenant();
+            var user = await _userService.GetUserByIdForTenantAsync(id, tenantId.Value);
             if (user == null)
             {
                 return NotFound($"User with ID {id} not found");
@@ -206,6 +212,17 @@ public partial class UserController : ControllerBase
     {
         try
         {
+            var tenantId = RequireTenantId();
+            if (!tenantId.HasValue) return MissingTenant();
+            if (!string.IsNullOrWhiteSpace(request.TenantId) &&
+                (!Guid.TryParse(request.TenantId, out var requestedTenantId) || requestedTenantId != tenantId.Value))
+            {
+                return Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Tenant access denied",
+                    detail: "Users can only be created in the active tenant.");
+            }
+
             var user = new ApplicationUser
             {
                 UserName = request.Username,
@@ -214,7 +231,7 @@ public partial class UserController : ControllerBase
                 FirstName = request.FirstName ?? string.Empty,
                 LastName = request.LastName ?? string.Empty,
                 IsActive = request.IsActive,
-                TenantId = string.IsNullOrEmpty(request.TenantId) ? Guid.Empty : Guid.Parse(request.TenantId)
+                TenantId = tenantId.Value
             };
 
             var createdUser = await _userService.CreateUserAsync(user, request.Password);
@@ -294,7 +311,9 @@ public partial class UserController : ControllerBase
     {
         try
         {
-            var user = await _userService.GetUserByIdAsync(id);
+            var tenantId = RequireTenantId();
+            if (!tenantId.HasValue) return MissingTenant();
+            var user = await _userService.GetUserByIdForTenantAsync(id, tenantId.Value);
             if (user == null)
             {
                 return NotFound($"User with ID {id} not found");
@@ -322,7 +341,7 @@ public partial class UserController : ControllerBase
             var updatedUser = await _userService.UpdateUserAsync(user);
 
             // Update roles if specified
-            if (request.Roles?.Any() == true)
+            if (request.Roles is not null)
             {
                 await _userService.UpdateUserRolesAsync(updatedUser, request.Roles);
             }
@@ -390,7 +409,9 @@ public partial class UserController : ControllerBase
         try
         {
             // Get user info for audit logging before deletion
-            var userToDelete = await _userService.GetUserByIdAsync(id);
+            var tenantId = RequireTenantId();
+            if (!tenantId.HasValue) return MissingTenant();
+            var userToDelete = await _userService.GetUserByIdForTenantAsync(id, tenantId.Value);
             if (userToDelete == null)
             {
                 return NotFound($"User with ID {id} not found");
@@ -435,6 +456,17 @@ public partial class UserController : ControllerBase
             return StatusCode(500, "An error occurred while deleting the user");
         }
     }
+
+    private Guid? RequireTenantId()
+    {
+        var tenantId = _currentUserService.TenantId;
+        return tenantId.HasValue && tenantId.Value != Guid.Empty ? tenantId : null;
+    }
+
+    private ObjectResult MissingTenant() => Problem(
+        statusCode: StatusCodes.Status400BadRequest,
+        title: "Active tenant required",
+        detail: "Select an active tenant before managing users.");
 
     /// <summary>
     /// Update current user's profile (including tenant selection)

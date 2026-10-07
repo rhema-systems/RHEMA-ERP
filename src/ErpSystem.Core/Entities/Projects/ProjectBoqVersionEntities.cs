@@ -76,9 +76,12 @@ public sealed class ProjectBoqVersionLine : TenantEntity
     public Guid LineKey { get; set; }
     public Guid? SourceBoqItemId { get; set; }
     public Guid? ProjectPackageId { get; set; }
+    public Guid? ProjectWorkItemId { get; set; }
 
     [StringLength(50)] public string? PackageCode { get; set; }
     [StringLength(200)] public string? PackageName { get; set; }
+    [StringLength(30)] public string? ActivityNodeType { get; set; }
+    [StringLength(200)] public string? ActivityTitle { get; set; }
     [StringLength(50)] public string? SectionCode { get; set; }
     [StringLength(150)] public string? SectionName { get; set; }
     [StringLength(50)] public string? TradeCode { get; set; }

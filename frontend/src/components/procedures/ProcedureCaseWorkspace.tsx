@@ -64,6 +64,7 @@ import {
   type ProcedureCaseSummary,
 } from '@/services/procedure-case.service';
 import { getProcedureWorkspaceTerminology } from '@/lib/procedure-workspace';
+import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
 import { LegalPropertyCaseContextDialog } from './LegalPropertyCaseContextDialog';
 import { estateLandManagementService, EstateManagedAssetStatus, type EstateManagedAsset } from '@/services/estate-land-management.service';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
@@ -3280,6 +3281,9 @@ export function ProcedureCaseWorkspace({
                     <TabsTrigger value="stage">Stage details</TabsTrigger>
                     <TabsTrigger value="checklist">Checklist</TabsTrigger>
                     <TabsTrigger value="documents">Documents</TabsTrigger>
+                    {selectedCase.usesConfiguredWorkflow || selectedCase.workflowInstanceId ? (
+                      <TabsTrigger value="workflow">Workflow history</TabsTrigger>
+                    ) : null}
                     <TabsTrigger value="submit">Submit</TabsTrigger>
                   </TabsList>
                   <TabsContent value="stage" className="space-y-4">
@@ -4105,6 +4109,20 @@ export function ProcedureCaseWorkspace({
                   </div>
                 </div>
                   </TabsContent>
+
+                  {selectedCase.usesConfiguredWorkflow || selectedCase.workflowInstanceId ? (
+                    <TabsContent value="workflow" className="space-y-4">
+                      <WorkflowApprovalHistoryPanel
+                        entityType={selectedCase.entityType}
+                        entityId={selectedCase.id}
+                        entityLabel={defaultTitle}
+                        entityNumber={selectedCase.referenceNumber || undefined}
+                        status={selectedCase.status}
+                        currentStepName={selectedCase.currentStageName}
+                        showActions={false}
+                      />
+                    </TabsContent>
+                  ) : null}
 
                   <TabsContent value="submit" className="space-y-4">
                 <div className="flex flex-col gap-3 rounded-md border border-border bg-background p-4 md:flex-row md:items-center md:justify-between">

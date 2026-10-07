@@ -62,6 +62,10 @@ import type {
  */
 
 type Kind = 'pre-authorization' | 'referral' | 'appointment';
+type ClinicalRecordDetail =
+  | MedicalPreAuthorizationDetail
+  | MedicalReferralDetail
+  | MedicalAppointmentDetail;
 
 const QUERY_KEY: Record<Kind, string> = {
   'pre-authorization': 'medical-preauths',
@@ -121,18 +125,18 @@ export function ClinicalRecordActions({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // Loaded only while the dialog is open — see the note above on why the row is not enough.
-  // The union is spelled out: inferred from the three-way branch, `record` came out as `{}`.
-  const { data: record, isLoading } = useQuery<
-    MedicalPreAuthorizationDetail | MedicalReferralDetail | MedicalAppointmentDetail
-  >({
+  const { data: record, isLoading } = useQuery<ClinicalRecordDetail>({
     queryKey: ['hr', QUERY_KEY[kind], id, 'detail'],
     enabled: editing,
-    queryFn: () =>
-      kind === 'pre-authorization'
-        ? medicalClinicalService.getPreAuthorization(id)
-        : kind === 'referral'
-          ? medicalClinicalService.getReferral(id)
-          : medicalClinicalService.getAppointment(id),
+    queryFn: async (): Promise<ClinicalRecordDetail> => {
+      if (kind === 'pre-authorization') {
+        return medicalClinicalService.getPreAuthorization(id);
+      }
+      if (kind === 'referral') {
+        return medicalClinicalService.getReferral(id);
+      }
+      return medicalClinicalService.getAppointment(id);
+    },
   });
 
   const [form, setForm] = useState<Record<string, string | boolean>>({});
@@ -192,12 +196,10 @@ export function ClinicalRecordActions({
   const orNull = (k: string) => (str(k).trim() === '' ? null : str(k));
   const numOrNull = (k: string) => (str(k).trim() === '' ? null : Number(str(k)));
 
-  const save = useMutation<
-    MedicalPreAuthorizationDetail | MedicalReferralDetail | MedicalAppointmentDetail
-  >({
-    mutationFn: () => {
+  const save = useMutation<void, Error>({
+    mutationFn: async (): Promise<void> => {
       if (kind === 'pre-authorization') {
-        return medicalClinicalService.updatePreAuthorization(id, {
+        await medicalClinicalService.updatePreAuthorization(id, {
           id,
           facilityId: orNull('facilityId'),
           physicianId: orNull('physicianId'),
@@ -209,9 +211,10 @@ export function ClinicalRecordActions({
           estimatedCost: numOrNull('estimatedCost'),
           notes: orNull('notes'),
         });
+        return;
       }
       if (kind === 'referral') {
-        return medicalClinicalService.updateReferral(id, {
+        await medicalClinicalService.updateReferral(id, {
           id,
           referredToFacilityId: orNull('referredToFacilityId'),
           referredToPhysicianId: orNull('referredToPhysicianId'),
@@ -221,8 +224,9 @@ export function ClinicalRecordActions({
           reasonForReferral: str('reasonForReferral'),
           notes: orNull('notes'),
         });
+        return;
       }
-      return medicalClinicalService.updateAppointment(id, {
+      await medicalClinicalService.updateAppointment(id, {
         id,
         physicianId: orNull('physicianId'),
         appointmentDateTime: str('appointmentDateTime'),

@@ -20,10 +20,16 @@ describe('loginAppearanceService', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('reads the selected design from the anonymous login configuration endpoint', async () => {
-    mocks.publicRequest.mockResolvedValue({ loginPageStyle: 'DarkPremium' });
+    mocks.publicRequest.mockResolvedValue({
+      loginPageStyle: 'DarkPremium',
+      lightBackgroundUrl: null,
+      darkBackgroundUrl: 'https://erp.example/api/public/config/login/background/image-id',
+    });
 
     await expect(loginAppearanceService.getPublicLoginAppearance()).resolves.toEqual({
       loginPageStyle: 'DarkPremium',
+      lightBackgroundUrl: null,
+      darkBackgroundUrl: 'https://erp.example/api/public/config/login/background/image-id',
     });
     expect(mocks.publicRequest).toHaveBeenCalledWith('/public/config/login', {
       method: 'GET',
@@ -43,6 +49,8 @@ describe('loginAppearanceService', () => {
 
     await expect(loginAppearanceService.getPublicLoginAppearance()).resolves.toEqual({
       loginPageStyle: 'LightCorporate',
+      lightBackgroundUrl: null,
+      darkBackgroundUrl: null,
     });
   });
 });

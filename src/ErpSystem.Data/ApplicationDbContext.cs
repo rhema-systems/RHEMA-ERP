@@ -223,6 +223,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
     public DbSet<BudgetScenario> BudgetScenarios { get; set; }
     public DbSet<BudgetScenarioControlDimension> BudgetScenarioControlDimensions { get; set; }
+    public DbSet<BudgetScenarioControlSegment> BudgetScenarioControlSegments { get; set; }
     public DbSet<BudgetEntry> BudgetEntries { get; set; }
     public DbSet<BudgetReturn> BudgetReturns { get; set; }
     public DbSet<BudgetRevision> BudgetRevisions { get; set; }
@@ -6263,6 +6264,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(e => e.TenantId);
             entity.HasIndex(e => new { e.TenantId, e.ReconciliationId });
+            entity.HasIndex(e => e.CashTransactionId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => e.BankStatementLineId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
 
             entity.HasOne(rm => rm.BankStatementLine)
                 .WithOne(bsl => bsl.ReconciliationMatch)
@@ -6622,6 +6629,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(a => a.Timestamp);
             entity.HasIndex(a => a.UserId);
             entity.HasIndex(a => a.Resource);
+            entity.HasIndex(a => new { a.TenantId, a.Timestamp });
             entity.Property(a => a.IdempotencyKey).HasMaxLength(450);
             entity.HasIndex(a => new { a.TenantId, a.IdempotencyKey })
                 .IsUnique()
@@ -6636,6 +6644,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(s => s.Timestamp);
             entity.HasIndex(s => s.IpAddress);
             entity.HasIndex(s => s.Action);
+            entity.HasIndex(s => new { s.TenantId, s.Timestamp });
+            entity.HasIndex(s => new { s.TenantId, s.Action, s.Timestamp });
+            entity.HasIndex(s => new { s.TenantId, s.UserId, s.Timestamp });
         });
 
         // Configure Security entity
@@ -6669,6 +6680,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         });
 
         // Configure SecurityAlert entity
+        builder.Entity<UserSession>(entity =>
+        {
+            entity.HasIndex(session => new { session.TenantId, session.IsActive, session.LastActivityTime });
+            entity.HasIndex(session => new { session.TenantId, session.UserId, session.LoginTime });
+        });
+
         builder.Entity<SecurityAlert>(entity =>
         {
             entity.HasOne(sa => sa.Tenant).WithMany().HasForeignKey(sa => sa.TenantId).OnDelete(DeleteBehavior.Cascade);
@@ -6678,6 +6695,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(sa => sa.Type);
             entity.HasIndex(sa => sa.Category);
             entity.HasIndex(sa => sa.Dismissed);
+            entity.HasIndex(sa => new { sa.TenantId, sa.Dismissed, sa.Timestamp });
         });
 
         // Configure SecurityMetrics entity
@@ -6699,6 +6717,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(td => td.Status);
             entity.HasIndex(td => td.Severity);
             entity.HasIndex(td => td.IpAddress);
+            entity.HasIndex(td => new { td.TenantId, td.Status, td.Severity, td.DetectedAt });
         });
 
         // Configure ThreatIndicator entity
@@ -9625,6 +9644,27 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<BudgetScenarioControlSegment>(entity =>
+        {
+            entity.ToTable("BudgetScenarioControlSegments");
+            entity.HasIndex(item => new
+                {
+                    item.TenantId,
+                    item.BudgetScenarioId,
+                    item.AccountSegmentStructureId
+                })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasOne(item => item.BudgetScenario)
+                .WithMany(scenario => scenario.ControlSegments)
+                .HasForeignKey(item => item.BudgetScenarioId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountSegmentStructure)
+                .WithMany()
+                .HasForeignKey(item => item.AccountSegmentStructureId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<BudgetReturn>(entity =>
         {
             entity.Property(budgetReturn => budgetReturn.RowVersion).IsRowVersion().IsConcurrencyToken();
@@ -9632,18 +9672,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 {
                     budgetReturn.TenantId,
                     budgetReturn.BudgetScenarioId,
-                    budgetReturn.SegmentValueId
-                })
-                .IsUnique()
-                .HasFilter("[IsDeleted] = 0 AND [SegmentValueId] IS NOT NULL");
-            entity.HasIndex(budgetReturn => new
-                {
-                    budgetReturn.TenantId,
-                    budgetReturn.BudgetScenarioId,
+                    budgetReturn.SegmentValueId,
                     budgetReturn.DistributionDimensionValueId
                 })
                 .IsUnique()
-                .HasFilter("[IsDeleted] = 0 AND [DistributionDimensionValueId] IS NOT NULL");
+                .HasFilter("[IsDeleted] = 0");
             entity.HasOne(budgetReturn => budgetReturn.DistributionDimensionValue)
                 .WithMany()
                 .HasForeignKey(budgetReturn => budgetReturn.DistributionDimensionValueId)

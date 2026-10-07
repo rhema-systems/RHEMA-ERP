@@ -363,6 +363,9 @@ public class ProjectBoqItemDto
     public Guid ProjectPackageId { get; set; }
     public string? PackageCode { get; set; }
     public string? PackageName { get; set; }
+    public Guid? ProjectWorkItemId { get; set; }
+    public string? ActivityNodeType { get; set; }
+    public string? ActivityTitle { get; set; }
     public Guid? SectionCatalogEntryId { get; set; }
     public string? SectionCode { get; set; }
     public string? SectionName { get; set; }
@@ -403,6 +406,8 @@ public class CreateProjectBoqItemDto
 {
     [Required]
     public Guid ProjectPackageId { get; set; }
+
+    public Guid? ProjectWorkItemId { get; set; }
 
     public Guid? SectionCatalogEntryId { get; set; }
     public Guid? TradeCatalogEntryId { get; set; }

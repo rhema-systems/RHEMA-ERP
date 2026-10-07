@@ -21,6 +21,7 @@ public sealed class CashierTillService : ICashierTillService
 {
     private const decimal CurrencyTolerance = 0.01m;
     private const int MinimumCorrectionReasonLength = 20;
+    private const int MinimumCancellationReasonLength = 10;
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly IDocumentNumberingService _numbering;
@@ -140,7 +141,8 @@ public sealed class CashierTillService : ICashierTillService
             var hasActiveSession = await _context.CashierTillSessions.AnyAsync(
                 item => item.TenantId == tenantId &&
                         item.LiquidityAccountId == till.Id &&
-                        item.Status != CashierTillSessionStatus.Closed,
+                        (item.Status == CashierTillSessionStatus.Open ||
+                         item.Status == CashierTillSessionStatus.PendingReview),
                 cancellationToken);
             if (hasActiveSession)
             {
@@ -187,6 +189,112 @@ public sealed class CashierTillService : ICashierTillService
                 session.OpeningEvidenceFileId
             }, cancellationToken);
             return await GetRequiredSessionDtoAsync(session.Id, cancellationToken);
+        });
+    }
+
+    public async Task<CashierTillSessionDto> UpdateOpeningAsync(
+        Guid id,
+        UpdateCashierTillOpeningDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        if (dto.OpeningFloatAmount < 0m)
+        {
+            throw new InvalidOperationException("Opening float cannot be negative.");
+        }
+        await ValidateEvidenceAsync(dto.OpeningEvidenceFileId, "opening", cancellationToken);
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            var session = await LoadForActionAsync(id, cancellationToken);
+            EnsureOwner(session, "edit this till session");
+            SetRowVersion(session, dto.RowVersion);
+            var activity = await CalculateActivityAsync(session, DateTime.UtcNow, includeEntries: false, cancellationToken);
+            var lockReason = GetOpeningDetailsLockReason(session, activity);
+            if (lockReason != null)
+            {
+                throw new InvalidOperationException(lockReason);
+            }
+
+            var before = new
+            {
+                session.OpeningFloatAmount,
+                session.OpeningNotes,
+                session.OpeningEvidenceFileId
+            };
+            var now = DateTime.UtcNow;
+            session.OpeningFloatAmount = RoundMoney(dto.OpeningFloatAmount);
+            session.OpeningNotes = Clean(dto.OpeningNotes);
+            session.OpeningEvidenceFileId = dto.OpeningEvidenceFileId;
+            StampModified(session, now);
+            await _context.SaveChangesAsync(cancellationToken);
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+            await RecordAuditAsync("Finance.CashTill.OpeningDetailsUpdated", session, before, new
+            {
+                session.OpeningFloatAmount,
+                session.OpeningNotes,
+                session.OpeningEvidenceFileId
+            }, cancellationToken);
+            return await GetRequiredSessionDtoAsync(id, cancellationToken);
+        });
+    }
+
+    public async Task<CashierTillSessionDto> CancelSessionAsync(
+        Guid id,
+        CancelCashierTillSessionDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var reason = RequireText(dto.Reason, "Cancellation reason", 1000);
+        if (reason.Length < MinimumCancellationReasonLength)
+        {
+            throw new InvalidOperationException($"Cancellation reason must contain at least {MinimumCancellationReasonLength} characters.");
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            var session = await LoadForActionAsync(id, cancellationToken);
+            EnsureOwner(session, "cancel this till session");
+            SetRowVersion(session, dto.RowVersion);
+            var now = DateTime.UtcNow;
+            var activity = await CalculateActivityAsync(session, now, includeEntries: false, cancellationToken);
+            var lockReason = GetOpeningDetailsLockReason(session, activity);
+            if (lockReason != null)
+            {
+                throw new InvalidOperationException(lockReason);
+            }
+
+            session.Status = CashierTillSessionStatus.Cancelled;
+            session.ActivityCutoffAt = now;
+            session.TransactionMovementAmount = activity.TransactionMovementAmount;
+            session.DepositedAmount = activity.DepositedAmount;
+            session.ExpectedClosingAmount = activity.ExpectedClosingAmount;
+            session.CustodyEntryCount = activity.EntryCount;
+            session.CancelledAt = now;
+            session.CancelledById = UserId;
+            session.CancellationReason = reason;
+            StampModified(session, now);
+            await _context.SaveChangesAsync(cancellationToken);
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+            await RecordAuditAsync("Finance.CashTill.Cancelled", session, null, new
+            {
+                reason,
+                session.CancelledAt,
+                session.CancelledById
+            }, cancellationToken);
+            return await GetRequiredSessionDtoAsync(id, cancellationToken);
         });
     }
 
@@ -289,8 +397,10 @@ public sealed class CashierTillService : ICashierTillService
             throw new InvalidOperationException("Only a submitted till count can be approved.");
         }
         SetRowVersion(session, dto.RowVersion);
-        var settings = await GetSettingsAsync(cancellationToken);
-        if (settings.RequireIndependentCashTillClosure && session.CashierUserId == UserId)
+        // A till closure is always a maker-checker decision. The historical tenant switch cannot
+        // weaken this custody boundary: permission to review is not authority to approve cash held
+        // and counted by the same user.
+        if (session.CashierUserId == UserId)
         {
             throw new UnauthorizedAccessException("The cashier cannot approve their own till closure.");
         }
@@ -374,7 +484,9 @@ public sealed class CashierTillService : ICashierTillService
             item => item.TenantId == TenantId &&
                     item.LiquidityAccountId == source.LiquidityAccountId &&
                     item.Id != source.Id &&
-                    (item.Status != CashierTillSessionStatus.Closed || item.OpenedAt > source.OpenedAt),
+                    (item.Status == CashierTillSessionStatus.Open ||
+                     item.Status == CashierTillSessionStatus.PendingReview ||
+                     (item.Status == CashierTillSessionStatus.Closed && item.OpenedAt > source.OpenedAt)),
             cancellationToken);
         if (hasLaterOrActiveSession)
         {
@@ -440,6 +552,7 @@ public sealed class CashierTillService : ICashierTillService
                     session.DepositedAmount,
                     session.ExpectedClosingAmount,
                     session.CustodyEntryCount,
+                    0,
                     Array.Empty<LiquidityAccountEntry>()));
         var transactionMovement = session.Status == CashierTillSessionStatus.Open
             ? activity.TransactionMovementAmount
@@ -450,6 +563,7 @@ public sealed class CashierTillService : ICashierTillService
         var expected = session.Status == CashierTillSessionStatus.Open
             ? activity.ExpectedClosingAmount
             : session.ExpectedClosingAmount;
+        var openingDetailsLockReason = GetOpeningDetailsLockReason(session, activity);
 
         return new CashierTillSessionDto
         {
@@ -488,6 +602,11 @@ public sealed class CashierTillService : ICashierTillService
             ReviewedById = session.ReviewedById,
             ReviewComments = session.ReviewComments,
             ClosedAt = session.ClosedAt,
+            CancelledAt = session.CancelledAt,
+            CancelledById = session.CancelledById,
+            CancellationReason = session.CancellationReason,
+            OpeningDetailsMutable = openingDetailsLockReason == null,
+            OpeningDetailsLockReason = openingDetailsLockReason,
             CorrectsSessionId = session.CorrectsSessionId,
             CorrectionReason = session.CorrectionReason,
             CountLines = session.CountLines
@@ -598,6 +717,10 @@ public sealed class CashierTillService : ICashierTillService
                     deposited,
                     RoundMoney(session.OpeningFloatAmount + movement - deposited),
                     sessionEntries.Length,
+                    postedAllocations.Count(item =>
+                        item.LiquidityAccountId == session.LiquidityAccountId &&
+                        item.PostedAt >= session.OpenedAt &&
+                        item.PostedAt <= cutoff),
                     Array.Empty<LiquidityAccountEntry>());
             });
     }
@@ -641,7 +764,44 @@ public sealed class CashierTillService : ICashierTillService
             deposited,
             expected,
             entries.Count,
+            postedAllocations.Count,
             includeEntries ? entries : Array.Empty<LiquidityAccountEntry>());
+    }
+
+    private static string? GetOpeningDetailsLockReason(CashierTillSession session, TillActivity activity)
+    {
+        if (session.Status != CashierTillSessionStatus.Open)
+        {
+            return "Only an open till session can be edited or cancelled.";
+        }
+        if (session.CorrectsSessionId.HasValue)
+        {
+            return "A linked correction session cannot have its opening evidence edited or cancelled.";
+        }
+        if (session.CountLines.Count > 0 ||
+            session.ActivityCutoffAt.HasValue ||
+            session.SubmittedAt.HasValue ||
+            session.SubmittedById.HasValue ||
+            session.ClosingEvidenceFileId.HasValue ||
+            session.ReviewedAt.HasValue ||
+            session.ReviewedById.HasValue ||
+            session.ClosedAt.HasValue)
+        {
+            return "This till session already contains count, submission, or review evidence and is immutable.";
+        }
+        if (activity.EntryCount > 0 || activity.DepositAllocationCount > 0)
+        {
+            return "This till session already has canonical custody activity and is immutable.";
+        }
+        return null;
+    }
+
+    private void EnsureOwner(CashierTillSession session, string action)
+    {
+        if (session.CashierUserId != UserId)
+        {
+            throw new UnauthorizedAccessException($"Only the cashier holding this till can {action}.");
+        }
     }
 
     private async Task<FinanceSettings> GetSettingsAsync(CancellationToken cancellationToken)
@@ -785,6 +945,7 @@ public sealed class CashierTillService : ICashierTillService
         decimal DepositedAmount,
         decimal ExpectedClosingAmount,
         int EntryCount,
+        int DepositAllocationCount,
         IReadOnlyList<LiquidityAccountEntry> Entries);
 
     private sealed record TillDepositActivity(

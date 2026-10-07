@@ -91,6 +91,7 @@ function Test-Path {
     Assert-Test ($report.ConfigurationReviewRequired -and $null -ne $report.ReadyLandCount -and @($report.Prerequisites | Where-Object Category -eq 'Actor').Count -eq 15) 'Report omitted configuration review, ready-land count or expanded UAT actors.'
     $html=Get-Content -LiteralPath $walkthroughs[0].FullName -Raw
     Assert-Test (-not $html.Contains('http://localhost:3000') -and $html.Contains('https://vps-uat.example.test') -and $html.Contains('Historical project IDs')) 'Walkthrough did not preserve the VPS-link and historical-fixture boundaries.'
+    Assert-Test ($html.Contains('Work Component / Work Package') -and $html.Contains('Activity / Project Task') -and $html.Contains('Finance Cost Centre: no entry on this dialog') -and $html.Contains('The dialog does not require a Phase Weight')) 'Walkthrough omitted the approved QS SRS field ownership and hierarchy guidance.'
     Assert-Test ($child.Output.Contains('QS_END_TO_END|NOT_YET_VERIFIED')) 'Console output must not claim completed UAT.'
     $reportHash=(Get-FileHash -LiteralPath $reports[0].FullName -Algorithm SHA256).Hash
     $mismatch=Invoke-TestChild -ScriptPath $harnessPath -ScriptArguments @('-SqlServer',$SqlServer,'-VerificationDatabase',$VerificationDatabase,'-TargetDatabase',$probeDatabase,'-ReportPath',$copiedReport)

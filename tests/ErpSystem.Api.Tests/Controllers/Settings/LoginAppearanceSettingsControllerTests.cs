@@ -96,6 +96,8 @@ public sealed class LoginAppearanceSettingsControllerTests
     [Theory]
     [InlineData(nameof(SettingsController.GetLoginAppearance))]
     [InlineData(nameof(SettingsController.UpdateLoginAppearance))]
+    [InlineData(nameof(SettingsController.UploadLoginBackground))]
+    [InlineData(nameof(SettingsController.ResetLoginBackground))]
     public void LoginAppearanceEndpoints_RequireSecurityAdministratorRole(string actionName)
     {
         var attribute = typeof(SettingsController).GetMethod(actionName)!
@@ -126,6 +128,7 @@ public sealed class LoginAppearanceSettingsControllerTests
             settings.Object,
             (audit ?? new Mock<IAuditLogService>()).Object,
             (currentUser ?? new Mock<ICurrentUserService>()).Object,
+            Mock.Of<IControlledFileUploadService>(),
             Mock.Of<ITenantSmsSender>(),
             NullLogger<SettingsController>.Instance)
         {

@@ -12,10 +12,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/hooks/use-auth';
+import { formatJournalBatchMoney } from '@/lib/finance/journal-batch-money';
 import { journalBatchDataService } from '@/services/finance/journal-batch-data.service';
 import type { JournalBatchImportPreview } from '@/types/journal-batches';
-
-const money = (value: number, currency: string) => new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(value);
 
 export default function JournalBatchImportPage() {
     const router = useRouter();
@@ -81,7 +80,7 @@ export default function JournalBatchImportPage() {
                                 {preview.isValid ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
                                 <AlertTitle>{preview.isValid ? 'Workbook is ready to import' : 'Workbook requires correction'}</AlertTitle>
                                 <AlertDescription>
-                                    {preview.journalCount} journals, {preview.lineCount} lines. Expected {money(preview.expectedDebitTotal, preview.controlCurrencyCode)}; actual {money(preview.actualDebitTotal, preview.controlCurrencyCode)}.
+                                    {preview.journalCount} journals, {preview.lineCount} lines. Expected {formatJournalBatchMoney(preview.expectedDebitTotal, preview.controlCurrencyCode)}; actual {formatJournalBatchMoney(preview.actualDebitTotal, preview.controlCurrencyCode)}.
                                 </AlertDescription>
                             </Alert>
 

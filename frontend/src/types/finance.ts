@@ -85,6 +85,7 @@ export interface ExchangeRate {
   baseCurrencyCode: string;
   targetCurrencyCode: string;
   rate: number;
+  inverseRate?: number;
   currentExchangeRate?: number;
   effectiveDate: string;
   expiryDate?: string;
@@ -1401,7 +1402,7 @@ export interface FinanceSettings {
   migrationClearingAccountId?: string;
   bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
   requireBankDepositPrimaryEvidence?: boolean;
-  autoPostBankDepositAfterApproval?: boolean;
+  autoPostBankDepositAfterConfirmation?: boolean;
   maximumDepositDeductionAmount?: number;
   maximumDepositDeductionPercentage?: number;
   bankStatementMatchDateToleranceDays?: number;
@@ -1474,7 +1475,7 @@ export interface UpdateFinanceSettingsDto {
   migrationClearingAccountId?: string;
   bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
   requireBankDepositPrimaryEvidence?: boolean;
-  autoPostBankDepositAfterApproval?: boolean;
+  autoPostBankDepositAfterConfirmation?: boolean;
   maximumDepositDeductionAmount?: number;
   maximumDepositDeductionPercentage?: number;
   bankStatementMatchDateToleranceDays?: number;

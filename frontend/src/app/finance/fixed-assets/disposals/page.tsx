@@ -98,7 +98,7 @@ export default function AssetDisposalsPage() {
         // these lookups here means the resulting invoice and receipt remain visible and operable
         // in their normal Finance workspaces instead of becoming disposal-specific shadow data.
         try {
-            const customerResult = await arService.getCustomers({ page: 1, pageSize: 500, status: 'Active' });
+            const customerResult = await arService.getCustomers({ page: 1, pageSize: 500, isActive: true });
             setCustomers(customerResult.items || []);
         } catch (error) {
             console.error('Failed to load active customers:', error);

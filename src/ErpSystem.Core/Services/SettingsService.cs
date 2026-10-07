@@ -24,6 +24,9 @@ public interface ISettingsService
     Task<Security?> GetPublicSecuritySettingsAsync();
     Task<Security> UpdateSecuritySettingsAsync(Security settings);
     Task<Security> UpdateLoginPageStyleAsync(Enums.LoginPageStyle loginPageStyle);
+    Task<Security> UpdateLoginBackgroundAsync(
+        Enums.LoginPageStyle loginPageStyle,
+        Guid? fileUploadRecordId);
 
     Task<SystemSettings?> GetSystemSettingAsync(string key);
     Task<SystemSettings> SetSystemSettingAsync(string key, string value, string? description = null);
@@ -107,7 +110,10 @@ public class SettingsService : ISettingsService
                 existingSettings.SmtpHost = settings.SmtpHost;
                 existingSettings.SmtpPort = settings.SmtpPort;
                 existingSettings.SmtpUsername = settings.SmtpUsername;
-                existingSettings.SmtpPassword = !string.IsNullOrEmpty(settings.SmtpPassword) ? _cryptoService.Encrypt(settings.SmtpPassword) : settings.SmtpPassword;
+                if (!string.IsNullOrEmpty(settings.SmtpPassword))
+                {
+                    existingSettings.SmtpPassword = _cryptoService.Encrypt(settings.SmtpPassword);
+                }
                 existingSettings.UseTLS = settings.UseTLS;
                 existingSettings.FromAddress = settings.FromAddress;
                 existingSettings.FromName = settings.FromName;
@@ -372,9 +378,13 @@ public class SettingsService : ISettingsService
                 existingSettings.CaptchaEnabled = settings.CaptchaEnabled;
                 existingSettings.CaptchaProvider = settings.CaptchaProvider;
                 existingSettings.RecaptchaSiteKey = settings.RecaptchaSiteKey;
-                existingSettings.RecaptchaSecretKey = settings.RecaptchaSecretKey;
+                existingSettings.RecaptchaSecretKey = !string.IsNullOrWhiteSpace(settings.RecaptchaSecretKey)
+                    ? _cryptoService.Encrypt(settings.RecaptchaSecretKey)
+                    : EnsureEncrypted(existingSettings.RecaptchaSecretKey);
                 existingSettings.HCaptchaSiteKey = settings.HCaptchaSiteKey;
-                existingSettings.HCaptchaSecretKey = settings.HCaptchaSecretKey;
+                existingSettings.HCaptchaSecretKey = !string.IsNullOrWhiteSpace(settings.HCaptchaSecretKey)
+                    ? _cryptoService.Encrypt(settings.HCaptchaSecretKey)
+                    : EnsureEncrypted(existingSettings.HCaptchaSecretKey);
 
                 // Session and Token Settings
                 existingSettings.SessionTimeoutMinutes = settings.SessionTimeoutMinutes;
@@ -406,6 +416,16 @@ public class SettingsService : ISettingsService
             else
             {
                 // Create new settings
+                if (!string.IsNullOrWhiteSpace(settings.RecaptchaSecretKey))
+                {
+                    settings.RecaptchaSecretKey = _cryptoService.Encrypt(settings.RecaptchaSecretKey);
+                }
+
+                if (!string.IsNullOrWhiteSpace(settings.HCaptchaSecretKey))
+                {
+                    settings.HCaptchaSecretKey = _cryptoService.Encrypt(settings.HCaptchaSecretKey);
+                }
+
                 settings.Id = Guid.NewGuid();
                 settings.TenantId = tenantId;
                 settings.CreatedAt = DateTime.UtcNow;
@@ -421,6 +441,24 @@ public class SettingsService : ISettingsService
         {
             _logger.LogError(ex, "Error updating security settings");
             throw;
+        }
+    }
+
+    private string? EnsureEncrypted(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        try
+        {
+            _ = _cryptoService.Decrypt(value);
+            return value;
+        }
+        catch
+        {
+            return _cryptoService.Encrypt(value);
         }
     }
 
@@ -458,6 +496,61 @@ public class SettingsService : ISettingsService
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Created security settings with login page style for tenant {TenantId}", tenantId);
         return createdSettings;
+    }
+
+    public async Task<Security> UpdateLoginBackgroundAsync(
+        Enums.LoginPageStyle loginPageStyle,
+        Guid? fileUploadRecordId)
+    {
+        if (!Enum.IsDefined(loginPageStyle))
+        {
+            throw new ArgumentOutOfRangeException(nameof(loginPageStyle), loginPageStyle, "Unsupported login page style.");
+        }
+
+        var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
+        var existingSettings = await GetSecuritySettingsAsync();
+
+        if (existingSettings == null)
+        {
+            existingSettings = new Security
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUserService.UserName
+            };
+
+            SetLoginBackground(existingSettings, loginPageStyle, fileUploadRecordId);
+            var createdSettings = await _unitOfWork.Repository<Security>().AddAsync(existingSettings);
+            await _unitOfWork.SaveChangesAsync();
+            return createdSettings;
+        }
+
+        SetLoginBackground(existingSettings, loginPageStyle, fileUploadRecordId);
+        existingSettings.UpdatedAt = DateTime.UtcNow;
+        existingSettings.UpdatedBy = _currentUserService.UserName;
+        await _unitOfWork.Repository<Security>().UpdateAsync(existingSettings);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "Updated {LoginPageStyle} login background for tenant {TenantId}",
+            loginPageStyle,
+            tenantId);
+        return existingSettings;
+    }
+
+    private static void SetLoginBackground(
+        Security settings,
+        Enums.LoginPageStyle loginPageStyle,
+        Guid? fileUploadRecordId)
+    {
+        if (loginPageStyle == Enums.LoginPageStyle.DarkPremium)
+        {
+            settings.DarkLoginBackgroundFileUploadRecordId = fileUploadRecordId;
+            return;
+        }
+
+        settings.LightLoginBackgroundFileUploadRecordId = fileUploadRecordId;
     }
 
     #endregion

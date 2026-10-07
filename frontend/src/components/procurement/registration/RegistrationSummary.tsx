@@ -155,6 +155,12 @@ export default function RegistrationSummary({
                 <p className="font-semibold">{formData.taxNumber}</p>
               </div>
             )}
+            {formData.ssnitNumber && (
+              <div>
+                <p className="text-gray-600">SSNIT Number</p>
+                <p className="font-semibold">{formData.ssnitNumber}</p>
+              </div>
+            )}
             {formData.industryType && (
               <div>
                 <p className="text-gray-600">Industry Type</p>

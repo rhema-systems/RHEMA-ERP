@@ -27,6 +27,9 @@ public static class ControlledFileUploadCategories
     public const string InventoryStockTakingEvidence =
         "inventory-stock-taking-evidence";
 
+    public const string LoginAppearanceAssets =
+        "login-appearance-assets";
+
     public const string QuantitySurveyBoqImport =
         "quantity-survey-boq-import";
 
@@ -286,6 +289,7 @@ public static class ControlledFileUploadCategories
                 ProcurementReceiptSourceEvidence,
                 ProcurementAppExchange,
                 InventoryStockTakingEvidence,
+                LoginAppearanceAssets,
                 QuantitySurveyBoqImport,
                 QuantitySurveyTenderBoqSubmission,
                 QuantitySurveyPriceIndexImport,

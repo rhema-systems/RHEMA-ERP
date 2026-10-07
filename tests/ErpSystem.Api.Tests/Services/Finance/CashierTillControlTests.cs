@@ -78,6 +78,13 @@ public sealed class CashierTillControlTests
         submitted.VarianceAmount.Should().Be(-10m);
         submitted.CustodyEntryCount.Should().Be(2);
 
+        // The legacy tenant flag must never turn a physical-cash maker into their own checker.
+        // Preserve the setting for compatibility, but prove the custody boundary is unconditional.
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.RequireIndependentCashTillClosure = false;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
         var selfApproval = () => cashier.ApproveClosureAsync(opened.Id, new ReviewCashierTillSessionDto
         {
             RowVersion = submitted.RowVersion,
@@ -130,6 +137,123 @@ public sealed class CashierTillControlTests
         });
         await unexplained.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*reason is required for every non-zero till variance*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CashierTill")]
+    [Trait("Category", "CashBank")]
+    public async Task UnusedTillSession_ShouldAllowOwnerToUpdateAndCancelWithoutDeletingAuditRecord()
+    {
+        var tenantId = Guid.NewGuid();
+        var cashierId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var till = await SeedTillAsync(db, tenantId);
+        var service = CreateService(db, tenantId, cashierId);
+        var opened = await service.OpenSessionAsync(new OpenCashierTillSessionDto
+        {
+            LiquidityAccountId = till.Id,
+            BusinessDate = DateTime.UtcNow.Date,
+            OpeningFloatAmount = 100m,
+            OpeningNotes = "Initial handover count."
+        });
+        opened.OpeningDetailsMutable.Should().BeTrue();
+        db.ChangeTracker.Clear();
+
+        var updated = await service.UpdateOpeningAsync(opened.Id, new UpdateCashierTillOpeningDto
+        {
+            OpeningFloatAmount = 125m,
+            OpeningNotes = "Corrected before the first custody transaction.",
+            RowVersion = opened.RowVersion
+        });
+        updated.OpeningFloatAmount.Should().Be(125m);
+        updated.ExpectedClosingAmount.Should().Be(125m);
+        updated.OpeningNotes.Should().Contain("Corrected");
+        updated.OpeningDetailsMutable.Should().BeTrue();
+        db.ChangeTracker.Clear();
+
+        var cancelled = await service.CancelSessionAsync(opened.Id, new CancelCashierTillSessionDto
+        {
+            Reason = "Opened for the wrong cashier shift.",
+            RowVersion = updated.RowVersion
+        });
+        cancelled.Status.Should().Be(CashierTillSessionStatus.Cancelled);
+        cancelled.CancelledById.Should().Be(cashierId);
+        cancelled.CancelledAt.Should().NotBeNull();
+        cancelled.CancellationReason.Should().Contain("wrong cashier shift");
+        cancelled.ExpectedClosingAmount.Should().Be(125m);
+        cancelled.OpeningDetailsMutable.Should().BeFalse();
+
+        (await db.CashierTillSessions.IgnoreQueryFilters().CountAsync(item => item.Id == opened.Id))
+            .Should().Be(1, "cancellation retains the custody audit record");
+        db.ChangeTracker.Clear();
+
+        var replacement = await service.OpenSessionAsync(new OpenCashierTillSessionDto
+        {
+            LiquidityAccountId = till.Id,
+            BusinessDate = DateTime.UtcNow.Date,
+            OpeningFloatAmount = 125m
+        });
+        replacement.Status.Should().Be(CashierTillSessionStatus.Open);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CashierTill")]
+    [Trait("Category", "CashBank")]
+    public async Task TillOpeningManagement_ShouldRequireOwnerAndFreezeAfterCanonicalActivity()
+    {
+        var tenantId = Guid.NewGuid();
+        var cashierId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var till = await SeedTillAsync(db, tenantId);
+        var owner = CreateService(db, tenantId, cashierId);
+        var opened = await owner.OpenSessionAsync(new OpenCashierTillSessionDto
+        {
+            LiquidityAccountId = till.Id,
+            BusinessDate = DateTime.UtcNow.Date,
+            OpeningFloatAmount = 100m
+        });
+        db.ChangeTracker.Clear();
+
+        var otherCashier = CreateService(db, tenantId, Guid.NewGuid());
+        var nonOwnerEdit = () => otherCashier.UpdateOpeningAsync(opened.Id, new UpdateCashierTillOpeningDto
+        {
+            OpeningFloatAmount = 110m,
+            RowVersion = opened.RowVersion
+        });
+        await nonOwnerEdit.Should().ThrowAsync<UnauthorizedAccessException>()
+            .WithMessage("*Only the cashier holding this till can edit*");
+
+        db.ChangeTracker.Clear();
+        db.LiquidityAccountEntries.Add(CreateEntry(
+            tenantId,
+            till.Id,
+            LiquidityEntryDirection.Increase,
+            25m,
+            "CustomerPayment"));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var live = await owner.GetSessionAsync(opened.Id);
+        live.Should().NotBeNull();
+        live!.OpeningDetailsMutable.Should().BeFalse();
+        live.OpeningDetailsLockReason.Should().Contain("canonical custody activity");
+
+        var editAfterActivity = () => owner.UpdateOpeningAsync(opened.Id, new UpdateCashierTillOpeningDto
+        {
+            OpeningFloatAmount = 110m,
+            RowVersion = live.RowVersion
+        });
+        await editAfterActivity.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*canonical custody activity*");
+
+        db.ChangeTracker.Clear();
+        var cancelAfterActivity = () => owner.CancelSessionAsync(opened.Id, new CancelCashierTillSessionDto
+        {
+            Reason = "Attempted cancellation after activity.",
+            RowVersion = live.RowVersion
+        });
+        await cancelAfterActivity.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*canonical custody activity*");
     }
 
     [Fact]

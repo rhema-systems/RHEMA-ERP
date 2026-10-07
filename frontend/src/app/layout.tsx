@@ -24,6 +24,7 @@ import { PWAInit } from '../components/PWAInit';
 import { SyncfusionLicenseBootstrap } from '../components/SyncfusionLicenseBootstrap';
 import { NotificationProvider } from '../contexts/NotificationContext';
 import { NotificationToast } from '../components/notifications/NotificationToast';
+import { ApplicationEnvironmentProvider } from '../contexts/ApplicationEnvironmentContext';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -72,18 +73,20 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <ReactQueryProvider>
-            <SessionBlacklistProvider>
-              <TenantProvider>
-                <NotificationProvider>
-                  <SyncfusionLicenseBootstrap />
-                  {children}
-                  <Toaster />
-                  <SonnerToaster position="bottom-right" richColors />
-                  <NotificationToast position="bottom-right" />
-                  <PWAInit />
-                </NotificationProvider>
-              </TenantProvider>
-            </SessionBlacklistProvider>
+            <ApplicationEnvironmentProvider>
+              <SessionBlacklistProvider>
+                <TenantProvider>
+                  <NotificationProvider>
+                    <SyncfusionLicenseBootstrap />
+                    {children}
+                    <Toaster />
+                    <SonnerToaster position="bottom-right" richColors />
+                    <NotificationToast position="bottom-right" />
+                    <PWAInit />
+                  </NotificationProvider>
+                </TenantProvider>
+              </SessionBlacklistProvider>
+            </ApplicationEnvironmentProvider>
           </ReactQueryProvider>
         </ThemeProvider>
         </FontSizeProvider>

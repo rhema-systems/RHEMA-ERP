@@ -23,7 +23,7 @@ export interface CreateRecurringJournalTemplate {
   name: string;
   description?: string;
   journalType: string;
-  bookClassification: 'IFRS' | 'LOCAL_STATUTORY' | 'MANAGEMENT';
+  bookClassification: string;
   currencyCode: string;
   referencePattern?: string;
   notes?: string;

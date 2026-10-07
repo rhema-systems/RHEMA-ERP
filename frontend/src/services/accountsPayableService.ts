@@ -201,6 +201,10 @@ export class AccountsPayableService {
         return apiService.put<VendorInvoice>(`${this.invoiceBaseUrl}/${id}`, data);
     }
 
+    public async deleteInvoice(id: string): Promise<void> {
+        await apiService.delete(`${this.invoiceBaseUrl}/${id}`);
+    }
+
     public async approveInvoice(id: string, comments?: string): Promise<VendorInvoice> {
         return apiService.post<VendorInvoice>(`${this.invoiceBaseUrl}/${id}/approve`, comments || 'Approved');
     }

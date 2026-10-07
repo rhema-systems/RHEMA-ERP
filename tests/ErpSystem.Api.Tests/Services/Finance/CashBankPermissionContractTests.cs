@@ -10,6 +10,19 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class CashBankPermissionContractTests
 {
     [Theory]
+    [InlineData(nameof(CashierTillController.UpdateOpening), "PUT")]
+    [InlineData(nameof(CashierTillController.CancelSession), "POST")]
+    public void UnusedTillManagement_ShouldRequireTillOperatorPermission(string action, string method)
+    {
+        FinancePermissionPolicyMap.GetRequiredPolicies(
+                "CashierTill",
+                action,
+                [method],
+                [$"sessions/{{id:guid}}/{action}"])
+            .Should().Equal(FinancePermissions.OperateCashTills);
+    }
+
+    [Theory]
     [InlineData("ApproveReturnedCheque")]
     [InlineData("RejectReturnedCheque")]
     public void ReturnedChequeReview_ShouldNotRequireBankDepositApproval(string action)

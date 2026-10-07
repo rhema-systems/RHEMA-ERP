@@ -17,7 +17,15 @@ import type { CivilEngineeringMaintenanceExecutionLink, CivilEngineeringMaintena
 const readPermission = 'civil-engineering.workspace.read';
 const managePermission = 'civil-engineering.maintenance.manage';
 const none = '__none__';
-const blank = () => ({ handoffId: '', linkMode: 'CreateJobCard' as const, maintenanceTypeId: '', priorityLevelId: '', jobCardId: none, workOrderId: none });
+type MaintenanceExecutionForm = {
+  handoffId: string;
+  linkMode: 'CreateJobCard' | 'LinkExisting';
+  maintenanceTypeId: string;
+  priorityLevelId: string;
+  jobCardId: string;
+  workOrderId: string;
+};
+const blank = (): MaintenanceExecutionForm => ({ handoffId: '', linkMode: 'CreateJobCard', maintenanceTypeId: '', priorityLevelId: '', jobCardId: none, workOrderId: none });
 const date = (value?: string | null) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Not yet synchronized';
 const errorText = (error: unknown, fallback: string) => {
   const value = error as { response?: { detail?: string; correlationId?: string }; message?: string };

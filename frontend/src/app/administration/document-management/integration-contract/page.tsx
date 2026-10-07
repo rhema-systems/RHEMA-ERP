@@ -1,11 +1,14 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
 import {
+  AlertTriangle,
   BookTemplate,
   CheckCircle2,
-  FileText,
   GitBranch,
+  Loader2,
+  RefreshCw,
   ShieldCheck,
   Workflow,
 } from 'lucide-react';
@@ -19,6 +22,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { documentManagementService } from '@/services/document-management.service';
 
 const requiredPackage = [
   'Source module',
@@ -40,73 +44,42 @@ const sourceContracts = [
   {
     module: 'Estate / Facilities',
     sourceLabel: 'Source: Estate / Facilities -> Central DMS',
-    status: 'Reference pattern active',
-    ownerAction:
-      'Estate and Facilities publish uploaded source documents into Central DMS and retain their business record ownership.',
-    injectionNeeded: 'None for current Estate land document flow.',
+    terms: ['estate / facilities'],
   },
   {
     module: 'Estate / Property Management',
     sourceLabel: 'Source: Estate / Property Management -> Central DMS',
-    status: 'Our side to prepare',
-    ownerAction:
-      'Property and unit documents should publish from Estate/Property records after project handover is received.',
-    injectionNeeded:
-      'Project Management only needs to provide property/unit handover document references later.',
+    terms: ['estate / property', 'property management'],
   },
   {
     module: 'Project Management',
     sourceLabel: 'Source: Project Management -> Central DMS',
-    status: 'External module contract',
-    ownerAction:
-      'Project keeps project delivery ownership and sends approved handover packages or deliverable documents to Central DMS.',
-    injectionNeeded:
-      'Expose project ID, deliverable/unit reference, document type, file reference, completion approval, and receiving module.',
+    terms: ['project'],
   },
   {
     module: 'Maintenance Management',
     sourceLabel: 'Source: Maintenance Management -> Central DMS',
-    status: 'External module contract',
-    ownerAction:
-      'Maintenance owns job cards, work orders, inspections, parts, and technical closure; DMS receives evidence and approved documents.',
-    injectionNeeded:
-      'Expose job card/work order reference, asset/location, completion status, inspection result, document type, and file reference.',
+    terms: ['maintenance'],
   },
   {
     module: 'Helpdesk / Complaint Management',
     sourceLabel: 'Source: Helpdesk / Complaint Management -> Central DMS',
-    status: 'External module contract',
-    ownerAction:
-      'Helpdesk owns ticket SLA, investigation, escalation, resolution, and closure; DMS receives ticket evidence and correspondence.',
-    injectionNeeded:
-      'Expose ticket reference, complainant/context, evidence type, resolution status, document type, and file reference.',
+    terms: ['helpdesk', 'complaint'],
   },
   {
     module: 'Finance AR / AP',
     sourceLabel: 'Source: Finance -> Central DMS',
-    status: 'External module contract',
-    ownerAction:
-      'Finance owns invoices, receipts, payments, statements, postings, and balances; DMS receives approved financial evidence.',
-    injectionNeeded:
-      'Expose invoice/receipt/payment reference, customer/supplier, posting reference, period, amount context, document type, and file reference.',
+    terms: ['finance'],
   },
   {
     module: 'HR / Payroll',
     sourceLabel: 'Source: HR / Payroll -> Central DMS',
-    status: 'External module contract',
-    ownerAction:
-      'HR owns employee records, payroll documents, and staff lifecycle; DMS receives controlled employee document references.',
-    injectionNeeded:
-      'Expose employee reference, document category, confidentiality profile, effective date, retention rule, and file reference.',
+    terms: ['hr', 'payroll'],
   },
   {
     module: 'Procurement / Legal',
     sourceLabel: 'Source: Procurement / Legal -> Central DMS',
-    status: 'External module contract',
-    ownerAction:
-      'Procurement owns supplier purchasing records; Legal owns instruments, matters, legal holds, and executed documents.',
-    injectionNeeded:
-      'Expose supplier/matter/contract reference, execution or approval status, legal hold flag, document type, and file reference.',
+    terms: ['procurement', 'legal'],
   },
 ];
 
@@ -134,6 +107,64 @@ const lifecycleSteps = [
 ];
 
 export default function DmsIntegrationContractPage() {
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [evidence, setEvidence] = React.useState({
+    metadataModules: [] as string[],
+    generationModules: [] as string[],
+    accessModules: [] as string[],
+    retentionModules: [] as string[],
+    pendingModules: [] as string[],
+  });
+
+  const loadEvidence = React.useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [metadata, generation, access, retention, pending] =
+        await Promise.all([
+          documentManagementService.getMetadataTemplates(),
+          documentManagementService.getGenerationTemplates(),
+          documentManagementService.getAccessRules(),
+          documentManagementService.getRetentionPolicies(),
+          documentManagementService.getIntegrationQueue(),
+        ]);
+      setEvidence({
+        metadataModules: metadata
+          .filter((item) => item.isActive !== false)
+          .map((item) => item.module),
+        generationModules: generation
+          .filter((item) => item.isActive)
+          .map((item) => item.module),
+        accessModules: access
+          .filter((item) => item.isActive)
+          .map((item) => item.module || ''),
+        retentionModules: retention
+          .filter((item) => item.isActive)
+          .map((item) => item.module || ''),
+        pendingModules: pending.map((item) => item.sourceModule),
+      });
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Could not load DMS integration readiness.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadEvidence();
+  }, [loadEvidence]);
+
+  const countMatches = (modules: string[], terms: string[]) =>
+    modules.filter((module) => {
+      const normalized = module.toLowerCase();
+      return terms.some((term) => normalized.includes(term));
+    }).length;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -148,6 +179,18 @@ export default function DmsIntegrationContractPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => void loadEvidence()}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Refresh
+          </Button>
           <Button asChild variant="outline">
             <Link href="/administration/document-management/metadata-templates">
               <BookTemplate className="mr-2 h-4 w-4" />
@@ -162,6 +205,13 @@ export default function DmsIntegrationContractPage() {
           </Button>
         </div>
       </div>
+
+      {error ? (
+        <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+          <AlertTriangle className="h-4 w-4" />
+          {error}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <Card className="border-border bg-card text-card-foreground">
@@ -201,49 +251,88 @@ export default function DmsIntegrationContractPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        {sourceContracts.map((contract) => (
-          <Card
-            key={contract.module}
-            className="border-border bg-card text-card-foreground"
-          >
-            <CardHeader>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <CardTitle className="text-base">{contract.module}</CardTitle>
-                  <Badge variant="outline" className="mt-2 w-fit">
-                    {contract.sourceLabel}
+        {sourceContracts.map((contract) => {
+          const metadataCount = countMatches(
+            evidence.metadataModules,
+            contract.terms
+          );
+          const templateCount = countMatches(
+            evidence.generationModules,
+            contract.terms
+          );
+          const accessCount = countMatches(
+            evidence.accessModules,
+            contract.terms
+          );
+          const retentionCount = countMatches(
+            evidence.retentionModules,
+            contract.terms
+          );
+          const pendingCount = countMatches(
+            evidence.pendingModules,
+            contract.terms
+          );
+          const configuredControls = [
+            metadataCount,
+            accessCount,
+            retentionCount,
+          ].filter(Boolean).length;
+          const readiness =
+            configuredControls === 3
+              ? 'Ready'
+              : configuredControls > 0 || templateCount > 0
+                ? 'Partially configured'
+                : 'Not configured';
+
+          return (
+            <Card
+              key={contract.module}
+              className="border-border bg-card text-card-foreground"
+            >
+              <CardHeader>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle className="text-base">
+                      {contract.module}
+                    </CardTitle>
+                    <Badge variant="outline" className="mt-2 w-fit">
+                      {contract.sourceLabel}
+                    </Badge>
+                  </div>
+                  <Badge
+                    variant={readiness === 'Ready' ? 'default' : 'outline'}
+                    className="w-fit"
+                  >
+                    {isLoading ? 'Checking' : readiness}
                   </Badge>
                 </div>
-                <Badge
-                  variant={
-                    contract.status === 'Reference pattern active'
-                      ? 'default'
-                      : 'outline'
-                  }
-                  className="w-fit"
-                >
-                  {contract.status}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-md border bg-background p-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <FileText className="h-4 w-4" />
-                  Owner action
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                  {[
+                    ['Metadata', metadataCount],
+                    ['Templates', templateCount],
+                    ['Access', accessCount],
+                    ['Retention', retentionCount],
+                    ['Pending', pendingCount],
+                  ].map(([label, count]) => (
+                    <div
+                      key={String(label)}
+                      className="rounded-md border bg-background p-3 text-center"
+                    >
+                      <div className="text-lg font-semibold">
+                        {isLoading ? '-' : count}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {label}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <p className="mt-2 text-sm">{contract.ownerAction}</p>
-              </div>
-              <div className="rounded-md border bg-background p-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Workflow className="h-4 w-4" />
-                  Injection needed later
-                </div>
-                <p className="mt-2 text-sm">{contract.injectionNeeded}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   );

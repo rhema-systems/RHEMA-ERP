@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useForm, useFieldArray, Controller, type FieldPath } from 'react-hook-form';
+import { useForm, useFieldArray, Controller, type FieldErrors, type FieldPath } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
@@ -58,7 +59,7 @@ import { TaxApplicability, TaxCategory, type Tax } from '@/types/tax';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import type { ApBudgetCell } from '@/types/ap';
@@ -75,6 +76,10 @@ import {
     toFinanceSourceDimensionFormState,
 } from '@/lib/finance/source-document-dimensions';
 import { calculateNetTradeDiscountLineAmount } from '@/lib/finance/invoice-trade-discount';
+import {
+    resolveInvoiceLineTaxSelection,
+    shouldBlockApInvoiceSaveForSupplierDefaults,
+} from '@/lib/finance/invoice-tax-selection';
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
@@ -125,8 +130,27 @@ const invoiceSchema = z.object({
 
 type InvoiceFormValues = z.infer<typeof invoiceSchema>;
 
+function findFirstInvoiceFormError(
+    errors: FieldErrors<InvoiceFormValues>,
+    path: string[] = []
+): { path: string; message: string } | null {
+    for (const [key, value] of Object.entries(errors)) {
+        if (!value) continue;
+        const nextPath = [...path, key];
+        if (typeof value === 'object' && 'message' in value && typeof value.message === 'string') {
+            return { path: nextPath.join('.'), message: value.message };
+        }
+        if (typeof value === 'object') {
+            const nested = findFirstInvoiceFormError(value as FieldErrors<InvoiceFormValues>, nextPath);
+            if (nested) return nested;
+        }
+    }
+    return null;
+}
+
 export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
     const router = useRouter();
+    const queryClient = useQueryClient();
     const searchParams = useSearchParams();
     const preselectedSupplierId = searchParams.get('supplierId');
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
@@ -469,6 +493,11 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 form.setValue(`lineItems.${index}.budgetEntryId`, preserveBudgetEntryId);
             }
         } catch (error: any) {
+            await queryClient.invalidateQueries({ queryKey: ['vendor-invoices'] });
+            if (editInvoice) {
+                await queryClient.invalidateQueries({ queryKey: ['vendor-invoice', editInvoice.id] });
+            }
+
             toast({
                 title: 'Budget cells unavailable',
                 description: error.message || 'Unable to load adopted Finance budget cells for this account.',
@@ -506,15 +535,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             supplierId: editInvoice.businessPartnerId,
             supplierInvoiceNumber: editInvoice.supplierInvoiceNumber || '',
             purchaseOrderId: editInvoice.purchaseOrderId || undefined,
-            acceptedSupplyKind: editInvoice.acceptedSupplyKind,
-            acceptedSupplySourceId: editInvoice.acceptedSupplySourceId,
+            acceptedSupplyKind: editInvoice.acceptedSupplyKind ?? undefined,
+            acceptedSupplySourceId: editInvoice.acceptedSupplySourceId ?? undefined,
             invoiceDate,
             dueDate,
             paymentTermId: editInvoice.paymentTermId || '',
             expenseAccountId: editInvoice.expenseAccountId || '',
             currencyCode: editInvoice.currencyCode || 'GHS',
             exchangeRate: editInvoice.exchangeRate || 1,
-            exchangeRateId: editInvoice.exchangeRateId,
+            exchangeRateId: editInvoice.exchangeRateId ?? undefined,
             exchangeRateDate: invoiceDate,
             exchangeRateSource: editInvoice.exchangeRateId ? 'Approved rate' : 'Daily',
             currencyOverrideReason: editInvoice.currencyOverrideReason || '',
@@ -526,23 +555,23 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             withholdingContractReference: editInvoice.withholdingContractReference || '',
             withholdingSupplyCategory: typeof editInvoice.withholdingSupplyCategory === 'number'
                 ? (['Goods', 'Works', 'Services'][editInvoice.withholdingSupplyCategory] as 'Goods' | 'Works' | 'Services')
-                : editInvoice.withholdingSupplyCategory,
+                : editInvoice.withholdingSupplyCategory ?? undefined,
             isOpeningBalance: editInvoice.isOpeningBalance,
             lineItems: editInvoice.lineItems.map(line => ({
                 sourceLineId: line.id,
                 lineItemType: (line.lineItemType || 'Expense') as 'Expense' | 'Service' | 'Product' | 'Inventory',
-                glAccountId: line.glAccountId,
-                budgetEntryId: line.budgetEntryId,
-                inventoryItemId: line.inventoryItemId,
-                warehouseId: line.warehouseId,
-                purchaseOrderItemId: line.purchaseOrderItemId,
+                glAccountId: line.glAccountId ?? undefined,
+                budgetEntryId: line.budgetEntryId ?? undefined,
+                inventoryItemId: line.inventoryItemId ?? undefined,
+                warehouseId: line.warehouseId ?? undefined,
+                purchaseOrderItemId: line.purchaseOrderItemId ?? undefined,
                 description: line.description,
                 quantity: line.quantity,
                 unitPrice: line.unitPrice,
                 taxGroupId: line.taxGroupId || 'none',
                 taxTreatment: invoiceTaxTreatment(line.taxTreatment),
                 discountPercentage: line.discountPercentage || 0,
-                unit: line.unit,
+                unit: line.unit ?? undefined,
             })),
         });
     }, [editInvoice, form, isEditMode, suppliersData]);
@@ -1019,6 +1048,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 acceptedSupplySourceId: data.acceptedSupplySourceId,
                 lineItems: data.lineItems.map(item => {
                     const lineTax = calculateLineTax(item, isOpeningBalance, data.taxGroupId);
+                    const taxSelection = resolveInvoiceLineTaxSelection({
+                        lineTaxGroupId: item.taxGroupId,
+                        defaultTaxGroupId: data.taxGroupId,
+                        taxTreatment: item.taxTreatment,
+                        isOpeningBalance,
+                    });
                     return {
                         id: item.sourceLineId,
                         lineItemType: item.lineItemType,
@@ -1030,8 +1065,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         unitPrice: Number(item.unitPrice),
                         discountPercentage: Number(item.discountPercentage),
                         taxRate: lineTax.taxRate,
-                        taxTreatment: item.taxTreatment,
-                        taxGroupId: resolveLineTaxGroupId(item, isOpeningBalance, data.taxGroupId),
+                        taxTreatment: taxSelection.taxTreatment,
+                        taxGroupId: taxSelection.taxGroupId,
                         unit: item.unit || null,
                         inventoryItemId: item.inventoryItemId || null,
                         warehouseId: item.warehouseId || null,
@@ -1075,6 +1110,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 await accountsPayableService.createInvoice(request);
             }
 
+            // The list route may be inactive while this form is mounted. Evict its
+            // paginated cache so navigation cannot paint a stale list before refetching.
+            queryClient.removeQueries({ queryKey: ['vendor-invoices'] });
+            if (editInvoice) {
+                await queryClient.invalidateQueries({ queryKey: ['vendor-invoice', editInvoice.id] });
+            }
+
             toast({
                 title: 'Success',
                 description: isEditMode
@@ -1085,6 +1127,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             router.push(isEditMode && editInvoice
                 ? `/finance/ap/invoices/${editInvoice.id}`
                 : '/finance/ap/invoices');
+            router.refresh();
         } catch (error: any) {
             toast({
                 title: 'Error',
@@ -1095,6 +1138,28 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             setIsSubmitting(false);
         }
     };
+
+    const onInvalid = (errors: FieldErrors<InvoiceFormValues>) => {
+        const firstError = findFirstInvoiceFormError(errors);
+        toast({
+            title: 'Review the highlighted invoice fields',
+            description: firstError
+                ? `${firstError.path}: ${firstError.message}`
+                : 'The invoice was not saved. Review the form and try again.',
+            variant: 'destructive',
+        });
+        requestAnimationFrame(() => {
+            const invalid = document.querySelector<HTMLElement>('[aria-invalid="true"], [data-invalid="true"]');
+            invalid?.focus();
+            invalid?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+    };
+
+    const saveBlockedBySupplierDefaults = shouldBlockApInvoiceSaveForSupplierDefaults({
+        isEditMode,
+        isOpeningBalance: watchIsOpeningBalance,
+        isLoading: supplierDefaultsLoading,
+    });
 
     const editSupplierMissing = Boolean(
         isEditMode &&
@@ -1163,7 +1228,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 </div>
             </div>
 
-            <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-8">
+            <form onSubmit={form.handleSubmit(onSubmit as any, onInvalid)} className="space-y-8" noValidate>
                 <Card>
                     <CardHeader>
                         <CardTitle>Invoice Details</CardTitle>
@@ -1413,10 +1478,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                     aria-readonly="true"
                                     {...form.register('exchangeRate')}
                                 />
-                                <span className="text-[11px] text-muted-foreground block mt-1">
-                                    1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
-                                    {' · approved rate locked to this invoice'}
-                                </span>
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                    <span>
+                                        1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
+                                        {' · approved rate locked to this invoice'}
+                                    </span>
+                                    <Button asChild type="button" variant="link" size="sm" className="h-auto p-0 text-xs">
+                                        <Link href="/finance/exchange-rates">Manage exchange rates</Link>
+                                    </Button>
+                                </div>
                             </div>
                         )}
 
@@ -2124,7 +2194,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     </CardContent>
                     <CardFooter className="flex justify-end space-x-2 bg-muted/50 p-4">
                         <Button variant="outline" type="button" onClick={() => router.back()}>Cancel</Button>
-                        <Button type="submit" disabled={isSubmitting || (!watchIsOpeningBalance && supplierDefaultsLoading && (!isEditMode || withholdingDecision === null)) || Boolean(goodsCategory && (goodsEntryLoading || goodsEntryError || !goodsEntry || fields.length === 0))}>
+                        <Button type="submit" disabled={isSubmitting || saveBlockedBySupplierDefaults || Boolean(goodsCategory && (goodsEntryLoading || goodsEntryError || !goodsEntry || fields.length === 0))}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {isEditMode ? 'Save Changes' : 'Record Invoice'}
                         </Button>

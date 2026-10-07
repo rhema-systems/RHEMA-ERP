@@ -225,6 +225,16 @@ const ADMINISTRATION_ROLES = [
   'TenantAdmin',
 ];
 
+const DMS_ADMINISTRATION_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Document Control Officer',
+  'Records Officer',
+];
+
+const LEGAL_ADMINISTRATION_ROLES = [
+  ...ADMINISTRATION_ROLES,
+];
+
 const DOCUMENT_MANAGEMENT_ROLES = [
   ...ADMINISTRATION_ROLES,
   'Estate Officer',
@@ -3306,6 +3316,13 @@ export const navigationItems: NavItem[] = [
       },
       { title: 'Transfers', href: '/legal/LegalTransfer', icon: GitBranch },
       {
+        title: 'Legal Setup',
+        href: '/administration/legal',
+        icon: Settings,
+        navigationSurface: 'settings',
+        roles: LEGAL_ADMINISTRATION_ROLES,
+      },
+      {
         title: 'Workflow Setup',
         href: '/administration/workflow?q=Legal',
         icon: Workflow,
@@ -3317,6 +3334,20 @@ export const navigationItems: NavItem[] = [
           'TenantAdmin',
           'WorkflowAdmin',
         ],
+      },
+      {
+        title: 'Agreement Templates',
+        href: '/administration/document-management/document-templates?q=Legal',
+        icon: FileText,
+        navigationSurface: 'settings',
+        roles: DMS_ADMINISTRATION_ROLES,
+      },
+      {
+        title: 'Document Metadata',
+        href: '/administration/document-management/metadata-templates?q=Legal',
+        icon: BookTemplate,
+        navigationSurface: 'settings',
+        roles: DMS_ADMINISTRATION_ROLES,
       },
     ],
   },
@@ -3620,7 +3651,7 @@ export const navigationItems: NavItem[] = [
     href: '/administration',
     icon: Settings,
     navigationSurface: 'settings',
-    roles: ADMINISTRATION_ROLES,
+    roles: DMS_ADMINISTRATION_ROLES,
     // admin.hr: an HR practitioner holding the seeded admin.hr grant must see the parent
     // node, or the HR child below would be filtered out with it.
     // Reference.Geography.* is listed too: a reference-data curator from another module holds no
@@ -3652,7 +3683,7 @@ export const navigationItems: NavItem[] = [
         title: 'Document Management',
         href: '/administration/document-management',
         icon: BookTemplate,
-        roles: ADMINISTRATION_ROLES,
+        roles: DMS_ADMINISTRATION_ROLES,
         permissions: ['Finance.Admin'],
         accessMode: 'any',
         children: [
@@ -4095,24 +4126,29 @@ export const navigationItems: NavItem[] = [
         roles: ADMINISTRATION_ROLES,
         children: [
           {
-            title: 'Property Types',
-            href: '/administration/estate/property-types',
-            icon: Home,
+            title: 'Estate Setup',
+            href: '/administration/estate',
+            icon: Settings,
           },
           {
-            title: 'Lease Templates',
-            href: '/administration/estate/lease-templates',
+            title: 'Lease & Agreement Templates',
+            href: '/administration/document-management/document-templates?q=Estate',
             icon: FileText,
           },
           {
-            title: 'Maintenance Categories',
-            href: '/administration/estate/maintenance-categories',
-            icon: Wrench,
+            title: 'Document Metadata',
+            href: '/administration/document-management/metadata-templates?q=Estate',
+            icon: BookTemplate,
           },
           {
-            title: 'Tenant Categories',
-            href: '/administration/estate/tenant-categories',
-            icon: Users,
+            title: 'Workflow Setup',
+            href: '/administration/workflow?q=Estate',
+            icon: Workflow,
+          },
+          {
+            title: 'GIS Integration',
+            href: '/estate/gis',
+            icon: Globe2,
           },
         ],
       },
@@ -4355,6 +4391,11 @@ export const navigationItems: NavItem[] = [
         icon: Settings,
         roles: ADMINISTRATION_ROLES,
         children: [
+          {
+            title: 'System Information',
+            href: '/administration/system',
+            icon: Gauge,
+          },
           {
             title: 'Security Management',
             href: '/administration/security/dashboard',

@@ -36,6 +36,9 @@ public class BusinessPartner : TenantEntity
     public string? TaxIdentificationNumber { get; set; }
 
     [MaxLength(100)]
+    public string? SsnitNumber { get; set; }
+
+    [MaxLength(100)]
     public string? VATNumber { get; set; }
 
     public bool IsVatWithholdingAgent { get; set; }

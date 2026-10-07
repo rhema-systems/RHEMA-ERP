@@ -2,8 +2,9 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { CheckCircle2, MonitorCog } from 'lucide-react';
+import { CheckCircle2, Loader2, MonitorCog, RotateCcw, UploadCloud } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { cn } from '@/lib/utils';
@@ -40,6 +41,12 @@ interface LoginAppearanceSettingsProps {
   disabled?: boolean;
   isLoading?: boolean;
   errorMessage?: string | null;
+  lightBackgroundUrl?: string | null;
+  darkBackgroundUrl?: string | null;
+  onBackgroundUpload: (style: LoginPageStyle, file: File) => void;
+  onBackgroundReset: (style: LoginPageStyle) => void;
+  uploadingStyle?: LoginPageStyle | null;
+  resettingStyle?: LoginPageStyle | null;
 }
 
 export function LoginAppearanceSettings({
@@ -48,6 +55,12 @@ export function LoginAppearanceSettings({
   disabled = false,
   isLoading = false,
   errorMessage,
+  lightBackgroundUrl,
+  darkBackgroundUrl,
+  onBackgroundUpload,
+  onBackgroundReset,
+  uploadingStyle = null,
+  resettingStyle = null,
 }: LoginAppearanceSettingsProps) {
   return (
     <Card>
@@ -91,26 +104,43 @@ export function LoginAppearanceSettings({
           >
             {LOGIN_APPEARANCE_OPTIONS.map((option) => {
               const isSelected = value === option.value;
+              const customBackgroundUrl = option.value === 'DarkPremium'
+                ? darkBackgroundUrl
+                : lightBackgroundUrl;
+              const previewSrc = customBackgroundUrl || option.previewSrc;
+              const isUploading = uploadingStyle === option.value;
+              const isResetting = resettingStyle === option.value;
+              const isBusy = isUploading || isResetting;
 
               return (
-                <label
+                <div
                   key={option.value}
-                  htmlFor={`login-page-style-${option.value}`}
                   className={cn(
                     'group overflow-hidden rounded-xl border bg-white transition',
                     'focus-within:ring-2 focus-within:ring-blue-600 focus-within:ring-offset-2',
-                    disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:border-blue-300 hover:shadow-md',
+                    disabled ? 'opacity-70' : 'hover:border-blue-300 hover:shadow-md',
                     isSelected && 'border-blue-600 ring-2 ring-blue-600 ring-offset-2'
                   )}
                 >
                   <div className="relative aspect-video overflow-hidden bg-slate-100">
-                    <Image
-                      src={option.previewSrc}
-                      alt={option.previewAlt}
-                      fill
-                      sizes="(max-width: 768px) 100vw, 40vw"
-                      className="object-cover transition duration-300 group-hover:scale-[1.02]"
-                    />
+                    {customBackgroundUrl ? (
+                      // The API origin differs from the Next.js origin during local development.
+                      // This tenant-controlled URL has already passed the image upload gate.
+                      <img
+                        key={previewSrc}
+                        src={previewSrc}
+                        alt={option.previewAlt}
+                        className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+                      />
+                    ) : (
+                      <Image
+                        src={previewSrc}
+                        alt={option.previewAlt}
+                        fill
+                        sizes="(max-width: 768px) 100vw, 40vw"
+                        className="object-cover transition duration-300 group-hover:scale-[1.02]"
+                      />
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950/20 to-transparent" />
                   </div>
                   <div className="flex items-start gap-3 p-4">
@@ -122,7 +152,12 @@ export function LoginAppearanceSettings({
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-950">{option.name}</span>
+                        <label
+                          htmlFor={`login-page-style-${option.value}`}
+                          className={cn('font-semibold text-slate-950', !disabled && 'cursor-pointer')}
+                        >
+                          {option.name}
+                        </label>
                         {isSelected && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
                             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -133,9 +168,61 @@ export function LoginAppearanceSettings({
                       <p className="mt-1.5 text-sm leading-5 text-slate-600">
                         {option.description}
                       </p>
+                      <p className="mt-2 text-xs font-medium text-slate-500">
+                        {customBackgroundUrl ? 'Custom tenant background' : 'Bundled default background'}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={disabled || isBusy}
+                          asChild
+                        >
+                          <label
+                            htmlFor={`login-background-upload-${option.value}`}
+                            className={cn(!disabled && !isBusy && 'cursor-pointer')}
+                          >
+                            {isUploading ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                            ) : (
+                              <UploadCloud className="mr-2 h-4 w-4" aria-hidden="true" />
+                            )}
+                            {isUploading ? 'Uploading...' : 'Upload background'}
+                          </label>
+                        </Button>
+                        <input
+                          id={`login-background-upload-${option.value}`}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                          className="sr-only"
+                          disabled={disabled || isBusy}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) onBackgroundUpload(option.value, file);
+                            event.target.value = '';
+                          }}
+                        />
+                        {customBackgroundUrl && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={disabled || isBusy}
+                            onClick={() => onBackgroundReset(option.value)}
+                          >
+                            {isResetting ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                            ) : (
+                              <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+                            )}
+                            {isResetting ? 'Restoring...' : 'Restore default'}
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </label>
+                </div>
               );
             })}
           </RadioGroup>

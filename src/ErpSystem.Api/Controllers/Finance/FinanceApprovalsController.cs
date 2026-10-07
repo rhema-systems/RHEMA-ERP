@@ -45,6 +45,8 @@ public class FinanceApprovalsController : ControllerBase
     private static readonly HashSet<string> FinanceWorkflowEntityKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         Normalize("JournalEntry"),
+        Normalize("DeltaAdjustmentJournal"),
+        Normalize("JournalBatch"),
         Normalize("RecurringJournalTemplate"),
         Normalize("RecurringJournalOccurrence"),
         Normalize("RecurringJournalOccurrenceWaiver"),
@@ -53,10 +55,8 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("VendorInvoice"),
         Normalize("VendorPayment"),
         Normalize("PaymentBatch"),
-        Normalize("SupplierReturn"),
         Normalize("Quote"),
         Normalize("SalesOrder"),
-        Normalize("DeliveryNote"),
         Normalize("Invoice"),
         Normalize("ReturnOrder"),
         Normalize("CreditNote"),
@@ -72,12 +72,12 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("AllocationRunBatch"),
         Normalize("CashTransaction"),
         Normalize("BankReconciliation"),
+        Normalize("BankDepositBatch"),
         // Exchange-rate changes already use the Finance workflow and outcome handlers below.
         // Keep them in this allowlist so assigned reviewers can actually see and action them.
         Normalize("ExchangeRate"),
         Normalize("OpeningBalanceBatch"),
         Normalize("FixedAsset"),
-        Normalize("AssetDepreciationSchedule"),
         Normalize("FixedAssetDepreciationRun"),
         Normalize("AssetValuation"),
         Normalize("AssetTransfer"),
@@ -103,6 +103,8 @@ public class FinanceApprovalsController : ControllerBase
     private readonly IVendorPaymentService? _vendorPaymentService;
     private readonly IFinanceBudgetControlService? _budgetControl;
     private readonly ILeaseAccountingService? _leaseAccountingService;
+    private readonly IBankingSettlementService? _bankingSettlementService;
+    private readonly IBankReconciliationService? _bankReconciliationService;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
@@ -120,7 +122,9 @@ public class FinanceApprovalsController : ControllerBase
         IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
         IVendorPaymentService? vendorPaymentService = null,
         IFinanceBudgetControlService? budgetControl = null,
-        ILeaseAccountingService? leaseAccountingService = null)
+        ILeaseAccountingService? leaseAccountingService = null,
+        IBankingSettlementService? bankingSettlementService = null,
+        IBankReconciliationService? bankReconciliationService = null)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -138,6 +142,8 @@ public class FinanceApprovalsController : ControllerBase
         _vendorPaymentService = vendorPaymentService;
         _budgetControl = budgetControl;
         _leaseAccountingService = leaseAccountingService;
+        _bankingSettlementService = bankingSettlementService;
+        _bankReconciliationService = bankReconciliationService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -170,6 +176,10 @@ public class FinanceApprovalsController : ControllerBase
             .AuthorizeAsync(User, FinancePermissions.WorkflowApprove)).Succeeded;
         var canApproveApPayments = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.ApproveApPayments)).Succeeded;
+        var canApproveBankDeposits = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveBankDeposits)).Succeeded;
+        var canApproveBankReconciliations = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveBankReconciliation)).Succeeded;
         var canRejectByPermission = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.WorkflowReject)).Succeeded;
         var canApproveBookTransitions = (await _authorizationService
@@ -426,6 +436,36 @@ public class FinanceApprovalsController : ControllerBase
                 continue;
             }
 
+            if (IsJournalBatch(entityType))
+            {
+                if (instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var batch = await _db.JournalBatches.AsNoTracking().FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId &&
+                    item.Id == instance.EntityId &&
+                    !item.IsDeleted &&
+                    item.ApprovalStatus == JournalBatchApprovalStatus.PendingApproval &&
+                    item.WorkflowInstanceId == instance.Id &&
+                    item.CreatedById != currentUserId.Value &&
+                    item.SubmittedByUserId != currentUserId.Value,
+                    cancellationToken);
+                if (batch == null ||
+                    !await _workflowService.CanUserApproveAsync("JournalBatch", batch.Id, currentUserId.Value))
+                    continue;
+
+                var batchApproval = await MapApprovalAsync(
+                    approval,
+                    canApprove: false,
+                    canReject: false,
+                    approveDisabledReason: "Open the journal batch to decide every journal at this review stage.",
+                    rejectDisabledReason: "Open the journal batch to decide every journal at this review stage.",
+                    cancellationToken);
+                batchApproval.DecisionOnDetailPage = true;
+                results.Add(batchApproval);
+                continue;
+            }
+
             if (!IsFinanceEntity(entityType))
             {
                 continue;
@@ -474,22 +514,33 @@ public class FinanceApprovalsController : ControllerBase
                     }
                 }
             }
+            var isBankDepositApproval = Normalize(entityType) == Normalize("BankDepositBatch");
+            var bankDepositPermissionBlocked = isBankDepositApproval && !canApproveBankDeposits;
+            var bankDepositPermissionReason = bankDepositPermissionBlocked
+                ? $"Your roles do not include {FinancePermissions.ApproveBankDeposits}."
+                : null;
+            var isBankReconciliationApproval = Normalize(entityType) == Normalize("BankReconciliation");
+            var bankReconciliationPermissionBlocked = isBankReconciliationApproval && !canApproveBankReconciliations;
+            var bankReconciliationPermissionReason = bankReconciliationPermissionBlocked
+                ? $"Your roles do not include {FinancePermissions.ApproveBankReconciliation}."
+                : null;
             var approveDisabledReason = GetActionDisabledReason(
                 "approve",
                 FinancePermissions.WorkflowApprove,
                 canApproveByPermission,
-                submitterApprovalBlocked || paymentSodBlocked,
-                paymentSodReason);
+                submitterApprovalBlocked || paymentSodBlocked || bankDepositPermissionBlocked || bankReconciliationPermissionBlocked,
+                paymentSodReason ?? bankDepositPermissionReason ?? bankReconciliationPermissionReason);
             var rejectDisabledReason = GetActionDisabledReason(
                 "reject",
                 FinancePermissions.WorkflowReject,
                 canRejectByPermission,
-                submitterApprovalBlocked);
+                submitterApprovalBlocked || bankDepositPermissionBlocked || bankReconciliationPermissionBlocked,
+                bankDepositPermissionReason ?? bankReconciliationPermissionReason);
 
             results.Add(await MapApprovalAsync(
                 approval,
-                canApproveByPermission && !submitterApprovalBlocked && !paymentSodBlocked,
-                canRejectByPermission && !submitterApprovalBlocked,
+                canApproveByPermission && !submitterApprovalBlocked && !paymentSodBlocked && !bankDepositPermissionBlocked && !bankReconciliationPermissionBlocked,
+                canRejectByPermission && !submitterApprovalBlocked && !bankDepositPermissionBlocked && !bankReconciliationPermissionBlocked,
                 approveDisabledReason,
                 rejectDisabledReason,
                 cancellationToken));
@@ -543,6 +594,11 @@ public class FinanceApprovalsController : ControllerBase
         {
             return BadRequest("This approval is not a finance workflow approval.");
         }
+        if (IsJournalBatch(entityType))
+        {
+            return BadRequest(
+                "Journal batch decisions must be completed from the journal batch so every journal receives a governed decision.");
+        }
 
         var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
         if (!CanActOnApproval(approval, currentUserId.Value, roleSet))
@@ -591,6 +647,24 @@ public class FinanceApprovalsController : ControllerBase
                 statusCode: StatusCodes.Status403Forbidden,
                 title: "Payment approval not permitted",
                 detail: $"Your roles do not include {FinancePermissions.ApproveApPayments}.");
+        }
+
+        if (Normalize(entityType) == Normalize("BankDepositBatch") &&
+            !(await _authorizationService.AuthorizeAsync(User, FinancePermissions.ApproveBankDeposits)).Succeeded)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Bank deposit approval not permitted",
+                detail: $"Your roles do not include {FinancePermissions.ApproveBankDeposits}.");
+        }
+
+        if (Normalize(entityType) == Normalize("BankReconciliation") &&
+            !(await _authorizationService.AuthorizeAsync(User, FinancePermissions.ApproveBankReconciliation)).Succeeded)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Bank reconciliation decision not permitted",
+                detail: $"Your roles do not include {FinancePermissions.ApproveBankReconciliation}.");
         }
 
         if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
@@ -685,6 +759,39 @@ public class FinanceApprovalsController : ControllerBase
             }
         }
 
+        // Bank-deposit approval owns dimension revalidation, workflow progression, approval
+        // evidence, and optional posting. Route workbench decisions through that domain service;
+        // a generic workflow transition would complete the task without moving the deposit.
+        if (Normalize(entityType) == Normalize("BankDepositBatch"))
+        {
+            if (_bankingSettlementService == null)
+                return Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Bank deposit approval unavailable",
+                    detail: "The authoritative banking settlement service is unavailable.");
+
+            var deposit = string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase)
+                ? await _bankingSettlementService.ApproveDepositAsync(instance.EntityId, comments, cancellationToken)
+                : await _bankingSettlementService.RejectDepositAsync(instance.EntityId, comments, cancellationToken);
+            return Ok(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = deposit.Status is BankDepositStatus.Approved or BankDepositStatus.Posted
+                    ? WorkflowInstanceStatus.Completed
+                    : deposit.Status == BankDepositStatus.Rejected
+                        ? WorkflowInstanceStatus.Failed
+                        : WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = deposit.WorkflowInstanceId,
+                Message = deposit.Status switch
+                {
+                    BankDepositStatus.Posted => "Bank deposit approved and posted.",
+                    BankDepositStatus.Approved => "Bank deposit approved.",
+                    BankDepositStatus.Rejected => "Bank deposit rejected.",
+                    _ => "Bank deposit approval step recorded."
+                }
+            });
+        }
+
         Guid? invoicePaymentSodControlEventId = null;
         if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
             Normalize(entityType) == Normalize("VendorPayment"))
@@ -735,15 +842,32 @@ public class FinanceApprovalsController : ControllerBase
             }
         }
 
-        var workflowResult = await ProcessWorkflowAndOutcomeAtomicallyAsync(
-            tenantId,
-            entityType,
-            instance.EntityId,
-            currentUserId.Value,
-            action,
-            comments,
-            invoicePaymentSodControlEventId,
-            cancellationToken);
+        WorkflowExecutionResult workflowResult;
+        try
+        {
+            workflowResult = await ProcessWorkflowAndOutcomeAtomicallyAsync(
+                tenantId,
+                entityType,
+                instance.EntityId,
+                currentUserId.Value,
+                action,
+                comments,
+                invoicePaymentSodControlEventId,
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception) when (
+            string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            Normalize(entityType) == Normalize("BankReconciliation"))
+        {
+            return BadRequest(new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = instance.Status,
+                WorkflowInstanceId = instance.Id,
+                CurrentStepId = instance.CurrentStepId,
+                Message = exception.Message
+            });
+        }
 
         if (!workflowResult.Success)
         {
@@ -956,6 +1080,15 @@ public class FinanceApprovalsController : ControllerBase
     {
         async Task<WorkflowExecutionResult> ProcessAndApplyAsync()
         {
+            if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+                Normalize(entityType) == Normalize("BankReconciliation"))
+            {
+                if (_bankReconciliationService == null)
+                    throw new InvalidOperationException(
+                        "The authoritative bank reconciliation service is unavailable.");
+                await _bankReconciliationService.ValidateApprovalBalanceAsync(entityId, cancellationToken);
+            }
+
             var result = await _workflowService.ProcessApprovalStepAsync(
                 entityType,
                 entityId,
@@ -1020,7 +1153,7 @@ public class FinanceApprovalsController : ControllerBase
     }
 
     internal static bool RequiresSerializableOutcomeTransaction(string entityType)
-        => Normalize(entityType) is "EXCHANGERATE" or "INVOICE" or "VENDORINVOICE";
+        => Normalize(entityType) is "EXCHANGERATE" or "INVOICE" or "VENDORINVOICE" or "BANKRECONCILIATION";
 
     internal static BusinessRuleException CreateInvoicePostingBusinessRuleException(
         string entityType,
@@ -1147,7 +1280,7 @@ public class FinanceApprovalsController : ControllerBase
                 item.CurrencyCode);
         }
 
-        if (key == Normalize("JournalEntry"))
+        if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
         {
             var item = await _db.JournalEntries.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null ? FinanceApprovalFacts.Empty : new(item.JournalEntryNumber, item.Description, item.PostingStatus, item.EntryDate, item.TotalDebitAmount, item.PrimaryCurrency ?? "GHS");
@@ -1222,12 +1355,6 @@ public class FinanceApprovalsController : ControllerBase
         {
             var item = await _db.Set<PaymentBatch>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null ? FinanceApprovalFacts.Empty : new(item.BatchNumber, item.Description, item.Status.ToString(), item.BatchDate, item.TotalAmount, null);
-        }
-
-        if (key == Normalize("SupplierReturn"))
-        {
-            var item = await _db.SupplierReturns.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
-            return item == null ? FinanceApprovalFacts.Empty : new(item.ReturnNumber, item.VendorName, item.Status.ToString(), item.ReturnDate, item.TotalAmount, item.CurrencyCode);
         }
 
         if (key == Normalize("CustomerPayment"))
@@ -1310,6 +1437,22 @@ public class FinanceApprovalsController : ControllerBase
             return item == null ? FinanceApprovalFacts.Empty : new($"REC-{item.ReconciliationDate:yyyyMMdd}", null, item.Status.ToString(), item.ReconciliationDate, item.StatementBalance, null);
         }
 
+        if (key == Normalize("BankDepositBatch"))
+        {
+            var item = await _db.BankDepositBatches.AsNoTracking()
+                .Include(x => x.BankAccount)
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted, cancellationToken);
+            return item == null
+                ? FinanceApprovalFacts.Empty
+                : new(
+                    item.DepositNumber,
+                    $"{item.BankAccount.AccountName} - {item.DepositReference}",
+                    item.Status.ToString(),
+                    item.SubmittedAt ?? item.DepositDate,
+                    item.NetAmount,
+                    item.Currency);
+        }
+
         if (key == Normalize("ExchangeRate"))
         {
             var item = await _db.ExchangeRates.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
@@ -1376,7 +1519,7 @@ public class FinanceApprovalsController : ControllerBase
             };
         }
 
-        if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
+        if (key == Normalize("FixedAssetDepreciationRun"))
         {
             var item = await _db.FixedAssetDepreciationRuns
                 .AsNoTracking()
@@ -1448,7 +1591,7 @@ public class FinanceApprovalsController : ControllerBase
         var key = Normalize(entityType);
         var now = DateTime.UtcNow;
 
-        if (key == Normalize("JournalEntry"))
+        if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Approved", "Approved", userId, cancellationToken: cancellationToken);
             return;
@@ -1728,12 +1871,6 @@ public class FinanceApprovalsController : ControllerBase
                 item.ApprovedById = userId;
                 item.ApprovedDate = now;
             }, cancellationToken);
-            return;
-        }
-
-        if (key == Normalize("SupplierReturn"))
-        {
-            await UpdateIfFoundAsync(_db.SupplierReturns, tenantId, entityId, item => item.Status = SupplierReturnStatus.Approved, cancellationToken);
             return;
         }
 
@@ -2055,7 +2192,7 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
-        if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
+        if (key == Normalize("FixedAssetDepreciationRun"))
         {
             await UpdateIfFoundAsync(_db.FixedAssetDepreciationRuns, tenantId, entityId, item =>
             {
@@ -2150,7 +2287,7 @@ public class FinanceApprovalsController : ControllerBase
         var key = Normalize(entityType);
         var now = DateTime.UtcNow;
 
-        if (key == Normalize("JournalEntry"))
+        if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Rejected", "Rejected", rejectionReason: reason, cancellationToken: cancellationToken);
             return;
@@ -2335,9 +2472,15 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
-        if (key == Normalize("SupplierReturn"))
+        if (key == Normalize("PaymentBatch"))
         {
-            await UpdateIfFoundAsync(_db.SupplierReturns, tenantId, entityId, item => item.Status = SupplierReturnStatus.Rejected, cancellationToken);
+            await UpdateIfFoundAsync(_db.Set<PaymentBatch>(), tenantId, entityId, item =>
+            {
+                item.Status = PaymentBatchStatus.Cancelled;
+                item.ApprovedById = null;
+                item.ApprovedDate = null;
+                item.Notes = AppendReason(item.Notes, reason);
+            }, cancellationToken);
             return;
         }
 
@@ -2499,7 +2642,11 @@ public class FinanceApprovalsController : ControllerBase
                 return;
             }
 
-            reconciliation.Status = ReconciliationStatus.Rejected;
+            reconciliation.Status = ReconciliationStatus.InProgress;
+            reconciliation.ReconciledAt = null;
+            reconciliation.ReconciledBy = null;
+            reconciliation.ApprovedAt = null;
+            reconciliation.ApprovedBy = null;
             reconciliation.UpdatedAt = now;
             reconciliation.UpdatedBy = _currentUserService.UserName ?? "system";
             reconciliation.Notes = AppendReason(reconciliation.Notes, reason);
@@ -2507,7 +2654,7 @@ public class FinanceApprovalsController : ControllerBase
             await RecordBankReconciliationAuditAsync(
                 tenantId,
                 reconciliation,
-                FinanceAuditEvents.BankReconciliationRejected,
+                FinanceAuditEvents.BankReconciliationReturnedForCorrection,
                 new
                 {
                     reconciliation.Status,
@@ -2633,7 +2780,7 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
-        if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
+        if (key == Normalize("FixedAssetDepreciationRun"))
         {
             await UpdateIfFoundAsync(_db.FixedAssetDepreciationRuns, tenantId, entityId, item =>
             {
@@ -3017,7 +3164,7 @@ public class FinanceApprovalsController : ControllerBase
             SourceDocumentId = reconciliation.Id,
             AfterValues = afterValues,
             Comment = comment,
-            Reason = eventType == FinanceAuditEvents.BankReconciliationRejected ? comment : null,
+            Reason = eventType is FinanceAuditEvents.BankReconciliationRejected or FinanceAuditEvents.BankReconciliationReturnedForCorrection ? comment : null,
             Resource = "Finance.BankReconciliation",
             ResourceId = reconciliation.Id.ToString()
         }, cancellationToken);
@@ -3090,6 +3237,9 @@ public class FinanceApprovalsController : ControllerBase
     private static bool IsBusinessPartner(string? entityType)
         => Normalize(entityType) == "BUSINESSPARTNER";
 
+    private static bool IsJournalBatch(string? entityType)
+        => Normalize(entityType) == "JOURNALBATCH";
+
     private static bool IsAccountingBookLifecycle(string? entityType)
         => Normalize(entityType) == "ACCOUNTINGBOOKLIFECYCLE";
 
@@ -3113,6 +3263,10 @@ public class FinanceApprovalsController : ControllerBase
             "RECURRINGJOURNALTEMPLATE" => $"/finance/recurring-journals/{entityId:D}",
             "RECURRINGJOURNALOCCURRENCE" or "RECURRINGJOURNALOCCURRENCEWAIVER" =>
                 "/finance/recurring-journals",
+            "JOURNALBATCH" => $"/finance/journal-batches/{entityId:D}",
+            "EXCHANGERATE" => "/finance/exchange-rates",
+            "BANKDEPOSITBATCH" => $"/finance/cash/deposits/{entityId:D}",
+            "BANKRECONCILIATION" => $"/finance/cash/reconciliation?reconciliation={entityId:D}",
             _ => "/finance/approvals"
         };
     }
@@ -3122,6 +3276,7 @@ public class FinanceApprovalsController : ControllerBase
         var key = Normalize(entityType);
         return key is "EXCHANGERATE"
             or "FINANCEBUDGETOVERRIDE"
+            or "JOURNALBATCH"
             or "VENDORPAYMENT"
             or "PAYMENTBATCH"
             or "OPENINGBALANCEBATCH"
@@ -3130,6 +3285,8 @@ public class FinanceApprovalsController : ControllerBase
             or "ASSETDEPRECIATIONSCHEDULE"
             or "ASSETVALUATION"
             or "CAPITALPROJECT"
+            or "BANKDEPOSITBATCH"
+            or "BANKRECONCILIATION"
             or "RECURRINGJOURNALTEMPLATE"
             or "RECURRINGJOURNALOCCURRENCE"
             or "RECURRINGJOURNALOCCURRENCEWAIVER";
@@ -3214,7 +3371,7 @@ public class FinanceApprovalsController : ControllerBase
             return "Unit Accounting";
         }
 
-        if (new[] { "CASHTRANSACTION", "BANKRECONCILIATION", "CHEQUE" }.Contains(key))
+        if (new[] { "CASHTRANSACTION", "BANKRECONCILIATION", "BANKDEPOSITBATCH", "CHEQUE" }.Contains(key))
         {
             return "Cash Management";
         }
@@ -3261,8 +3418,10 @@ public class FinanceApprovalsController : ControllerBase
             "ALLOCATIONRULE" => "Allocation",
             "CASHTRANSACTION" => "Bank Transaction",
             "BANKRECONCILIATION" => "Bank Reconciliation",
+            "BANKDEPOSITBATCH" => "Bank Deposit",
             "CHEQUE" => "Cheque",
             "EXCHANGERATE" => "Exchange Rate",
+            "JOURNALBATCH" => "Journal Batch",
             "FIXEDASSET" => "Fixed Asset",
             "FIXEDASSETDEPRECIATIONRUN" => "Depreciation Run",
             "ASSETDEPRECIATIONSCHEDULE" => "Depreciation",

@@ -5,6 +5,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConfirmationDialog } from './confirmation-dialog';
 
 describe('ConfirmationDialog', () => {
+  it('shows environment context on destructive confirmations', () => {
+    render(
+      <ConfirmationDialog
+        open
+        onOpenChange={vi.fn()}
+        title="Delete records"
+        description="This cannot be undone."
+        variant="destructive"
+        onConfirm={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Environment')).toBeInTheDocument();
+    expect(screen.getByLabelText('Environment: Unknown Environment')).toBeInTheDocument();
+  });
+
   it('submits only once while an asynchronous confirmation is in flight', async () => {
     let finish!: () => void;
     const pending = new Promise<void>((resolve) => {

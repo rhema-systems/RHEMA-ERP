@@ -130,6 +130,17 @@ export default function CompanyInformation({
           />
         </div>
 
+        {/* SSNIT Number */}
+        <div className="space-y-2">
+          <Label htmlFor="ssnitNumber">SSNIT Number</Label>
+          <Input
+            id="ssnitNumber"
+            value={formData.ssnitNumber || ''}
+            onChange={(e) => updateFormData({ ssnitNumber: e.target.value })}
+            placeholder="Enter SSNIT number"
+          />
+        </div>
+
         {/* VAT Number */}
         <div className="space-y-2">
           <Label htmlFor="vatNumber">VAT Number</Label>

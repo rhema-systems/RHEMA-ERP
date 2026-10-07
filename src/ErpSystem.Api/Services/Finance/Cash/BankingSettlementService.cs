@@ -812,10 +812,6 @@ public sealed class BankingSettlementService : IBankingSettlementService
         deposit.SubmittedById = UserId;
         StampModified(deposit);
         await _context.SaveChangesAsync(cancellationToken);
-        if (deposit.Status == BankDepositStatus.Approved && settings.AutoPostBankDepositAfterApproval)
-        {
-            await PostDepositAsync(deposit, cancellationToken);
-        }
 
         return await GetDepositAsync(id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the submitted deposit.");
@@ -852,12 +848,6 @@ public sealed class BankingSettlementService : IBankingSettlementService
         }
         StampModified(deposit);
         await _context.SaveChangesAsync(cancellationToken);
-
-        var settings = await GetSettingsAsync(cancellationToken);
-        if (deposit.Status == BankDepositStatus.Approved && settings.AutoPostBankDepositAfterApproval)
-        {
-            await PostDepositAsync(deposit, cancellationToken);
-        }
 
         return await GetDepositAsync(id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the approved deposit.");
@@ -928,6 +918,12 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new InvalidOperationException("Posted deposits must be reversed, not cancelled.");
         }
+        if (deposit.Status == BankDepositStatus.Approved &&
+            deposit.ConfirmationStatus == BankDepositConfirmationStatus.Confirmed)
+        {
+            throw new InvalidOperationException(
+                "A bank-acknowledged deposit cannot be cancelled. Post it or use an explicit corrective workflow.");
+        }
 
         if (deposit.WorkflowInstanceId.HasValue)
         {
@@ -957,6 +953,11 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new InvalidOperationException("Only a fully approved deposit can be posted.");
         }
+        if (deposit.ConfirmationStatus != BankDepositConfirmationStatus.Confirmed)
+        {
+            throw new InvalidOperationException(
+                "Bank acknowledgement must be recorded before an approved deposit can be posted.");
+        }
 
         await ValidateAndFreezeDepositDimensionsAsync(id, cancellationToken);
 
@@ -971,9 +972,10 @@ public sealed class BankingSettlementService : IBankingSettlementService
         CancellationToken cancellationToken = default)
     {
         var deposit = await LoadDepositForActionAsync(id, cancellationToken);
-        if (deposit.Status != BankDepositStatus.Posted)
+        if (deposit.Status is not BankDepositStatus.Approved and not BankDepositStatus.Posted)
         {
-            throw new InvalidOperationException("Only a posted bank deposit can receive bank confirmation.");
+            throw new InvalidOperationException(
+                "Only an approved deposit awaiting posting, or a legacy posted deposit, can receive bank confirmation.");
         }
 
         var reference = RequireText(dto.BankConfirmationReference, "Bank confirmation reference", 100);
@@ -989,6 +991,14 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 deposit.BankConfirmationDate == confirmationDate &&
                 deposit.BankConfirmationEvidenceFileId == dto.ConfirmationEvidenceFileId)
             {
+                if (deposit.Status == BankDepositStatus.Approved)
+                {
+                    var retrySettings = await GetSettingsAsync(cancellationToken);
+                    if (retrySettings.AutoPostBankDepositAfterConfirmation)
+                    {
+                        await PostDepositAsync(deposit, cancellationToken);
+                    }
+                }
                 return await GetDepositAsync(id, cancellationToken)
                     ?? throw new InvalidOperationException("Failed to reload the confirmed deposit.");
             }
@@ -1045,6 +1055,15 @@ public sealed class BankingSettlementService : IBankingSettlementService
             },
             notes,
             cancellationToken);
+
+        if (deposit.Status == BankDepositStatus.Approved)
+        {
+            var settings = await GetSettingsAsync(cancellationToken);
+            if (settings.AutoPostBankDepositAfterConfirmation)
+            {
+                await PostDepositAsync(deposit, cancellationToken);
+            }
+        }
 
         return await GetDepositAsync(id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the confirmed deposit.");
@@ -3171,11 +3190,42 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new InvalidOperationException($"Liquidity account code '{normalizedCode}' already exists.");
         }
-        if (!await _context.Accounts.AnyAsync(
-                item => item.TenantId == tenantId && item.Id == glAccountId && item.IsActive,
-                cancellationToken))
+        var glAccount = await _context.Accounts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                item => item.TenantId == tenantId && item.Id == glAccountId && !item.IsDeleted,
+                cancellationToken);
+        if (glAccount == null || !glAccount.IsActive)
         {
             throw new InvalidOperationException("Select an active GL control account belonging to this tenant.");
+        }
+
+        var glCurrency = NormalizeCurrency(glAccount.CurrencyCode);
+        if (!glCurrency.Equals(normalizedCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!glAccount.IsMultiCurrency)
+            {
+                throw new InvalidOperationException(
+                    $"GL account '{glAccount.AccountNumber}' only accepts {glCurrency} and cannot support a {normalizedCurrency} liquidity account.");
+            }
+
+            var now = DateTime.UtcNow;
+            var hasCurrencyLink = await _context.AccountCurrencyLinks
+                .AsNoTracking()
+                .AnyAsync(link =>
+                    link.TenantId == tenantId &&
+                    link.AccountId == glAccountId &&
+                    link.LinkedCurrencyCode == normalizedCurrency &&
+                    link.IsActive &&
+                    !link.IsDeleted &&
+                    link.EffectiveDate <= now &&
+                    (!link.EffectiveEndDate.HasValue || link.EffectiveEndDate.Value > now),
+                    cancellationToken);
+            if (!hasCurrencyLink)
+            {
+                throw new InvalidOperationException(
+                    $"GL account '{glAccount.AccountNumber}' does not have an active {normalizedCurrency} currency link.");
+            }
         }
         if (type == LiquidityAccountType.Bank && !bankAccountId.HasValue)
         {
@@ -3193,6 +3243,15 @@ public sealed class BankingSettlementService : IBankingSettlementService
             if (!bank.Currency.Equals(normalizedCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("The liquidity account and bank account currencies must match.");
+            }
+            if (!bank.GLAccountId.HasValue)
+            {
+                throw new InvalidOperationException("The linked bank account must have a GL account mapping.");
+            }
+            if (bank.GLAccountId.Value != glAccountId)
+            {
+                throw new InvalidOperationException(
+                    "The bank liquidity account must use the GL account mapped to the selected bank account master.");
             }
         }
     }

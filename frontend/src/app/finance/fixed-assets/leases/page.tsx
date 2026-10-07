@@ -49,6 +49,7 @@ export default function LeasesPage() {
   const getStatusBadge = (status: LeaseStatus) => {
     const variants: Record<LeaseStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
       Draft: 'outline', Active: 'default', Terminated: 'destructive', Completed: 'secondary',
+      PendingApproval: 'secondary', Rejected: 'destructive',
     };
     return <Badge variant={variants[status] || 'default'}>{status}</Badge>;
   };

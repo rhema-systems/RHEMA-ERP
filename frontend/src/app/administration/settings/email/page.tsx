@@ -63,7 +63,7 @@ const emailSettingsSchema = z.object({
   smtpHost: z.string().min(1, 'SMTP Host is required'),
   smtpPort: z.number().min(1, 'SMTP Port must be greater than 0').max(65535, 'Invalid port number'),
   smtpUsername: z.string().min(1, 'SMTP Username is required'),
-  smtpPassword: z.string().min(1, 'SMTP Password is required'),
+  smtpPassword: z.string(),
   useTLS: z.boolean(),
   fromAddress: z.string().email('Invalid email address'),
   fromName: z.string().min(1, 'From Name is required'),
@@ -133,7 +133,8 @@ export default function EmailSettingsPage() {
         smtpHost: emailSettings.smtpHost,
         smtpPort: emailSettings.smtpPort,
         smtpUsername: emailSettings.smtpUsername,
-        smtpPassword: emailSettings.smtpPassword,
+        // The API deliberately never returns persisted credentials.
+        smtpPassword: '',
         useTLS: emailSettings.useTLS,
         fromAddress: emailSettings.fromAddress,
         fromName: emailSettings.fromName,
@@ -237,6 +238,10 @@ export default function EmailSettingsPage() {
   });
 
   const onSubmit = (data: EmailSettingsFormData) => {
+    if (!emailSettings?.smtpPasswordConfigured && !data.smtpPassword.trim()) {
+      form.setError('smtpPassword', { message: 'SMTP Password is required until a credential has been configured' });
+      return;
+    }
     updateSettingsMutation.mutate(data);
   };
 
@@ -402,16 +407,18 @@ export default function EmailSettingsPage() {
                         name="smtpPassword"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Password *</FormLabel>
+                            <FormLabel>Password{emailSettings?.smtpPasswordConfigured ? '' : ' *'}</FormLabel>
                             <FormControl>
                               <Input 
                                 type="password" 
-                                placeholder="••••••••" 
+                                placeholder={emailSettings?.smtpPasswordConfigured ? 'Configured — enter a new password to replace it' : 'Enter SMTP password'}
                                 {...field} 
                               />
                             </FormControl>
                             <FormDescription>
-                              SMTP authentication password
+                              {emailSettings?.smtpPasswordConfigured
+                                ? 'A password is stored securely. Leave this blank to keep it.'
+                                : 'SMTP authentication password'}
                             </FormDescription>
                             <FormMessage />
                           </FormItem>

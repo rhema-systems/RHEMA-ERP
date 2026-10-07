@@ -8,6 +8,8 @@ import {
     Send,
     CreditCard,
     Loader2,
+    Trash2,
+    FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,6 +49,7 @@ export default function InvoiceDetailsPage() {
     const { currentTenant, currentTenantCode } = useTenant();
     const [showSubmitConfirmation, setShowSubmitConfirmation] = useState(false);
     const [showPostConfirmation, setShowPostConfirmation] = useState(false);
+    const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
     const workflow = useWorkflowSummary({ entityType: 'Invoice', entityId: id });
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['invoice', id],
@@ -89,6 +92,19 @@ export default function InvoiceDetailsPage() {
         onError: (error: unknown) => {
             const postingError = getFinancePostingErrorPresentation(error, 'Failed to post the customer invoice.');
             toast({ ...postingError, variant: 'destructive' });
+        },
+    });
+
+    const deleteInvoiceMutation = useMutation({
+        mutationFn: () => arService.deleteInvoice(id),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            queryClient.removeQueries({ queryKey: ['invoice', id] });
+            toast({ title: 'Draft invoice deleted', description: 'The customer invoice draft was removed.' });
+            router.push('/finance/ar/invoices');
+        },
+        onError: (error: any) => {
+            toast({ title: 'Unable to delete invoice', description: error.message || 'The draft invoice could not be deleted.', variant: 'destructive' });
         },
     });
 
@@ -136,6 +152,16 @@ export default function InvoiceDetailsPage() {
                     </div>
                 </div>
                 <div className="flex space-x-2">
+                    {(invoice.status === 'Draft' || invoice.status === 'Rejected') && (hasPermission('Finance.AR.Invoices.Edit') || hasPermission('Finance.AR.Invoices.Write')) && (
+                        <Button variant="outline" size="sm" onClick={() => router.push(`/finance/ar/invoices/${invoice.id}/edit`)}>
+                            <FileText className="mr-2 h-4 w-4" /> Edit invoice
+                        </Button>
+                    )}
+                    {invoice.status === 'Draft' && (hasPermission('Finance.AR.Invoices.Delete') || hasPermission('Finance.AR.Invoices.Write')) && (
+                        <Button variant="destructive" size="sm" onClick={() => setShowDeleteConfirmation(true)}>
+                            <Trash2 className="mr-2 h-4 w-4" /> Delete draft
+                        </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={printArInvoiceDocument}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
@@ -305,6 +331,17 @@ export default function InvoiceDetailsPage() {
                 title="Post invoice?" description="This releases the invoice, updates applicable stock and the customer balance, and posts its balanced journal."
                 confirmText="Post" isLoading={postInvoiceMutation.isPending}
                 onConfirm={async () => { try { await postInvoiceMutation.mutateAsync(); } catch { return false; } }} maxWidth="500px" />
+            <ConfirmationDialog
+                open={showDeleteConfirmation}
+                onOpenChange={setShowDeleteConfirmation}
+                title="Delete draft customer invoice?"
+                description={`${invoice.invoiceNumber} will be permanently removed. Posted or submitted invoices cannot be deleted.`}
+                confirmText="Delete draft"
+                variant="destructive"
+                isLoading={deleteInvoiceMutation.isPending}
+                onConfirm={async () => { try { await deleteInvoiceMutation.mutateAsync(); } catch { return false; } }}
+                maxWidth="500px"
+            />
         </div>
         <ArInvoicePrintDocument
             invoice={invoice}

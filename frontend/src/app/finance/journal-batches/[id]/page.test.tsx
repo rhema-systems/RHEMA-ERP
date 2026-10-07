@@ -2,7 +2,17 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), submit: vi.fn(), post: vi.fn(), summary: vi.fn(), permission: vi.fn(), toast: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  get: vi.fn(),
+  getJournal: vi.fn(),
+  getEligible: vi.fn(),
+  remove: vi.fn(),
+  submit: vi.fn(),
+  post: vi.fn(),
+  summary: vi.fn(),
+  permission: vi.fn(),
+  toast: vi.fn(),
+}));
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'batch-1' }), useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasPermission: mocks.permission }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
@@ -11,9 +21,18 @@ vi.mock('@/services/finance/finance-data.service', () => ({
     getAccounts: vi.fn(async () => []),
     getFinanceDimensions: vi.fn(async () => []),
     getFinanceDimensionRules: vi.fn(async () => []),
+    getJournalEntryById: mocks.getJournal,
   },
 }));
-vi.mock('@/services/finance/journal-batch-data.service', () => ({ journalBatchDataService: { getBatch: mocks.get, submit: mocks.submit, post: mocks.post } }));
+vi.mock('@/services/finance/journal-batch-data.service', () => ({
+  journalBatchDataService: {
+    getBatch: mocks.get,
+    getEligibleDraftJournals: mocks.getEligible,
+    removeJournal: mocks.remove,
+    submit: mocks.submit,
+    post: mocks.post,
+  },
+}));
 vi.mock('@/services/workflow-api.service', () => ({ workflowApiService: { getWorkflowEntitySummary: mocks.summary } }));
 import Page from './page';
 
@@ -25,7 +44,15 @@ const draft = { id: 'batch-1', batchNumber: 'JB-1', description: 'Batch test', d
 const direct = { entityType: 'JournalBatch', entityId: 'batch-1', approvalRequired: false, hasActiveInstance: false, hasWorkflowHistory: false };
 const ready = { ...draft, approvalRequired: false, approvalStatus: 'ReadyToPost', displayStatus: 'Ready to Post', canSubmit: false,
   canPostAny: true, items: [{ ...item, reviewStatus: 'NotRequired', postingStatus: 'Ready' }] };
-beforeEach(() => { vi.stubGlobal('React', React); vi.clearAllMocks(); mocks.get.mockResolvedValue(draft); mocks.summary.mockResolvedValue(direct); mocks.permission.mockReturnValue(true); });
+beforeEach(() => {
+  vi.stubGlobal('React', React);
+  vi.clearAllMocks();
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
+  mocks.get.mockResolvedValue(draft);
+  mocks.getEligible.mockResolvedValue([]);
+  mocks.summary.mockResolvedValue(direct);
+  mocks.permission.mockReturnValue(true);
+});
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('journal batch optional approval', () => {
@@ -100,5 +127,42 @@ describe('journal batch optional approval', () => {
     render(<Page />);
     expect(await screen.findByRole('button', { name: 'Submit for approval' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Prepare to post' })).not.toBeInTheDocument();
+  });
+
+  it('opens and focuses the populated editor for a draft journal', async () => {
+    mocks.get.mockResolvedValue({ ...draft, canEdit: true });
+    mocks.getJournal.mockResolvedValue({
+      id: 'journal-1',
+      transactionDate: '2026-09-12',
+      description: 'Balanced journal',
+      reference: 'REF-1',
+      transactions: [
+        { id: 'line-1', accountId: 'account-1', transactionType: 'Debit', amount: 100, dimensions: [] },
+        { id: 'line-2', accountId: 'account-2', transactionType: 'Credit', amount: 100, dimensions: [] },
+      ],
+    });
+
+    render(<Page />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+    expect(await screen.findByRole('heading', { name: 'Edit journal entry' })).toBeVisible();
+    const description = screen.getByLabelText('Description');
+    expect(description).toHaveValue('Balanced journal');
+    expect(description).toHaveFocus();
+    expect(screen.getAllByRole('spinbutton').filter((input) => (input as HTMLInputElement).value === '100')).toHaveLength(2);
+  });
+
+  it('refreshes eligible drafts immediately after removing a journal', async () => {
+    const editable = { ...draft, canEdit: true };
+    mocks.get.mockResolvedValue(editable);
+    mocks.remove.mockResolvedValue({ ...editable, items: [], entryCount: 0 });
+
+    render(<Page />);
+    const removeButton = await screen.findByRole('button', { name: 'Remove JE-1 from batch' });
+    const callsBeforeRemoval = mocks.getEligible.mock.calls.length;
+    fireEvent.click(removeButton);
+
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith('batch-1', 'journal-1'));
+    await waitFor(() => expect(mocks.getEligible.mock.calls.length).toBeGreaterThan(callsBeforeRemoval));
   });
 });

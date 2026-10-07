@@ -186,26 +186,23 @@ namespace ErpSystem.Api.Controllers
         [HttpPost("trust")]
         public IActionResult UpdateDeviceTrust([FromBody] UpdateDeviceTrustRequest request)
         {
-            try
+            var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
+            if (!currentUserId.HasValue)
             {
-                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
-                if (!currentUserId.HasValue)
-                {
-                    return Unauthorized();
-                }
-
-                // This is a simplified implementation
-                // In a real system, you'd have a device trust store/database
-                _logger.LogInformation("User {UserId} updated trust for device {DeviceId} to {IsTrusted}",
-                    currentUserId.Value, request.DeviceId, request.IsTrusted);
-
-                return Ok(new { message = "Device trust updated successfully" });
+                return Unauthorized();
             }
-            catch (Exception ex)
+
+            _logger.LogWarning(
+                "User {UserId} requested device trust update for {DeviceId}, but no persisted device trust store is configured.",
+                currentUserId.Value,
+                request.DeviceId);
+
+            return StatusCode(StatusCodes.Status501NotImplemented, new ProblemDetails
             {
-                _logger.LogError(ex, "Error updating device trust");
-                return StatusCode(500, new { message = "An error occurred while updating device trust" });
-            }
+                Title = "Device trust is unavailable",
+                Detail = "RHEMA-ERP does not currently have a persisted device trust store. No trust state was changed.",
+                Status = StatusCodes.Status501NotImplemented
+            });
         }
 
         /// <summary>

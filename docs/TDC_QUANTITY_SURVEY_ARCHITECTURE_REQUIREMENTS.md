@@ -27,6 +27,8 @@ The architecture document does **not** assign `FR-QS-*` requirement IDs. The `TD
 
 This baseline does not replace `docs/tdc-quantity-survey-gap-implementation-tracker.md`. That tracker is based on the separate *Quantity Survey Questionnaire - Response.docx* and contains a broader set of questionnaire requirements. Where that tracker exceeds the architecture document, the additional capability remains useful but is not treated as an architecture-mandated publication or transaction blocker.
 
+The later *TDC Quantity Survey Management SRS Module.docx* is reconciled in `docs/TDC_QS_SRS_RECONCILIATION_20261006.md`. It adds functional vocabulary and field detail without replacing the architecture's shared-owner, workflow, security, audit, DMS, Procurement, or Finance boundaries.
+
 ## Architecture outcome
 
 The Quantity Surveying module shall control cost estimation, bills of quantities, valuations, contract cost monitoring, variations, interim payment certificates, retention, final accounts, and cost certification for works, maintenance, construction, and engineering activities.

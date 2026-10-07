@@ -151,19 +151,20 @@ public class BudgetController : ControllerBase
     }
 
     /// <summary>
-    /// Updates an existing budget scenario's metadata (e.g., name, description).
+    /// Updates an existing budget scenario.
     /// </summary>
     /// <remarks>
     /// **Common Use Cases:**
     /// - Renaming a scenario to better reflect its purpose (e.g., "Draft" to "Board-Approved").
-    /// - Updating the description or notes attached to a scenario.
+    /// - Correcting an unused Draft scenario's fiscal year, currency, account-segment grain,
+    ///   or Finance-dimension grain before returns are distributed.
     ///
     /// **Integration Pattern:**
     /// - The route ID must match <c>dto.Id</c>; a mismatch returns 400 to prevent accidental overwrites.
     ///
     /// **Business Rules:**
-    /// - A locked scenario cannot be updated; the service layer will throw an
-    ///   <see cref="InvalidOperationException"/> resulting in a 400 response.
+    /// - Structural setup can change only while the scenario is an unused Draft with no returns,
+    ///   workflow evidence, revisions, reservations, or derived versions.
     /// - The route ID and DTO ID must match.
     ///
     /// **Authorization:** Requires the mapped finance budgeting permission.
@@ -200,43 +201,48 @@ public class BudgetController : ControllerBase
     }
 
     /// <summary>
-    /// Deletes a budget scenario and all associated returns and entries.
+    /// Soft-deletes a genuinely unused Draft budget scenario.
     /// </summary>
     /// <remarks>
     /// **Common Use Cases:**
-    /// - Removing a draft or superseded scenario that is no longer needed.
-    /// - Cleaning up test or exploratory scenarios before final budget approval.
+    /// - Removing a mistaken Draft before any return or workflow evidence exists.
     ///
     /// **Integration Pattern:**
-    /// - Cascading delete removes all child returns and entries; callers should confirm with the
-    ///   user before invoking.
+    /// - The scenario and its grain declarations are tombstoned for auditability; no return,
+    ///   worksheet, revision, reservation, or workflow evidence is erased.
     ///
     /// **Business Rules:**
-    /// - A locked scenario cannot be deleted; the service layer will reject the operation with
-    ///   an <see cref="InvalidOperationException"/> resulting in a 400 response.
+    /// - Only an unused Draft can be deleted. Any dependent evidence blocks the operation.
+    /// - The row version is required to prevent stale deletion.
     /// - Returns 404 if the scenario does not exist.
     ///
     /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the scenario to delete.</param>
+    /// <param name="rowVersion">Base64 concurrency token from the latest scenario representation.</param>
     /// <returns>No content on success.</returns>
     /// <response code="204">Scenario deleted successfully.</response>
-    /// <response code="400">Scenario is locked and cannot be deleted.</response>
+    /// <response code="400">Scenario is not an unused Draft or has dependent evidence.</response>
+    /// <response code="409">Scenario changed after the caller loaded it.</response>
     /// <response code="401">Not authenticated.</response>
     /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Scenario with the specified ID was not found.</response>
     [HttpDelete("scenarios/{id}")]
-    public async Task<ActionResult> DeleteScenario(Guid id)
+    public async Task<ActionResult> DeleteScenario(Guid id, [FromQuery] string rowVersion)
     {
         try
         {
-            var success = await _budgetService.DeleteScenarioAsync(id);
+            var success = await _budgetService.DeleteScenarioAsync(id, rowVersion);
             if (!success) return NotFound();
             return NoContent();
         }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget scenario changed after you opened it. Refresh and try again.");
         }
     }
 

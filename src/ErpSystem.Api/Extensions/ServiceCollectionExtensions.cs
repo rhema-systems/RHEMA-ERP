@@ -615,6 +615,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Api.Services.IEmployeeLinkResolutionService, ErpSystem.Api.Services.EmployeeLinkResolutionService>();
 
             services.AddScoped<ISecurityService, SecurityService>();
+            services.AddScoped<ErpSystem.Api.Services.ISecurityOperationsService, ErpSystem.Api.Services.SecurityOperationsService>();
             // User context services
             services.AddHttpContextAccessor();
             services.AddScoped<ICurrentUserService, ErpSystem.Api.Services.CurrentUserService>();
@@ -849,6 +850,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IPaymentTermService, ErpSystem.Core.Services.Finance.PaymentTermService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyService, ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IExchangeRateService, ErpSystem.Api.Services.Finance.MultiCurrency.ExchangeRateService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.MultiCurrency.ExchangeRateWorkflowReconciliationService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.RecurringJournalWorkflowReconciliationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFiscalPeriodService, ErpSystem.Api.Services.Finance.Fiscal.FiscalPeriodService>();
             // BudgetService is the single Finance-owned aggregate for scenarios,
             // departmental returns, consolidated reporting, and governed revisions.
@@ -1639,6 +1642,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                         !ctx.User.IsInRole(Constants.Roles.ConsultantClient)))
                 .AddPolicy("AuditGovernanceRead", policy =>
                     policy.Requirements.Add(new PermissionRequirement("audit.read", "procurement.audit.read")))
+                .AddPolicy("SecurityManagementRead", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("audit.read", "settings.read", "settings.update")))
                 .AddPolicy("AuditGovernanceManage", policy =>
                     policy.Requirements.Add(new PermissionRequirement("settings.update")))
                 .AddPolicy("HrIdentityReconciliationRead", policy =>

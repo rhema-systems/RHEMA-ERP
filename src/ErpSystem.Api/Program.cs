@@ -100,6 +100,8 @@ if (args.Length > 0 && args[0] == "seed-finance-baseline")
 
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<FinanceBaselineProvisioningSeeder>>();
         await new FinanceBaselineProvisioningSeeder(db, logger).SeedAsync(tenant.Id, DateTime.UtcNow);
+        var taxLogger = scope.ServiceProvider.GetRequiredService<ILogger<FinanceTaxAccountProvisioningSeeder>>();
+        await new FinanceTaxAccountProvisioningSeeder(db, taxLogger).SeedAsync(tenant.Id);
 
         // Protected statement layouts depend on the canonical books and classification
         // hierarchy established by the Finance baseline. Provision them through this same
@@ -670,6 +672,8 @@ builder.Services.AddErpSystemDatabase(builder.Configuration);
 builder.Services.AddErpSystemIdentity();
 builder.Services.AddErpSystemRepositories();
 builder.Services.AddErpSystemServices();
+builder.Services.AddSingleton<ErpSystem.Api.Services.IApplicationEnvironmentService,
+    ErpSystem.Api.Services.ApplicationEnvironmentService>();
 builder.Services.Configure<ErpSystem.Core.DTOs.Procurement.SupplierApplicantAccessOptions>(
     builder.Configuration.GetSection(
         ErpSystem.Core.DTOs.Procurement.SupplierApplicantAccessOptions.SectionName));
@@ -1040,6 +1044,24 @@ if (!skipStartupInitialization)
 
     if (databaseInitializationSucceeded)
     {
+        app.Logger.LogInformation("Starting critical Finance workflow provisioning...");
+        try
+        {
+            await SeedCriticalFinanceWorkflowDefinitionsAsync(app);
+            app.Logger.LogInformation("Critical Finance workflow provisioning completed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Critical Finance workflow provisioning failed");
+            if (failFastOnDatabaseInitializationError)
+            {
+                throw;
+            }
+        }
+    }
+
+    if (databaseInitializationSucceeded)
+    {
         app.Logger.LogInformation("Starting baseline payment-term seeding...");
         try
         {
@@ -1231,6 +1253,33 @@ async Task SeedWorkflowDefinitionsAsync(WebApplication app)
     using var scope = app.Services.CreateScope();
     var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
     await seedingService.SeedWorkflowDefinitionsAsync();
+}
+
+async Task SeedCriticalFinanceWorkflowDefinitionsAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+    await seedingService.SeedCriticalFinanceWorkflowDefinitionsAsync();
+    var reconciliationService = scope.ServiceProvider.GetRequiredService<
+        ErpSystem.Api.Services.Finance.MultiCurrency.ExchangeRateWorkflowReconciliationService>();
+    var reconciliation = await reconciliationService.ReconcileAsync();
+    app.Logger.LogInformation(
+        "Exchange-rate workflow reconciliation completed: {PendingCount} pending, {OrphanCount} orphaned, {RecoveredCount} recovered, {FailedCount} failed, {SkippedWithoutInitiatorCount} skipped without initiator",
+        reconciliation.PendingCount,
+        reconciliation.OrphanCount,
+        reconciliation.RecoveredCount,
+        reconciliation.FailedCount,
+        reconciliation.SkippedWithoutInitiatorCount);
+    var recurringReconciliationService = scope.ServiceProvider.GetRequiredService<
+        ErpSystem.Api.Services.Finance.GL.RecurringJournalWorkflowReconciliationService>();
+    var recurringReconciliation = await recurringReconciliationService.ReconcileAsync();
+    app.Logger.LogInformation(
+        "Recurring-journal workflow reconciliation completed: {PendingCount} pending, {OrphanCount} orphaned, {RecoveredCount} recovered, {FailedCount} failed, {SkippedWithoutInitiatorCount} skipped without initiator",
+        recurringReconciliation.PendingCount,
+        recurringReconciliation.OrphanCount,
+        recurringReconciliation.RecoveredCount,
+        recurringReconciliation.FailedCount,
+        recurringReconciliation.SkippedWithoutInitiatorCount);
 }
 
 async Task SeedPaymentTermBaselineAsync(WebApplication app)

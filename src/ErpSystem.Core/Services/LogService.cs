@@ -250,9 +250,11 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
+            var tenantId = GetRequiredSecurityTenantId();
             return await _unitOfWork.Repository<SecurityLog>().GetPagedAsync(
                 pageNumber,
                 pageSize,
+                s => s.TenantId == tenantId,
                 s => s.Timestamp,
                 descending: true);
         }
@@ -267,10 +269,11 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
+            var tenantId = GetRequiredSecurityTenantId();
             return await _unitOfWork.Repository<SecurityLog>().GetPagedAsync(
                 pageNumber,
                 pageSize,
-                s => s.UserId == userId,
+                s => s.TenantId == tenantId && s.UserId == userId,
                 s => s.Timestamp,
                 descending: true);
         }
@@ -285,10 +288,11 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
+            var tenantId = GetRequiredSecurityTenantId();
             return await _unitOfWork.Repository<SecurityLog>().GetPagedAsync(
                 pageNumber,
                 pageSize,
-                s => s.Action == action,
+                s => s.TenantId == tenantId && s.Action == action,
                 s => s.Timestamp,
                 descending: true);
         }
@@ -303,10 +307,11 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
+            var tenantId = GetRequiredSecurityTenantId();
             return await _unitOfWork.Repository<SecurityLog>().GetPagedAsync(
                 pageNumber,
                 pageSize,
-                s => s.Timestamp >= from && s.Timestamp <= to,
+                s => s.TenantId == tenantId && s.Timestamp >= from && s.Timestamp <= to,
                 s => s.Timestamp,
                 descending: true);
         }
@@ -321,7 +326,9 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
-            return await _unitOfWork.Repository<SecurityLog>().GetByIdAsync(id);
+            var tenantId = GetRequiredSecurityTenantId();
+            return await _unitOfWork.Repository<SecurityLog>()
+                .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id);
         }
         catch (Exception ex)
         {
@@ -402,7 +409,9 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
-            var oldLogs = await _unitOfWork.Repository<SecurityLog>().FindAsync(s => s.CreatedAt < beforeDate);
+            var tenantId = GetRequiredSecurityTenantId();
+            var oldLogs = await _unitOfWork.Repository<SecurityLog>().FindAsync(
+                s => s.TenantId == tenantId && s.CreatedAt < beforeDate);
             foreach (var log in oldLogs)
             {
                 await _unitOfWork.Repository<SecurityLog>().DeleteAsync(log.Id);
@@ -422,7 +431,9 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
+            var tenantId = GetRequiredSecurityTenantId();
             return await _unitOfWork.Repository<SecurityLog>().FindAsync(s =>
+                s.TenantId == tenantId &&
                 s.IpAddress == ipAddress &&
                 s.Action == SecurityAction.LoginFailure.ToString() &&
                 s.Timestamp >= since);
@@ -438,7 +449,9 @@ public class SecurityLogService : ISecurityLogService
     {
         try
         {
+            var tenantId = GetRequiredSecurityTenantId();
             var failedAttempts = await _unitOfWork.Repository<SecurityLog>().FindAsync(s =>
+                s.TenantId == tenantId &&
                 s.Username == username &&
                 s.Action == SecurityAction.LoginFailure.ToString() &&
                 s.Timestamp >= since);
@@ -450,5 +463,16 @@ public class SecurityLogService : ISecurityLogService
             _logger.LogError(ex, "Error counting failed login attempts for user {Username}", username);
             throw;
         }
+    }
+
+    private Guid GetRequiredSecurityTenantId()
+    {
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue || tenantId.Value == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant context is required for security log access.");
+        }
+
+        return tenantId.Value;
     }
 }

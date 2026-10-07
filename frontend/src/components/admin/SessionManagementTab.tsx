@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Badge } from '../ui/badge';
 import { NoSSR } from '../NoSSR';
-import { Avatar, AvatarImage, AvatarFallback } from '../ui/avatar';
+import { Avatar, AvatarFallback } from '../ui/avatar';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Input } from '../ui/input';
@@ -114,13 +114,6 @@ export function SessionManagementTab() {
       
       const apiSessions = await securityService.getAllActiveSessions(filters);
       const enhancedSessions: EnhancedUserSession[] = apiSessions.map(session => {
-        console.log('🔧 SessionManagementTab: Processing session:', {
-          sessionId: session.sessionId,
-          username: session.username,
-          apiRole: session.role,
-          apiEmail: session.email
-        });
-        
         return {
           ...session,
           // Keep the API-provided role and email - don't override with SignalR data
@@ -211,7 +204,6 @@ export function SessionManagementTab() {
         return (
           <div className="flex items-center space-x-3">
             <Avatar className="h-8 w-8">
-              <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${session.username}`} />
               <AvatarFallback className="text-xs">{initials}</AvatarFallback>
             </Avatar>
             <div className="flex flex-col">
@@ -335,7 +327,6 @@ export function SessionManagementTab() {
       icon: LogOutIcon,
       onClick: (row) => handleTerminateSession(row.original.sessionId),
       variant: 'ghost',
-      disabled: (row) => row.original.role === 'SuperAdmin',
     },
   ], []);
 

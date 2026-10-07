@@ -1,5 +1,8 @@
 # Rhema ERP VPS Deployment Runbook
 
+> Environment identity and isolation requirements are documented in
+> [Environment awareness and deployment safety](ENVIRONMENT_AWARENESS_AND_DEPLOYMENT_SAFETY.md).
+
 Last updated: 2026-09-29
 
 This note captures the VPS deployment details that have caused repeat failures. Read it before deploying to the current Windows VPS. The server is presently a **test server**, so development-data seeding is intentionally enabled. It must be disabled before this host is promoted to production.

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -126,6 +127,7 @@ type LifecycleKind =
   | 'cancel';
 
 export default function SupplierMasterChangesPage() {
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const client = useQueryClient();
   const [draftOpen, setDraftOpen] = useState(false);
@@ -142,6 +144,7 @@ export default function SupplierMasterChangesPage() {
     request: ProcurementMasterDataChange;
   }>();
   const [comment, setComment] = useState('');
+  const [prefillApplied, setPrefillApplied] = useState(false);
 
   const summary = useQuery({
     queryKey: ['supplier-master-change-summary'],
@@ -204,6 +207,21 @@ export default function SupplierMasterChangesPage() {
       return;
     setDraft((current) => hydrateSupplierComplianceDraft(current, detail));
   }, [changedFields.size, draft.resourceType, partnerId, supplierDetail.data]);
+
+  useEffect(() => {
+    if (prefillApplied || suppliers.isLoading) return;
+    const requestedPartnerId = searchParams.get('partnerId') || '';
+    const requestedResource = searchParams.get('resourceType') as SupplierMasterResourceType | null;
+    if (!requestedPartnerId || !requestedResource || !supplierMasterResourceTypes.includes(requestedResource)) {
+      setPrefillApplied(true);
+      return;
+    }
+    setPartnerId(requestedPartnerId);
+    setDraft({ ...emptyDraft(), resourceType: requestedResource });
+    setChangedFields(new Set());
+    setDraftOpen(searchParams.get('new') === '1');
+    setPrefillApplied(true);
+  }, [prefillApplied, searchParams, suppliers.isLoading]);
 
   const changeDraftField = (
     field: keyof SupplierMasterChangeDraft,

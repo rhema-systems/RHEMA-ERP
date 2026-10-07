@@ -98,6 +98,11 @@ public class Security : BaseEntity
     // Public login appearance. The default remains usable when a tenant has not configured it yet.
     public LoginPageStyle LoginPageStyle { get; set; } = LoginPageStyle.LightCorporate;
 
+    // Tenant-owned, controlled-upload records used by the two public login presentations.
+    // Null means the bundled application image remains the default for that presentation.
+    public Guid? LightLoginBackgroundFileUploadRecordId { get; set; }
+    public Guid? DarkLoginBackgroundFileUploadRecordId { get; set; }
+
     // Tenant association
     public Guid TenantId { get; set; }
     public virtual Tenant Tenant { get; set; } = null!;

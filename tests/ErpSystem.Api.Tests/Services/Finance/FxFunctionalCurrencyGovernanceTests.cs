@@ -647,6 +647,66 @@ public sealed class FxFunctionalCurrencyGovernanceTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceWorkflowApprovalHardening")]
+    [Trait("Category", "Workflow")]
+    public async Task ExchangeRateCreationRollsBackWhenWorkflowCannotStart()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        await db.SaveChangesAsync();
+        var innerUnitOfWork = new UnitOfWork(db);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        var transactionActive = false;
+        unitOfWork.SetupGet(item => item.HasActiveTransaction).Returns(() => transactionActive);
+        unitOfWork.Setup(item => item.Repository<ExchangeRate>())
+            .Returns(innerUnitOfWork.Repository<ExchangeRate>());
+        unitOfWork.Setup(item => item.Repository<Currency>())
+            .Returns(innerUnitOfWork.Repository<Currency>());
+        unitOfWork.Setup(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken token) => db.SaveChangesAsync(token));
+        unitOfWork.Setup(item => item.BeginTransactionAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => transactionActive = true)
+            .Returns(Task.CompletedTask);
+        unitOfWork.Setup(item => item.RollbackAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => transactionActive = false)
+            .Returns(Task.CompletedTask);
+        unitOfWork.Setup(item => item.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task<ExchangeRateDto>>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((Func<Task<ExchangeRateDto>> operation, CancellationToken _) => operation());
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(x => x.StartApprovalWorkflowAsync("ExchangeRate", It.IsAny<Guid>()))
+            .ThrowsAsync(new InvalidOperationException("Workflow entity type 'ExchangeRate' is not configured"));
+        var currentUser = CreateCurrentUser(tenantId).Object;
+        var service = new ExchangeRateService(
+            unitOfWork.Object,
+            currentUser,
+            new TenantSettingsService(db, currentUser),
+            Mock.Of<ILogger<ExchangeRateService>>(),
+            workflowService: workflow.Object);
+
+        await service.Invoking(item => item.CreateExchangeRateAsync(new CreateExchangeRateDto
+            {
+                BaseCurrencyCode = "GHS",
+                TargetCurrencyCode = "USD",
+                Rate = 15m,
+                EffectiveDate = new DateTime(2026, 10, 5),
+                RateType = ExchangeRateType.Daily.ToString(),
+                QuoteSide = ExchangeRateQuoteSide.Mid.ToString(),
+                RateSource = "Bank of Ghana"
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not configured*");
+
+        unitOfWork.Verify(item => item.RollbackAsync(CancellationToken.None), Times.Once,
+            "a failed workflow start must roll back the pending submission");
+        transactionActive.Should().BeFalse();
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-ExchangeRates")]
     [Trait("Category", "Workflow")]
     public async Task ExchangeRateSubmissionShouldNotChangeApprovedSchedule()

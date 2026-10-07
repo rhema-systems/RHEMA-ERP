@@ -139,7 +139,18 @@ public sealed class JournalBatchService : IJournalBatchService
     public async Task<JournalBatchDetailDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var batch = await LoadBatchAsync(id, asTracking: false, cancellationToken);
-        return batch == null ? null : MapDetail(batch);
+        if (batch == null)
+            return null;
+
+        var detail = MapDetail(batch);
+        if (detail.CanReview)
+        {
+            var makerBlocked = batch.CreatedById == UserId || batch.SubmittedByUserId == UserId;
+            detail.CanReview = !makerBlocked &&
+                await _workflow.CanUserApproveAsync(WorkflowEntityType, id, UserId);
+        }
+
+        return detail;
     }
 
     public async Task<IReadOnlyList<EligibleJournalBatchBookDto>> GetEligibleBooksAsync(
@@ -263,17 +274,59 @@ public sealed class JournalBatchService : IJournalBatchService
 
         await EnsureEligibleJournalAsync(batch, journal, cancellationToken);
         var nextSequence = await NextSequenceAsync(batch.Id, cancellationToken);
-        var item = new JournalBatchItem
+        var item = await _context.JournalBatchItems
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                candidate => candidate.TenantId == TenantId &&
+                             candidate.JournalEntryId == journal.Id &&
+                             candidate.IsDeleted &&
+                             candidate.PostingClaimRunId == null &&
+                             candidate.PostedInRunId == null &&
+                             candidate.PostedAt == null &&
+                             candidate.ReversalJournalBatchItemId == null &&
+                             !_context.JournalBatchItemReviews
+                                 .IgnoreQueryFilters()
+                                 .Any(review => review.JournalBatchItemId == candidate.Id) &&
+                             !_context.JournalBatchPostingRunItems
+                                 .IgnoreQueryFilters()
+                                 .Any(runItem => runItem.JournalBatchItemId == candidate.Id),
+                cancellationToken);
+        if (item == null)
         {
-            TenantId = TenantId,
-            JournalBatchId = batch.Id,
-            JournalEntryId = journal.Id,
-            SequenceNumber = nextSequence,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = _currentUser.UserName,
-            CreatedById = UserId
-        };
-        _context.JournalBatchItems.Add(item);
+            item = new JournalBatchItem
+            {
+                TenantId = TenantId,
+                JournalBatchId = batch.Id,
+                JournalEntryId = journal.Id,
+                SequenceNumber = nextSequence,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUser.UserName,
+                CreatedById = UserId
+            };
+            _context.JournalBatchItems.Add(item);
+        }
+        else
+        {
+            item.JournalBatchId = batch.Id;
+            item.SequenceNumber = nextSequence;
+            item.ReviewStatus = JournalBatchItemReviewStatus.Pending;
+            item.FinalReviewedByUserId = null;
+            item.FinalReviewedAt = null;
+            item.FinalRejectionReason = null;
+            item.SubmittedContentFingerprint = null;
+            item.PostingStatus = JournalBatchItemPostingStatus.NotEligible;
+            item.PostingClaimRunId = null;
+            item.PostingClaimedAt = null;
+            item.PostedInRunId = null;
+            item.PostedAt = null;
+            item.ReversalJournalBatchItemId = null;
+            item.IsDeleted = false;
+            item.DeletedAt = null;
+            item.DeletedBy = null;
+            item.UpdatedAt = DateTime.UtcNow;
+            item.UpdatedBy = _currentUser.UserName;
+            item.LastModifiedById = UserId;
+        }
         await _context.SaveChangesAsync(cancellationToken);
         await AuditAsync(
             "JournalBatchEntryAdded",
@@ -774,6 +827,9 @@ public sealed class JournalBatchService : IJournalBatchService
             ?? throw new ArgumentException("Journal batch was not found for this tenant.");
         if (batch.ApprovalStatus != JournalBatchApprovalStatus.PendingApproval || !batch.WorkflowInstanceId.HasValue)
             throw new InvalidOperationException("The journal batch is not pending approval.");
+        if (batch.CreatedById == UserId || batch.SubmittedByUserId == UserId)
+            throw new InvalidOperationException(
+                "Maker-checker control requires a different user to review this journal batch.");
         if (!await _workflow.CanUserApproveAsync(WorkflowEntityType, id, UserId))
             throw new UnauthorizedAccessException("This journal batch is assigned to another workflow approver.");
 

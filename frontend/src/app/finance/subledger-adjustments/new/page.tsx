@@ -102,7 +102,7 @@ export default function NewSubledgerAdjustmentPage() {
 
     const { data: customersData, isLoading: customersLoading } = useQuery({
         queryKey: ['subledger-adjustment-customers'],
-        queryFn: () => arService.getCustomers({ pageSize: 200, includeBalances: true, status: 'Active' }),
+        queryFn: () => arService.getCustomers({ pageSize: 200, includeBalances: true, isActive: true }),
         enabled: selectedModule === 'AR',
     });
 

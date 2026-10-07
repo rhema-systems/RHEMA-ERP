@@ -17,6 +17,7 @@ import { FixedAssetCapitalizationApprovalPanel } from '@/components/finance/Fixe
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { AssetLocationCombobox } from '@/components/finance/fixed-assets/AssetLocationCombobox';
 import { DepreciationConventionField } from '@/components/finance/fixed-assets/DepreciationConventionField';
+import { DeleteFixedAssetDraftButton } from '@/components/finance/fixed-assets/DeleteFixedAssetDraftButton';
 import type {
   DepreciationMethod,
   FixedAsset,
@@ -199,10 +200,15 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
             <p className="text-muted-foreground">Update asset details and depreciation settings.</p>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={saving || asset?.status === 'PendingApproval' || (!!asset?.capitalizationApprovalApprovedAt && !asset?.capitalizationApprovalInvalidatedAt)}>
-          <Save className="mr-2 h-4 w-4" />
-          Save Changes
-        </Button>
+        <div className="flex gap-2">
+          {asset && (
+            <DeleteFixedAssetDraftButton asset={asset} onDeleted={() => router.push('/finance/fixed-assets/register')} />
+          )}
+          <Button onClick={handleSave} disabled={saving || asset?.status === 'PendingApproval' || (!!asset?.capitalizationApprovalApprovedAt && !asset?.capitalizationApprovalInvalidatedAt)}>
+            <Save className="mr-2 h-4 w-4" />
+            Save Changes
+          </Button>
+        </div>
       </div>
 
       <Card>

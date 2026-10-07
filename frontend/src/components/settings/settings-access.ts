@@ -31,6 +31,12 @@ const WORKFLOW_ADMINISTRATION_ROLES = [
   ...ADMINISTRATION_ROLES,
   'WorkflowAdmin',
 ];
+const DMS_ADMINISTRATION_ROLES = [
+  ...ADMINISTRATION_ROLES,
+  'Document Control Officer',
+  'Records Officer',
+];
+const LEGAL_ADMINISTRATION_ROLES = [...ADMINISTRATION_ROLES];
 const PROCUREMENT_POLICY_ROLES = ['SuperAdmin', 'TenantAdmin'];
 
 const normalizeHref = (href: string) => href.trim().toLowerCase();
@@ -108,6 +114,15 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
     ['procurement.workflow.configure'],
     WORKFLOW_ADMINISTRATION_ROLES
   ),
+  roleAccess(exactPath('/administration/legal'), LEGAL_ADMINISTRATION_ROLES),
+  roleAccess(
+    exactHref('/administration/document-management/document-templates?q=Legal'),
+    DMS_ADMINISTRATION_ROLES
+  ),
+  roleAccess(
+    exactHref('/administration/document-management/metadata-templates?q=Legal'),
+    DMS_ADMINISTRATION_ROLES
+  ),
 
   // Notifications are an administration function and never appear to ordinary users.
   anyAccess(pathPrefix('/notifications'), ['settings.update']),
@@ -175,9 +190,11 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
     'procurement.inventory.master-data.manage',
   ]),
   anyAccess(pathPrefix('/administration/finance'), ['Finance.Admin']),
-  anyAccess(pathPrefix('/administration/document-management'), [
-    'Finance.Admin',
-  ]),
+  anyAccess(
+    pathPrefix('/administration/document-management'),
+    ['Finance.Admin'],
+    DMS_ADMINISTRATION_ROLES
+  ),
   anyAccess(
     pathPrefix('/administration/project-management/quantity-survey-config'),
     ['quantity-survey.configuration.read']
@@ -207,6 +224,18 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
   roleAccess(pathPrefix('/administration/sales')),
   roleAccess(pathPrefix('/administration/marketing')),
   roleAccess(pathPrefix('/administration/estate')),
+  roleAccess(
+    exactHref('/administration/document-management/document-templates?q=Estate')
+  ),
+  roleAccess(
+    exactHref('/administration/document-management/metadata-templates?q=Estate')
+  ),
+  anyAccess(
+    exactHref('/administration/workflow?q=Estate'),
+    ['procurement.workflow.configure'],
+    WORKFLOW_ADMINISTRATION_ROLES
+  ),
+  roleAccess(exactPath('/estate/gis')),
   roleAccess(pathPrefix('/administration/helpdesk')),
 
   // Shared workflow, identity, tenant, security, audit and communications setup.
@@ -216,6 +245,7 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
     WORKFLOW_ADMINISTRATION_ROLES
   ),
   anyAccess(exactPath('/administration/security/dashboard'), [
+    'audit.read',
     'settings.read',
     'settings.update',
   ]),

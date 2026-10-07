@@ -419,6 +419,15 @@ function Set-TestServerConfiguration {
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
         'CandidatePortal__PortalUrl' = $ExpectedPublicOrigin
         'FrontendUrl' = $ExpectedPublicOrigin
+        # Application__Environment is the authoritative user-facing deployment
+        # stage. ASPNETCORE_ENVIRONMENT remains the framework/runtime profile.
+        'Application__Environment' = 'Test'
+        # Isolation must be confirmed by infrastructure owners. The deployment
+        # stays conservative until that explicit assertion is made.
+        'Application__DataIsolationConfirmed' = 'false'
+        'Application__Version' = $ReleaseId
+        'Application__BuildId' = $ExpectedCommit.Substring(0, 7)
+        'Application__DeployedAtUtc' = [DateTime]::UtcNow.ToString('o')
     }
 }
 

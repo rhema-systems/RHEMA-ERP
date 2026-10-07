@@ -123,6 +123,7 @@ public static class FinanceAuditEvents
 
     public const string BudgetScenarioCreated = "Finance.BudgetScenario.Created";
     public const string BudgetScenarioUpdated = "Finance.BudgetScenario.Updated";
+    public const string BudgetScenarioDeleted = "Finance.BudgetScenario.Deleted";
     public const string BudgetScenarioOpened = "Finance.BudgetScenario.OpenedForCollection";
     public const string BudgetScenarioSubmitted = "Finance.BudgetScenario.SubmittedForApproval";
     public const string BudgetScenarioApproved = "Finance.BudgetScenario.Approved";
@@ -244,6 +245,7 @@ public static class FinanceAuditEvents
     public const string BankReconciliationSubmitted = "Finance.BankReconciliation.Submitted";
     public const string BankReconciliationApproved = "Finance.BankReconciliation.Approved";
     public const string BankReconciliationRejected = "Finance.BankReconciliation.Rejected";
+    public const string BankReconciliationReturnedForCorrection = "Finance.BankReconciliation.ReturnedForCorrection";
     public const string BankReconciliationAdjustmentPosted = "Finance.BankReconciliation.AdjustmentPosted";
     public const string BankReconciliationAdjustmentDuplicatePostingAttempt = "Finance.BankReconciliation.AdjustmentDuplicatePostingAttempt";
     public const string BankReconciliationFinalized = "Finance.BankReconciliation.Finalized";

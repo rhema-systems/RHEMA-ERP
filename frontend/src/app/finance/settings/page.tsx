@@ -146,7 +146,7 @@ export default function FinanceSettingsPage() {
         migrationClearingAccountId: undefined,
         bankDepositPolicy: 'DepositIntact',
         requireBankDepositPrimaryEvidence: true,
-        autoPostBankDepositAfterApproval: true,
+        autoPostBankDepositAfterConfirmation: true,
         bankStatementMatchDateToleranceDays: 3,
         chequeClearingPeriodDays: 3,
         defaultReturnedChequeChargeTreatment: 'CustomerRecoverable',
@@ -223,7 +223,7 @@ export default function FinanceSettingsPage() {
                 migrationClearingAccountId: data.migrationClearingAccountId,
                 bankDepositPolicy: data.bankDepositPolicy ?? 'DepositIntact',
                 requireBankDepositPrimaryEvidence: data.requireBankDepositPrimaryEvidence ?? true,
-                autoPostBankDepositAfterApproval: data.autoPostBankDepositAfterApproval ?? true,
+                autoPostBankDepositAfterConfirmation: data.autoPostBankDepositAfterConfirmation ?? true,
                 maximumDepositDeductionAmount: data.maximumDepositDeductionAmount,
                 maximumDepositDeductionPercentage: data.maximumDepositDeductionPercentage,
                 bankStatementMatchDateToleranceDays: data.bankStatementMatchDateToleranceDays ?? 3,
@@ -852,8 +852,8 @@ export default function FinanceSettingsPage() {
                             <Switch id="bankEvidence" checked={formData.requireBankDepositPrimaryEvidence ?? true} onCheckedChange={checked => setFormData({ ...formData, requireBankDepositPrimaryEvidence: checked })} />
                         </div>
                         <div className="flex items-center justify-between rounded-md border p-3">
-                            <div><Label htmlFor="bankAutoPost">Post after final approval</Label><p className="text-xs text-muted-foreground">Chief Accountant approval creates the bank transaction.</p></div>
-                            <Switch id="bankAutoPost" checked={formData.autoPostBankDepositAfterApproval ?? true} onCheckedChange={checked => setFormData({ ...formData, autoPostBankDepositAfterApproval: checked })} />
+                            <div><Label htmlFor="bankAutoPost">Post after bank acknowledgement</Label><p className="text-xs text-muted-foreground">Independent bank acknowledgement creates the final bank transaction after approval.</p></div>
+                            <Switch id="bankAutoPost" checked={formData.autoPostBankDepositAfterConfirmation ?? true} onCheckedChange={checked => setFormData({ ...formData, autoPostBankDepositAfterConfirmation: checked })} />
                         </div>
                     </div>
                     {formData.bankDepositPolicy === 'ControlledNetBanking' && (

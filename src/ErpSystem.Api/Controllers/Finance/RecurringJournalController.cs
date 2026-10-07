@@ -55,13 +55,13 @@ public sealed class RecurringJournalController : ControllerBase
         Ok(await _service.SubmitAsync(id, request.Comment, cancellationToken));
 
     [HttpPost("{id:guid}/approve")]
-    [Authorize(Policy = FinancePermissions.ApproveJournalEntries)]
+    [Authorize(Policy = FinancePermissions.WorkflowApprove)]
     public async Task<ActionResult<RecurringJournalTemplateDto>> Approve(
         Guid id, [FromBody] RecurringJournalDecisionDto request, CancellationToken cancellationToken) =>
         Ok(await _service.ApproveAsync(id, request.Comment, cancellationToken));
 
     [HttpPost("{id:guid}/reject")]
-    [Authorize(Policy = FinancePermissions.ApproveJournalEntries)]
+    [Authorize(Policy = FinancePermissions.WorkflowReject)]
     public async Task<ActionResult<RecurringJournalTemplateDto>> Reject(
         Guid id, [FromBody] RecurringJournalDecisionDto request, CancellationToken cancellationToken) =>
         Ok(await _service.RejectAsync(id, request.Comment, cancellationToken));
@@ -122,13 +122,13 @@ public sealed class RecurringJournalController : ControllerBase
         Ok(await _service.ProcessDueReversalsAsync(DateOnly.FromDateTime(DateTime.UtcNow), occurrenceId, cancellationToken));
 
     [HttpPost("occurrences/{occurrenceId:guid}/approve")]
-    [Authorize(Policy = FinancePermissions.ApproveJournalEntries)]
+    [Authorize(Policy = FinancePermissions.WorkflowApprove)]
     public async Task<ActionResult<RecurringJournalOccurrenceDto>> ApproveOccurrence(
         Guid occurrenceId, [FromBody] RecurringJournalDecisionDto request, CancellationToken cancellationToken) =>
         Ok(await _service.ApproveOccurrenceAsync(occurrenceId, request.Comment, cancellationToken));
 
     [HttpPost("occurrences/{occurrenceId:guid}/reject")]
-    [Authorize(Policy = FinancePermissions.ApproveJournalEntries)]
+    [Authorize(Policy = FinancePermissions.WorkflowReject)]
     public async Task<ActionResult<RecurringJournalOccurrenceDto>> RejectOccurrence(
         Guid occurrenceId, [FromBody] RecurringJournalDecisionDto request, CancellationToken cancellationToken) =>
         Ok(await _service.RejectOccurrenceAsync(occurrenceId, request.Comment, cancellationToken));

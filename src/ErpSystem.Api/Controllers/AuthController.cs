@@ -34,6 +34,7 @@ namespace ErpSystem.Api.Controllers
         private readonly IRefreshTokenService _refreshTokenService;
         private readonly IJwtBlacklistService _jwtBlacklistService;
         private readonly ISettingsService _settingsService;
+        private readonly IFileStorageService _fileStorageService;
         private readonly IUserSessionService _userSessionService;
         private readonly ITwoFactorAuthService _twoFactorService;
         private readonly IPasswordResetService _passwordResetService;
@@ -62,6 +63,7 @@ namespace ErpSystem.Api.Controllers
             IRefreshTokenService refreshTokenService,
             IJwtBlacklistService jwtBlacklistService,
             ISettingsService settingsService,
+            IFileStorageService fileStorageService,
             IUserSessionService userSessionService,
             ITwoFactorAuthService twoFactorService,
             IPasswordResetService passwordResetService,
@@ -91,6 +93,7 @@ namespace ErpSystem.Api.Controllers
             _refreshTokenService = refreshTokenService;
             _jwtBlacklistService = jwtBlacklistService;
             _settingsService = settingsService;
+            _fileStorageService = fileStorageService;
             _userSessionService = userSessionService;
             _twoFactorService = twoFactorService;
             _passwordResetService = passwordResetService;
@@ -877,7 +880,10 @@ namespace ErpSystem.Api.Controllers
                     // Validate the provided 2FA code format first
                     if (request.TwoFactorCode.Length != 6 || !request.TwoFactorCode.All(char.IsDigit))
                     {
-                        _logger.LogWarning("Invalid 2FA code format for user {Username}: length={Length}, code='{Code}'", request.Username, request.TwoFactorCode.Length, request.TwoFactorCode);
+                        _logger.LogWarning(
+                            "Invalid 2FA code format for user {Username}: length={Length}",
+                            request.Username,
+                            request.TwoFactorCode.Length);
                         return BadRequest(new { message = "Two-factor authentication code must be exactly 6 digits" });
                     }
 
@@ -2533,7 +2539,9 @@ namespace ErpSystem.Api.Controllers
                 var (settings, _) = await ResolvePublicSecuritySettingsAsync();
                 return Ok(new LoginAppearanceSettingsDto
                 {
-                    LoginPageStyle = settings.LoginPageStyle.ToString()
+                    LoginPageStyle = settings.LoginPageStyle.ToString(),
+                    LightBackgroundUrl = BuildPublicLoginBackgroundUrl(settings.LightLoginBackgroundFileUploadRecordId),
+                    DarkBackgroundUrl = BuildPublicLoginBackgroundUrl(settings.DarkLoginBackgroundFileUploadRecordId)
                 });
             }
             catch (Exception ex)
@@ -2545,6 +2553,61 @@ namespace ErpSystem.Api.Controllers
                 });
             }
         }
+
+        [HttpGet("/api/public/config/login/background/{fileUploadRecordId:guid}")]
+        [AllowAnonymous]
+        [EnableRateLimiting("PublicPortalPolicy")]
+        [ResponseCache(Duration = 31536000, Location = ResponseCacheLocation.Any)]
+        public async Task<IActionResult> GetPublicLoginBackground(
+            Guid fileUploadRecordId,
+            CancellationToken cancellationToken)
+        {
+            var isActiveLoginBackground = await _context.Securities
+                .AsNoTracking()
+                .AnyAsync(
+                    settings =>
+                        settings.LightLoginBackgroundFileUploadRecordId == fileUploadRecordId ||
+                        settings.DarkLoginBackgroundFileUploadRecordId == fileUploadRecordId,
+                    cancellationToken);
+
+            if (!isActiveLoginBackground)
+            {
+                return NotFound();
+            }
+
+            var record = await _context.FileUploadRecords
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    candidate =>
+                        candidate.Id == fileUploadRecordId &&
+                        candidate.Category == ControlledFileUploadCategories.LoginAppearanceAssets &&
+                        !candidate.IsDeleted,
+                    cancellationToken);
+
+            if (record == null)
+            {
+                return NotFound();
+            }
+
+            try
+            {
+                var content = await _fileStorageService.DownloadFileAsync(record.FilePath, record.Id);
+                Response.Headers["Cache-Control"] = "public,max-age=31536000,immutable";
+                return File(
+                    content,
+                    string.IsNullOrWhiteSpace(record.ContentType) ? "application/octet-stream" : record.ContentType,
+                    enableRangeProcessing: true);
+            }
+            catch (FileNotFoundException)
+            {
+                return NotFound();
+            }
+        }
+
+        private string? BuildPublicLoginBackgroundUrl(Guid? fileUploadRecordId) =>
+            fileUploadRecordId.HasValue
+                ? $"{Request.Scheme}://{Request.Host}/api/public/config/login/background/{fileUploadRecordId.Value:D}"
+                : null;
 
         [HttpGet("security-settings")]
         [AllowAnonymous]
