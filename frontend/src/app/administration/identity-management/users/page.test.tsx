@@ -166,7 +166,26 @@ describe('Security user role editing', () => {
     })));
   });
 
-  it('preserves every existing role when another role is added', async () => {
+  it('filters roles by name or description in the create dialog and provides a clear no-results state', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+
+    const search = screen.getByRole('searchbox', { name: 'Search roles' });
+    expect(search).toHaveAttribute('placeholder', 'Search roles by name or description...');
+
+    fireEvent.change(search, { target: { value: 'APPROVER DESCRIPTION' } });
+    expect(screen.getByRole('checkbox', { name: 'Assign Approver' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Assign Procurement User' })).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: 'missing role' } });
+    expect(screen.getByText('No roles match “missing role”.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear role search' }));
+    expect(screen.getByRole('checkbox', { name: 'Assign Procurement User' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Assign Approver' })).toBeInTheDocument();
+  });
+
+  it('preserves roles hidden by the edit-dialog search when another role is added', async () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit rolekeeper' }));
@@ -175,8 +194,19 @@ describe('Security user role editing', () => {
     expect(screen.getByRole('checkbox', { name: 'Assign TDC_HEAD_OF_PROCUREMENT' })).toBeChecked();
     expect(screen.getByText('2 selected')).toBeInTheDocument();
 
+    const search = screen.getByRole('searchbox', { name: 'Search roles' });
+    fireEvent.change(search, { target: { value: 'approver' } });
+    expect(screen.queryByRole('checkbox', { name: 'Assign Procurement User' })).not.toBeInTheDocument();
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('checkbox', { name: 'Assign Approver' }));
     expect(screen.getByText('3 selected')).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: '' } });
+    expect(screen.getByRole('checkbox', { name: 'Assign Procurement User' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Assign TDC_HEAD_OF_PROCUREMENT' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Assign Approver' })).toBeChecked();
+
     fireEvent.click(screen.getByRole('button', { name: 'Update User' }));
 
     await waitFor(() => expect(mocks.updateUser).toHaveBeenCalledWith(

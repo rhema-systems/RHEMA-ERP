@@ -373,9 +373,13 @@ public class Activity : BusinessEntity
     [StringLength(200)]
     public string? Location { get; set; }
 
-    // Meeting attendees (JSON array)
+    // External meeting attendees, stored as normalized comma-separated free text.
     [StringLength(1000)]
     public string? Attendees { get; set; }
+
+    // Stable employee IDs for internal attendees. Names remain sourced from the employee register.
+    [StringLength(2000)]
+    public string? InternalAttendeeEmployeeIdsJson { get; set; }
 
     // Outcome
     [StringLength(50)]

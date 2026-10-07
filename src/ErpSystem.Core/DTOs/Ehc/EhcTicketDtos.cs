@@ -62,6 +62,7 @@ public sealed class EhcTicketListItemDto
     public string? AssignedToName { get; set; }
     public string? RequesterName { get; set; }
     public string? RequesterAuthenticationProvider { get; set; }
+    public bool IsPublicSiteSubmission { get; set; }
 }
 
 public sealed class EhcTicketDetailDto

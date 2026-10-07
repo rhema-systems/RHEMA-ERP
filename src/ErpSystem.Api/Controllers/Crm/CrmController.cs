@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Crm;
 using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -456,13 +457,13 @@ public class CrmController : ControllerBase
     }
 
     [HttpGet("opportunity-stages")]
-    [Authorize(Policy = "Sales")]
+    [Authorize(Policy = CrmPermissions.Read)]
     public async Task<ActionResult<IReadOnlyList<CrmOpportunityStageDefinitionDto>>> GetOpportunityStages(
         [FromQuery] bool includeInactive = false)
         => Ok(await _crmService.GetOpportunityStagesAsync(includeInactive));
 
     [HttpPut("opportunity-stages")]
-    [Authorize(Policy = "Sales")]
+    [Authorize(Policy = CrmPermissions.Manage)]
     public async Task<ActionResult<IReadOnlyList<CrmOpportunityStageDefinitionDto>>> UpdateOpportunityStages(
         [FromBody] UpdateCrmOpportunityStagesDto dto)
     {

@@ -1725,6 +1725,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
 
+            foreach (var permission in CrmPermissions.All)
+            {
+                authorizationBuilder.AddPolicy(permission.Name, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Name)));
+            }
+
             // HR leave policies. The organisation-wide surface — every request,
             // everyone's balances, the adjustment ledger, the type catalogue's writes and the
             // year-end jobs — authorizes on these. Employee self-service (file, amend, cancel,

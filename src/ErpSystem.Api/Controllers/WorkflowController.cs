@@ -764,8 +764,8 @@ public class WorkflowController : ControllerBase
                 });
             }
 
-            var approvalRequired = await _workflowService.HasActiveApprovalWorkflowAsync(
-                entityTypeRecord.Code ?? entityTypeRecord.Name ?? entityType);
+            var canonicalEntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? entityType;
+            var approvalRequired = await _workflowService.HasActiveApprovalWorkflowAsync(canonicalEntityType);
 
             var instances = (await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, entityId.ToString()))
                 .Where(instance => instance.TenantId == tenantId && !instance.IsDeleted).ToList();
@@ -796,7 +796,11 @@ public class WorkflowController : ControllerBase
             }
 
             var status = await _workflowEngine.GetWorkflowStatusAsync(activeInstance.Id);
-            var stepInfo = await _workflowService.GetCurrentWorkflowStepAsync(entityType, entityId);
+            // Use the configured canonical type for every workflow-service lookup. Tenant
+            // catalogues can expose a friendly name that matches the requested alias while
+            // their runtime definition is keyed by Code; mixing the alias and code causes
+            // summary retrieval to fail only after an active instance exists.
+            var stepInfo = await _workflowService.GetCurrentWorkflowStepAsync(canonicalEntityType, entityId);
 
             var currentStepName = stepInfo?.StepName;
             var currentStepInstanceId = stepInfo?.Id;
@@ -830,7 +834,7 @@ public class WorkflowController : ControllerBase
                 })
                 .ToList();
 
-            var canApprove = await _workflowService.CanUserApproveAsync(entityType, entityId, currentUserId.Value);
+            var canApprove = await _workflowService.CanUserApproveAsync(canonicalEntityType, entityId, currentUserId.Value);
             var currentUserApprovalId = await ResolveCurrentUserApprovalIdAsync(currentStepInstanceId, currentUserId.Value);
             var currentUserCorrection = await ResolveCurrentUserCorrectionAsync(status.WorkflowInstanceId, currentUserId.Value);
             var currentStepChecklist = await GetStepChecklistAsync(currentStepInstanceId, HttpContext.RequestAborted);

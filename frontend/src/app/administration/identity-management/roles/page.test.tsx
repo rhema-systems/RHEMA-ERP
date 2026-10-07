@@ -79,6 +79,15 @@ describe('role permission search', () => {
       },
       {
         id: 'permission-2',
+        name: 'procurement.contracts.approve',
+        displayName: 'Approve Procurement Contracts',
+        description: 'Approve procurement contracts',
+        category: 'Procurement',
+        isSystemPermission: true,
+        createdAt: new Date('2026-08-01T00:00:00Z'),
+      },
+      {
+        id: 'permission-3',
         name: 'users.read',
         displayName: 'View Users',
         description: 'View user accounts and details',
@@ -108,7 +117,7 @@ describe('role permission search', () => {
 
     expect(screen.getByText('Manage Procurement Sourcing')).toBeInTheDocument();
     expect(screen.queryByText('View Users')).not.toBeInTheDocument();
-    expect(screen.getByText('Showing 1 of 2 permissions')).toBeInTheDocument();
+    expect(screen.getByText('Showing 1 of 3 permissions')).toBeInTheDocument();
 
     fireEvent.change(
       screen.getByRole('textbox', { name: 'Search permissions' }),
@@ -118,5 +127,33 @@ describe('role permission search', () => {
     );
 
     expect(screen.getByText(/No permissions match/)).toBeInTheDocument();
+  });
+
+  it('selects a whole module and lets the module group collapse', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByTitle('Edit role permissions'));
+
+    const moduleTrigger = await screen.findByRole('button', {
+      name: /Procurement 1 of 2 selected/,
+    });
+    expect(moduleTrigger).toHaveAttribute('aria-expanded', 'true');
+
+    const selectAll = screen.getByRole('checkbox', {
+      name: 'Select all Procurement permissions',
+    });
+    expect(selectAll).toBePartiallyChecked();
+
+    fireEvent.click(selectAll);
+
+    expect(screen.getByRole('checkbox', { name: 'Manage Procurement Sourcing' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Approve Procurement Contracts' })).toBeChecked();
+    expect(selectAll).toBeChecked();
+
+    fireEvent.click(moduleTrigger);
+    expect(moduleTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(moduleTrigger);
+    expect(moduleTrigger).toHaveAttribute('aria-expanded', 'true');
   });
 });

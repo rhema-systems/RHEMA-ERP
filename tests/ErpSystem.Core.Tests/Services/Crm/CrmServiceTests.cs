@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using ErpSystem.Core.DTOs.Crm;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
@@ -1918,7 +1919,29 @@ public class CrmServiceTests
         var partnerId = Guid.NewGuid();
         var leadId = Guid.NewGuid();
         var opportunityId = Guid.NewGuid();
+        var firstAttendeeId = Guid.NewGuid();
+        var secondAttendeeId = Guid.NewGuid();
         var fixture = new CrmServiceFixture(tenantId, userId);
+
+        fixture.Employees.AddRange(new[]
+        {
+            new Employee
+            {
+                Id = firstAttendeeId,
+                TenantId = tenantId,
+                EmployeeNumber = "EMP-100",
+                FirstName = "Ama",
+                LastName = "Mensah"
+            },
+            new Employee
+            {
+                Id = secondAttendeeId,
+                TenantId = tenantId,
+                EmployeeNumber = "EMP-101",
+                FirstName = "Kojo",
+                LastName = "Asare"
+            }
+        });
 
         fixture.BusinessPartners.Add(new BusinessPartner
         {
@@ -1968,6 +1991,8 @@ public class CrmServiceTests
             Priority = 1,
             RequiresFollowUp = true,
             NextFollowUpDate = DateTime.UtcNow.Date.AddDays(5),
+            InternalAttendeeEmployeeIds = [firstAttendeeId, secondAttendeeId, firstAttendeeId],
+            ExternalAttendees = "  Efua Owusu, client@example.com, Efua Owusu  ",
             Notes = "Confirm commercial approvals"
         });
 
@@ -1981,6 +2006,8 @@ public class CrmServiceTests
             DueDate = created.DueDate,
             Priority = 2,
             RequiresFollowUp = false,
+            InternalAttendeeEmployeeIds = [secondAttendeeId],
+            ExternalAttendees = "client@example.com",
             Outcome = "Successful",
             Notes = "Approvals confirmed"
         });
@@ -1992,10 +2019,56 @@ public class CrmServiceTests
         created.BusinessPartnerName.Should().Be("Summit Terminals");
         created.LeadId.Should().Be(leadId);
         created.OpportunityId.Should().Be(opportunityId);
+        created.InternalAttendees.Select(x => x.EmployeeId).Should().Equal(firstAttendeeId, secondAttendeeId);
+        created.InternalAttendees.Select(x => x.DisplayName).Should().Equal("Ama Mensah", "Kojo Asare");
+        created.ExternalAttendees.Should().Be("Efua Owusu, client@example.com");
         updated.ActivityStatus.Should().Be("Completed");
+        updated.InternalAttendees.Should().ContainSingle(x => x.EmployeeId == secondAttendeeId);
+        updated.ExternalAttendees.Should().Be("client@example.com");
         updated.Outcome.Should().Be("Successful");
         updated.RequiresFollowUp.Should().BeFalse();
         deleted.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateActivityAsync_ShouldRejectInternalAttendeeFromAnotherTenant()
+    {
+        var tenantId = Guid.NewGuid();
+        var fixture = new CrmServiceFixture(tenantId, Guid.NewGuid());
+        var partnerId = Guid.NewGuid();
+        var otherTenantEmployeeId = Guid.NewGuid();
+        fixture.BusinessPartners.Add(new BusinessPartner
+        {
+            Id = partnerId,
+            TenantId = tenantId,
+            PartnerCode = "CUST-OUTSIDE-TEST",
+            PartnerName = "Tenant Customer",
+            PartnerType = "Customer",
+            RegistrationStatus = "Approved"
+        });
+        fixture.Employees.Add(new Employee
+        {
+            Id = otherTenantEmployeeId,
+            TenantId = Guid.NewGuid(),
+            EmployeeNumber = "EMP-OUTSIDE",
+            FirstName = "Outside",
+            LastName = "Employee"
+        });
+
+        var action = () => fixture.CreateService().CreateActivityAsync(new CreateCrmActivityDto
+        {
+            Subject = "Tenant-scoped meeting",
+            ActivityType = "Meeting",
+            ActivityStatus = "Planned",
+            ActivityDate = DateTime.UtcNow,
+            Priority = 2,
+            BusinessPartnerId = partnerId,
+            InternalAttendeeEmployeeIds = [otherTenantEmployeeId]
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not employees in this tenant*");
+        fixture.Activities.Should().BeEmpty();
     }
 
     [Fact]
@@ -3059,6 +3132,7 @@ public class CrmServiceTests
         public List<CreditNote> CreditNotes { get; } = new();
         public List<Refund> Refunds { get; } = new();
         public List<Activity> Activities { get; } = new();
+        public List<Employee> Employees { get; } = new();
         public List<BusinessPartner> BusinessPartners { get; } = new();
         public List<Project> Projects { get; } = new();
         public List<Contract> Contracts { get; } = new();
@@ -3097,6 +3171,7 @@ public class CrmServiceTests
             _unitOfWork.Setup(x => x.Repository<CreditNote>()).Returns(CreateRepository(CreditNotes).Object);
             _unitOfWork.Setup(x => x.Repository<Refund>()).Returns(CreateRepository(Refunds).Object);
             _unitOfWork.Setup(x => x.Repository<Activity>()).Returns(CreateRepository(Activities).Object);
+            _unitOfWork.Setup(x => x.Repository<Employee>()).Returns(CreateRepository(Employees).Object);
             _unitOfWork.Setup(x => x.Repository<BusinessPartner>()).Returns(CreateRepository(BusinessPartners).Object);
             _unitOfWork.Setup(x => x.Repository<Project>()).Returns(CreateRepository(Projects).Object);
             _unitOfWork.Setup(x => x.Repository<Contract>()).Returns(CreateRepository(Contracts).Object);

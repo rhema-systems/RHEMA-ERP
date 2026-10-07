@@ -54,7 +54,7 @@ function PageContent() {
 describe('Dashboard account panel integration', () => {
   it('docks the panel beside a shrinkable main region and keeps page content interactive and mounted', () => {
     render(<DashboardLayout><PageContent /></DashboardLayout>);
-    expect(screen.getByTestId('environment-banner')).toHaveTextContent('Unknown Environment');
+    expect(screen.queryByTestId('environment-banner')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Page action 0' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open account sidebar' }));
 

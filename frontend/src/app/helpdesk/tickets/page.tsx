@@ -19,6 +19,7 @@ import {
   isExternalTicketSource,
   isTicketInHelpdeskScope,
 } from '@/lib/helpdesk-scope';
+import { getTicketSubmissionLabel } from '@/lib/helpdesk-ticket-submission';
 import { ehcInternalTicketService } from '@/services/ehcInternalTicketService';
 import type { EhcTicketListItem, EhcTicketPriority, EhcTicketSource, EhcTicketStatus, EhcTicketType } from '@/services/ehcTicketService';
 
@@ -269,8 +270,7 @@ export default function HelpdeskTicketsPage() {
         accessorFn: (r: EhcTicketListItem) => r.requesterName || '—',
         cell: ({ row }: TableCellProps<EhcTicketListItem>) => {
           const name = row.original.requesterName || '—';
-          const provider = row.original.requesterAuthenticationProvider || null;
-          const submittedVia = provider === 'Local' ? 'External Portal' : provider ? 'Internal ERP' : null;
+          const submittedVia = getTicketSubmissionLabel(row.original);
           return (
             <div className="min-w-[160px]">
               <div className="font-medium text-slate-900">{name}</div>

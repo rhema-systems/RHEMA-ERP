@@ -10699,6 +10699,13 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
+            .Concat(CrmPermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
             .Concat(HrPermissions.All.Select(permission => new
             {
                 permission.Name,
@@ -10817,6 +10824,7 @@ namespace ErpSystem.Web.Services
                 // two must not drift.
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
+                    .Concat(CrmPermissions.AllNames)
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.SuperAdmin))
                     .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.SuperAdmin))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
@@ -10838,6 +10846,7 @@ namespace ErpSystem.Web.Services
                     .ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
+                    .Concat(CrmPermissions.AllNames)
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.TenantAdmin))
                     .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.TenantAdmin))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)

@@ -774,11 +774,19 @@ export interface CrmActivityDetailDto extends CrmActivityListItemDto {
   duration?: number;
   location?: string;
   attendees?: string;
+  externalAttendees?: string;
+  internalAttendees?: CrmActivityEmployeeAttendeeDto[];
   outcome?: string;
   notes?: string;
   propertyEnquiryTicketId?: string;
   propertyEnquiryTicketNumber?: string;
   propertyEnquirySubject?: string;
+}
+
+export interface CrmActivityEmployeeAttendeeDto {
+  employeeId: string;
+  employeeNumber: string;
+  displayName: string;
 }
 
 export interface CrmProjectSummaryDto {
@@ -1268,6 +1276,8 @@ export interface CreateCrmActivityDto {
   propertyEnquiryTicketId?: string;
   location?: string;
   attendees?: string;
+  externalAttendees?: string;
+  internalAttendeeEmployeeIds?: string[];
   outcome?: string;
   notes?: string;
   requiresFollowUp: boolean;

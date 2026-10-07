@@ -40,6 +40,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import {
   businessPartnerService,
   type BusinessPartnerDto,
@@ -48,6 +49,7 @@ import {
   crmService,
   type CreateCrmActivityDto,
   type CrmActivityDetailDto,
+  type CrmActivityEmployeeAttendeeDto,
   type CrmActivityListItemDto,
   type CrmLeadListItemDto,
   type CrmOpportunityListItemDto,
@@ -69,6 +71,7 @@ import {
   Search,
   Target,
   Trash2,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { resolveActivityPropertyEnquiryContext } from '@/lib/crm-activity-property-enquiry';
@@ -106,7 +109,8 @@ const createEmptyActivityForm = (
   opportunityId: opportunityId || '',
   propertyEnquiryTicketId: '',
   location: '',
-  attendees: '',
+  externalAttendees: '',
+  internalAttendeeEmployeeIds: [],
   outcome: '',
   notes: '',
   requiresFollowUp: false,
@@ -158,7 +162,8 @@ const buildActivityPayload = (
   opportunityId: form.opportunityId || undefined,
   propertyEnquiryTicketId: form.propertyEnquiryTicketId || undefined,
   location: toOptionalString(form.location),
-  attendees: toOptionalString(form.attendees),
+  externalAttendees: toOptionalString(form.externalAttendees),
+  internalAttendeeEmployeeIds: form.internalAttendeeEmployeeIds || [],
   outcome: toOptionalString(form.outcome),
   notes: toOptionalString(form.notes),
   requiresFollowUp: form.requiresFollowUp,
@@ -185,7 +190,10 @@ const mapActivityToForm = (
   opportunityId: activity.opportunityId || '',
   propertyEnquiryTicketId: activity.propertyEnquiryTicketId || '',
   location: activity.location || '',
-  attendees: activity.attendees || '',
+  externalAttendees: activity.externalAttendees || activity.attendees || '',
+  internalAttendeeEmployeeIds: (activity.internalAttendees ?? []).map(
+    (attendee) => attendee.employeeId
+  ),
   outcome: activity.outcome || '',
   notes: activity.notes || '',
   requiresFollowUp: activity.requiresFollowUp,
@@ -211,6 +219,7 @@ function ActivityDialog({
   accounts,
   leads,
   opportunities,
+  internalAttendees,
   propertyEnquiries,
   propertyEnquiryReadOnly,
   leadReadOnly,
@@ -218,6 +227,7 @@ function ActivityDialog({
   onOpenChange,
   onSubmit,
   onChange,
+  onInternalAttendeesChange,
 }: {
   open: boolean;
   title: string;
@@ -227,6 +237,7 @@ function ActivityDialog({
   accounts: BusinessPartnerDto[];
   leads: CrmLeadListItemDto[];
   opportunities: CrmOpportunityListItemDto[];
+  internalAttendees: CrmActivityEmployeeAttendeeDto[];
   propertyEnquiries: PropertyEnquiryQueueItem[];
   propertyEnquiryReadOnly: boolean;
   leadReadOnly: boolean;
@@ -236,6 +247,9 @@ function ActivityDialog({
   onChange: <K extends keyof CreateCrmActivityDto>(
     field: K,
     value: CreateCrmActivityDto[K]
+  ) => void;
+  onInternalAttendeesChange: (
+    attendees: CrmActivityEmployeeAttendeeDto[]
   ) => void;
 }) {
   const {
@@ -527,14 +541,81 @@ function ActivityDialog({
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="activity-attendees">Attendees</Label>
-              <Input
-                id="activity-attendees"
-                value={form.attendees || ''}
-                onChange={(event) => onChange('attendees', event.target.value)}
-                placeholder="Irene Mensah, Kojo Asare"
+            <div className="space-y-2 md:col-span-2">
+              <Label>Internal attendees</Label>
+              <EmployeePicker
+                value={null}
+                placeholder="Search employees to add..."
+                onChange={(employeeId, displayName) => {
+                  if (
+                    !employeeId ||
+                    !displayName ||
+                    internalAttendees.some(
+                      (attendee) => attendee.employeeId === employeeId
+                    )
+                  ) {
+                    return;
+                  }
+
+                  onInternalAttendeesChange([
+                    ...internalAttendees,
+                    {
+                      employeeId,
+                      employeeNumber: '',
+                      displayName,
+                    },
+                  ]);
+                }}
               />
+              {internalAttendees.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {internalAttendees.map((attendee) => (
+                    <Badge
+                      key={attendee.employeeId}
+                      variant="secondary"
+                      className="gap-1 py-1 pl-2 pr-1"
+                    >
+                      {attendee.displayName}
+                      <button
+                        type="button"
+                        className="rounded-sm p-0.5 hover:bg-muted"
+                        aria-label={`Remove ${attendee.displayName}`}
+                        onClick={() =>
+                          onInternalAttendeesChange(
+                            internalAttendees.filter(
+                              (item) => item.employeeId !== attendee.employeeId
+                            )
+                          )
+                        }
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Search by employee name or number and select each attendee.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="activity-external-attendees">
+                External attendees
+              </Label>
+              <Input
+                id="activity-external-attendees"
+                value={form.externalAttendees || ''}
+                onChange={(event) =>
+                  onChange('externalAttendees', event.target.value)
+                }
+                maxLength={1000}
+                placeholder="Ama Boateng, client@example.com"
+              />
+              <p className="text-xs text-muted-foreground">
+                Enter external names or email addresses separated by commas.
+              </p>
             </div>
 
             <div className="space-y-3 rounded-lg border p-3 md:col-span-2">
@@ -659,6 +740,9 @@ export default function CrmActivitiesPage() {
       scopedOpportunityId
     )
   );
+  const [internalAttendees, setInternalAttendees] = useState<
+    CrmActivityEmployeeAttendeeDto[]
+  >([]);
   const [saving, setSaving] = useState(false);
   const [newRequestHandled, setNewRequestHandled] = useState(false);
 
@@ -792,6 +876,7 @@ export default function CrmActivitiesPage() {
         scopedOpportunityId
       )
     );
+    setInternalAttendees([]);
     setFormOpen(true);
     setNewRequestHandled(true);
   }, [
@@ -856,6 +941,7 @@ export default function CrmActivitiesPage() {
         scopedOpportunityId
       )
     );
+    setInternalAttendees([]);
     setFormOpen(true);
   };
 
@@ -875,6 +961,7 @@ export default function CrmActivitiesPage() {
       setSelectedActivityId(detail.activityId);
       setFormMode('edit');
       setForm(mapActivityToForm(detail));
+      setInternalAttendees(detail.internalAttendees || []);
       setFormOpen(true);
     } catch (error: unknown) {
       toast.error(getMessage(error, 'Failed to load CRM activity for editing'));
@@ -1414,14 +1501,35 @@ export default function CrmActivitiesPage() {
                   </div>
                 </div>
 
-                {selectedActivity.attendees ? (
+                {(selectedActivity.internalAttendees?.length ?? 0) ||
+                selectedActivity.externalAttendees ||
+                selectedActivity.attendees ? (
                   <div className="rounded-lg border p-4 text-sm">
                     <div className="mb-2 flex items-center gap-2 font-medium">
                       <Target className="h-4 w-4" />
                       Attendees
                     </div>
-                    <div className="text-muted-foreground">
-                      {selectedActivity.attendees}
+                    <div className="space-y-2 text-muted-foreground">
+                      {selectedActivity.internalAttendees?.length ? (
+                        <div>
+                          <span className="font-medium text-foreground">
+                            Employees:{' '}
+                          </span>
+                          {selectedActivity.internalAttendees
+                            .map((attendee) => attendee.displayName)
+                            .join(', ')}
+                        </div>
+                      ) : null}
+                      {selectedActivity.externalAttendees ||
+                      selectedActivity.attendees ? (
+                        <div>
+                          <span className="font-medium text-foreground">
+                            External:{' '}
+                          </span>
+                          {selectedActivity.externalAttendees ||
+                            selectedActivity.attendees}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}
@@ -1442,6 +1550,7 @@ export default function CrmActivitiesPage() {
         accounts={accounts}
         leads={leads}
         opportunities={opportunities}
+        internalAttendees={internalAttendees}
         propertyEnquiries={propertyEnquiries}
         propertyEnquiryReadOnly={formMode === 'edit'}
         leadReadOnly={Boolean(scopedLeadId)}
@@ -1451,6 +1560,15 @@ export default function CrmActivitiesPage() {
         onChange={(field, value) =>
           setForm((current) => ({ ...current, [field]: value }))
         }
+        onInternalAttendeesChange={(attendees) => {
+          setInternalAttendees(attendees);
+          setForm((current) => ({
+            ...current,
+            internalAttendeeEmployeeIds: attendees.map(
+              (attendee) => attendee.employeeId
+            ),
+          }));
+        }}
       />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>

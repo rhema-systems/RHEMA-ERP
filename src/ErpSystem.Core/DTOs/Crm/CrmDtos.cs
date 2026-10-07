@@ -801,11 +801,20 @@ public class CrmActivityDetailDto : CrmActivityListItemDto
     public int? Duration { get; set; }
     public string? Location { get; set; }
     public string? Attendees { get; set; }
+    public string? ExternalAttendees { get; set; }
+    public IReadOnlyList<CrmActivityEmployeeAttendeeDto> InternalAttendees { get; set; } = [];
     public string? Outcome { get; set; }
     public string? Notes { get; set; }
     public Guid? PropertyEnquiryTicketId { get; set; }
     public string? PropertyEnquiryTicketNumber { get; set; }
     public string? PropertyEnquirySubject { get; set; }
+}
+
+public class CrmActivityEmployeeAttendeeDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
 }
 
 public class CrmProjectSummaryDto
@@ -1384,6 +1393,12 @@ public abstract class CrmActivityUpsertDto
 
     [MaxLength(1000)]
     public string? Attendees { get; set; }
+
+    [MaxLength(1000)]
+    public string? ExternalAttendees { get; set; }
+
+    [MaxLength(25)]
+    public IReadOnlyList<Guid>? InternalAttendeeEmployeeIds { get; set; }
 
     [MaxLength(50)]
     public string? Outcome { get; set; }

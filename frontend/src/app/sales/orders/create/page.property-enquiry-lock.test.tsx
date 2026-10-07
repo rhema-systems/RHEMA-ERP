@@ -79,6 +79,7 @@ describe('Sales Order property enquiry source lock', () => {
       itemCode: 'PROP-001',
       itemName: 'Published Property',
       itemType: 'Property',
+      unitOfMeasure: 'Plot',
       propertyReference: 'PROP-001',
       estimatedValue: '250000',
       currency: 'GHS',
@@ -99,8 +100,11 @@ describe('Sales Order property enquiry source lock', () => {
 
     const itemName = await screen.findByDisplayValue('Published Property');
     const itemCode = screen.getByDisplayValue('PROP-001');
+    const unitOfMeasure = screen.getByDisplayValue('Each');
     expect(itemName).toBeDisabled();
     expect(itemCode).toBeDisabled();
+    expect(unitOfMeasure).toBeDisabled();
+    expect(screen.queryByDisplayValue('Plot')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add Line' })).not.toBeInTheDocument();
     expect(services.searchSaleableItems).not.toHaveBeenCalled();
   });

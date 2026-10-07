@@ -50,6 +50,7 @@ export interface EhcTicketListItem {
   assignedToName?: string | null;
   requesterName?: string | null;
   requesterAuthenticationProvider?: string | null;
+  isPublicSiteSubmission: boolean;
 }
 
 export interface CreateEhcTicketRequest {

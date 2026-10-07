@@ -41,7 +41,7 @@ export function ExternalNavbar() {
   };
 
   const handleLogout = () => {
-    logout();
+    logout('logout');
   };
 
   return (
