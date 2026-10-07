@@ -63,6 +63,8 @@ public class EstateManagedAssetDto
     public string? LesseeAddress { get; set; }
     public string? PropertyFileReference { get; set; }
     public decimal? AreaSquareMeters { get; set; }
+    public decimal? SquareMetersPerPlot { get; set; }
+    public decimal? PlotEquivalentCount { get; set; }
     public decimal? ValuationAmount { get; set; }
     public decimal? OwnerConsiderationCost { get; set; }
     public decimal? ExternalSurveyorCost { get; set; }
@@ -393,4 +395,14 @@ public class LandAcquisitionEstateHandoffDto
     public bool BoundaryVerified { get; set; }
     public bool IsReadyForProjectManagement { get; set; }
     public string? Notes { get; set; }
+}
+
+public sealed class EstatePlotSettingsDto
+{
+    public decimal? SquareMetersPerPlot { get; set; }
+}
+
+public sealed class UpdateEstatePlotSettingsDto
+{
+    public decimal? SquareMetersPerPlot { get; set; }
 }

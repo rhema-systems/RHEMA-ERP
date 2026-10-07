@@ -18,6 +18,8 @@ export interface ExternalEstateListing {
   areaSquareMeters?: number | null;
   areaValue?: number | null;
   areaUnit?: string | null;
+  squareMetersPerPlot?: number | null;
+  plotEquivalentCount?: number | null;
   externalListingType: string;
   externalListingPrice?: number | null;
   externalSalePrice?: number | null;

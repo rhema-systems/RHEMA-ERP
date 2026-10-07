@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-07-A
-integration_status: merged_hotfix_in_progress
+integration_status: merged_deployment_triggered
 integration_decision: include
 candidate_branch: codex/fix-external-logout-finance-build
 candidate_head: 0472d49c925
@@ -12,6 +12,8 @@ verification_status: hotfix_frontend_build_and_focused_tests_passed
 integration_commit: 0875a5a3e30
 pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/364
 hotfix_pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/368
+hotfix_merge_commit: 2da59240dfe
+deployment_workflow_run: https://github.com/rhema-systems/RHEMA-ERP/actions/runs/37620014990
 ---
 
 # Finance UAT consolidation: bank reconciliation and transaction FX overrides
@@ -69,7 +71,7 @@ Unrelated primary-checkout changes, generated local artifacts, historical worktr
 
 ## Remaining work
 
-Commit and publish the focused recovery branch, open and merge its pull request after required checks, then trigger the Windows VPS workflow from the exact merged `master` revision.
+PR #368 passed the required release-contract check and was merged as `2da59240dfe`. Windows VPS workflow run `37620014990` was manually dispatched from `master` with release build and test-VPS deployment enabled. Per the user's instruction, deployment monitoring is deferred until the user reports that the run has completed.
 
 ## Authorization boundaries
 
