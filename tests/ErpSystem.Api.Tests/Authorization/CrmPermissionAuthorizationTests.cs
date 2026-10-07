@@ -68,21 +68,24 @@ public sealed class CrmPermissionAuthorizationTests
     }
 
     [Theory]
-    [InlineData(CrmPermissions.Read)]
-    [InlineData(CrmPermissions.Manage)]
-    public void RegisteredCrmPolicy_ShouldUseDatabaseBackedPermissionRequirement(string permission)
+    [InlineData(CrmPermissions.Access, CrmPermissions.Access, CrmPermissions.Read, CrmPermissions.Manage)]
+    [InlineData(CrmPermissions.Read, CrmPermissions.Read, CrmPermissions.Manage)]
+    [InlineData(CrmPermissions.Manage, CrmPermissions.Manage)]
+    public void RegisteredCrmPolicy_ShouldUseDatabaseBackedPermissionRequirement(
+        string policyName,
+        params string[] acceptedPermissions)
     {
         var services = new ServiceCollection();
         services.AddErpSystemAuthorization();
         using var provider = services.BuildServiceProvider();
 
         var policy = provider.GetRequiredService<IOptions<AuthorizationOptions>>()
-            .Value.GetPolicy(permission);
+            .Value.GetPolicy(policyName);
 
         policy.Should().NotBeNull();
         var permissionRequirement = policy!.Requirements.Should().ContainSingle().Which
             .Should().BeOfType<PermissionRequirement>().Which;
-        permissionRequirement.Permissions.Should().Equal(permission);
+        permissionRequirement.Permissions.Should().Equal(acceptedPermissions);
         policy.Requirements.OfType<AssertionRequirement>().Should().BeEmpty();
     }
 
@@ -95,6 +98,58 @@ public sealed class CrmPermissionAuthorizationTests
             permission.Category == CrmPermissions.Category
             && !string.IsNullOrWhiteSpace(permission.DisplayName)
             && !string.IsNullOrWhiteSpace(permission.Description));
+    }
+
+    [Fact]
+    public void PermissionCatalogue_ShouldExposeCompleteSalesEntriesForRoleManagement()
+    {
+        SalesPermissions.All.Select(permission => permission.Name)
+            .Should().BeEquivalentTo(
+                SalesPermissions.Access,
+                SalesPermissions.Read,
+                SalesPermissions.Manage,
+                SalesPermissions.Approve,
+                SalesPermissions.Configure,
+                SalesPermissions.ViewReports);
+        SalesPermissions.All.Should().OnlyContain(permission =>
+            permission.Category == SalesPermissions.Category
+            && !string.IsNullOrWhiteSpace(permission.DisplayName)
+            && !string.IsNullOrWhiteSpace(permission.Description));
+    }
+
+    [Fact]
+    public void RegisteredSalesPolicies_ShouldUseCapabilityHierarchyWithoutRoleNames()
+    {
+        var services = new ServiceCollection();
+        services.AddErpSystemAuthorization();
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AuthorizationOptions>>().Value;
+
+        var expectations = new Dictionary<string, string[]>
+        {
+            [SalesPermissions.Access] = SalesPermissions.AllNames,
+            [SalesPermissions.Read] =
+            [
+                SalesPermissions.Read,
+                SalesPermissions.Manage,
+                SalesPermissions.Approve,
+                SalesPermissions.Configure
+            ],
+            [SalesPermissions.Manage] = [SalesPermissions.Manage],
+            [SalesPermissions.Approve] = [SalesPermissions.Approve],
+            [SalesPermissions.Configure] = [SalesPermissions.Configure],
+            [SalesPermissions.ViewReports] = [SalesPermissions.ViewReports, SalesPermissions.Manage]
+        };
+
+        foreach (var (policyName, acceptedPermissions) in expectations)
+        {
+            var policy = options.GetPolicy(policyName);
+            policy.Should().NotBeNull();
+            policy!.Requirements.Should().ContainSingle().Which
+                .Should().BeOfType<PermissionRequirement>().Which.Permissions
+                .Should().Equal(acceptedPermissions);
+            policy.Requirements.OfType<AssertionRequirement>().Should().BeEmpty();
+        }
     }
 
     private static ApplicationDbContext CreateContext()

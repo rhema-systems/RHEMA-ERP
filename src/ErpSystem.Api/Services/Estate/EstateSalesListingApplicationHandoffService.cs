@@ -74,11 +74,16 @@ public sealed class EstateSalesListingApplicationHandoffService(
 
         var opportunity = await db.Opportunities
             .AsNoTracking()
+            .Include(item => item.StageDefinition)
             .FirstOrDefaultAsync(item => item.Id == request.SalesOpportunityId
                 && item.TenantId == tenantId
                 && !item.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("The linked Sales opportunity was not found.");
-        if (!string.Equals(opportunity.Stage, "Closed Won", StringComparison.OrdinalIgnoreCase))
+        var isWon = opportunity.StageDefinition is not null
+            ? opportunity.StageDefinition.IsWon
+            : string.Equals(opportunity.Stage, "Won", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(opportunity.Stage, "Closed Won", StringComparison.OrdinalIgnoreCase);
+        if (!isWon)
             throw new InvalidOperationException("Close the linked Sales opportunity as Won before handing the enquiry to Estate.");
 
         var asset = await db.EstateManagedAssets

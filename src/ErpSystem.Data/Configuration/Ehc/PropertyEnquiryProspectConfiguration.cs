@@ -9,7 +9,7 @@ public sealed class EhcPropertyEnquiryProspectConfiguration : IEntityTypeConfigu
     public void Configure(EntityTypeBuilder<EhcPropertyEnquiryProspect> builder)
     {
         builder.HasIndex(x => new { x.TenantId, x.TicketId }).IsUnique();
-        builder.HasIndex(x => new { x.TenantId, x.LeadId }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.LeadId }).IsUnique().HasFilter("[LeadId] IS NOT NULL");
         builder.HasIndex(x => new { x.TenantId, x.OpportunityId }).IsUnique().HasFilter("[OpportunityId] IS NOT NULL");
         builder.HasOne(x => x.Ticket).WithMany().HasForeignKey(x => x.TicketId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Lead).WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.Restrict);

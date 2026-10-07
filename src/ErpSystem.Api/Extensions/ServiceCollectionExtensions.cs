@@ -1725,11 +1725,43 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
 
-            foreach (var permission in CrmPermissions.All)
-            {
-                authorizationBuilder.AddPolicy(permission.Name, policy =>
-                    policy.Requirements.Add(new PermissionRequirement(permission.Name)));
-            }
+            // CRM follows the same capability ladder as the other governed modules. Roles are
+            // dynamic and are authorized by their assigned permissions; no Sales role name is
+            // embedded here. A managing role can also open and read the workspace it manages.
+            authorizationBuilder
+                .AddPolicy(CrmPermissions.Access, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        CrmPermissions.Access,
+                        CrmPermissions.Read,
+                        CrmPermissions.Manage)))
+                .AddPolicy(CrmPermissions.Read, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        CrmPermissions.Read,
+                        CrmPermissions.Manage)))
+                .AddPolicy(CrmPermissions.Manage, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(CrmPermissions.Manage)));
+
+            // Sales roles are tenant-defined. These policies compose capabilities without
+            // depending on a role name: higher capabilities include the lower read/access tier.
+            authorizationBuilder
+                .AddPolicy(SalesPermissions.Access, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(SalesPermissions.AllNames)))
+                .AddPolicy(SalesPermissions.Read, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        SalesPermissions.Read,
+                        SalesPermissions.Manage,
+                        SalesPermissions.Approve,
+                        SalesPermissions.Configure)))
+                .AddPolicy(SalesPermissions.Manage, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(SalesPermissions.Manage)))
+                .AddPolicy(SalesPermissions.Approve, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(SalesPermissions.Approve)))
+                .AddPolicy(SalesPermissions.Configure, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(SalesPermissions.Configure)))
+                .AddPolicy(SalesPermissions.ViewReports, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        SalesPermissions.ViewReports,
+                        SalesPermissions.Manage)));
 
             // HR leave policies. The organisation-wide surface — every request,
             // everyone's balances, the adjustment ledger, the type catalogue's writes and the

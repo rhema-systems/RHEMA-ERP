@@ -16,8 +16,8 @@ public sealed class EhcPropertyEnquiryProspect : TenantEntity
     public Guid TicketId { get; set; }
     public EhcTicket Ticket { get; set; } = null!;
 
-    public Guid LeadId { get; set; }
-    public Lead Lead { get; set; } = null!;
+    public Guid? LeadId { get; set; }
+    public Lead? Lead { get; set; }
 
     public Guid? OpportunityId { get; set; }
     public Opportunity? Opportunity { get; set; }
@@ -88,7 +88,7 @@ public sealed class ProspectDepositReceipt : TenantEntity
     public EhcPropertyEnquiryProspect Prospect { get; set; } = null!;
 
     public Guid TicketId { get; set; }
-    public Guid LeadId { get; set; }
+    public Guid? LeadId { get; set; }
     public Guid OpportunityId { get; set; }
     public Guid? SalesAllocationId { get; set; }
     public Guid? BusinessPartnerId { get; set; }

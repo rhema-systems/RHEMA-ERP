@@ -62,3 +62,36 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 
 - No implementation or verification work remains in this worktree.
 - Do not push, open, or merge a PR until the parent task explicitly proceeds.
+
+## Follow-up: configured Won stage and Estate handoff
+
+- Branch: `codex/fix-estate-won-handoff`
+- Exact base: `22fd949a26e5bbe39bbee4af09a64ab0c6f3c7e3` (`origin/master`, merged PR #370)
+- Defect: the CRM opportunity displayed the tenant-configured stage `Won`, while the property-enquiry page and final Estate handoff service still required the legacy literal `Closed Won`.
+- Resolution: the handoff projection and service now use the linked opportunity stage definition's `IsWon` outcome. Historical opportunities without a stage-definition link retain compatibility for `Won` and `Closed Won`.
+- API response: the estate-handoff opportunity projection now exposes `isWon`; the frontend consumes that governed outcome instead of comparing display text.
+- Regression coverage: frontend property-enquiry test passes for a stage named `Won`; six Estate handoff service tests pass, including the new configured-Won case; the focused property-enquiry controller test passes and verifies `isWon` plus `canHandoff`.
+- Build environment: focused .NET tests used `TdcFastEfBuild=true`, C-drive artifacts, and the installed .NET 10 SDK with runtime roll-forward because the workstation currently lacks the repository-pinned .NET 9 SDK and .NET 8 runtime. The temporary `global.json` change was restored and is not part of the worktree diff.
+- Remaining work: publish this follow-up together with the separate Sales Order workflow-summary correction once that investigation and verification complete.
+
+## Follow-up: existing customer qualification without duplicate Lead
+
+- Decision: a property enquiry already linked to an approved, active Customer Business Partner qualifies against that customer account. It does not create another CRM Lead.
+- Compatibility: enquiries without a linked customer retain the existing Lead lifecycle. Enquiries that already have a Lead keep that lineage even if a customer is linked later.
+- Data model: `EhcPropertyEnquiryProspect.LeadId` and `ProspectDepositReceipt.LeadId` are nullable. Opportunity and allocation creation pass the optional Lead reference and the existing Business Partner reference through their canonical DTOs.
+- Migration: `20261007190000_AllowExistingCustomerPropertyProspectsWithoutLead` makes both Lead foreign keys nullable and filters the tenant/Lead uniqueness index to non-null Lead values. The down migration refuses rollback while customer-only records exist rather than manufacturing fake Lead identifiers.
+- Validation: the linked Business Partner must exist in the tenant, be active, be approved, and have the Customer role before the no-Lead path is allowed.
+- UI: the Sales qualification card states when the linked customer account is being used and that no duplicate Lead will be created. Sales handoff URLs omit `leadId` when the opportunity is customer-only.
+- Verification: the focused backend lifecycle suite passes 17/17, including record-contact, qualification, and Existing Customer opportunity creation with no Lead row or ticket `CrmLeadId`; the frontend property-enquiry suites pass 24/24; the full frontend TypeScript check passes.
+- Release preflight: the nullable-Lead migration's rollback-only guard is source-hash pinned in the canonical CRM migration preflight manifest. `Test-CanonicalMigrationPreflight.ps1` passes with all 42 guarded-migration coverage IDs.
+- Remaining work: commit this follow-up, integrate the separately verified Sales Order workflow-summary correction, refresh from `origin/master`, and publish the authorized consolidated follow-up PR.
+
+## Follow-up: production CRM and Sales permission catalogues
+
+- Defect: `crm.read` and the other CRM permission definitions were registered as authorization policies and included in development seeding, but production startup does not run the development-data seeder. Existing production databases therefore had no CRM permission rows for the Roles UI to display or assign.
+- Resolution: data migration `20261007191000_SeedCrmAndSalesPermissionCatalogues` idempotently creates or repairs `crm.access`, `crm.read`, and `crm.manage` in the `CRM` category and six Sales capabilities in the `Sales` category. The Roles UI groups the server catalogue dynamically, so these permissions are selectable for any management-created role.
+- Authorization: opportunity-stage access remains permission based. No Sales role names are embedded in the policy. `crm.manage` satisfies CRM read and access policies; `crm.read` satisfies the access and read policies; `crm.access` grants workspace access only.
+- Rollback safety: the migration retains the catalogue on downgrade because administrators may have attached the permissions to live dynamic roles after deployment.
+- Role UI: a control beside permission search now collapses or expands all currently visible module accordions. Search results remain controllable instead of being forced open.
+- Verification scope: backend authorization policy tests cover the CRM and Sales permission hierarchies. Roles UI tests cover CRM/Sales catalogue display, permission selection, per-module selection, and expand/collapse-all behavior.
+- Authorization boundary requiring confirmation: applying the new Sales capabilities across every existing Sales controller would change production access for a large endpoint family. An automatic approval review rejected a heuristic all-controller convention due to the risk of misclassifying endpoints and denying valid users. The proposed explicit mapping is GET/read -> `sales.read`, create/edit/lifecycle -> `sales.manage`, approval/confirmation/closing -> `sales.approve`, setup writes -> `sales.configure`, and reports -> `sales.reports.read`. Endpoint-by-endpoint enforcement remains pending explicit user approval of that access change.

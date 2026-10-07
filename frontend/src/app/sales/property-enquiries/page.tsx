@@ -58,6 +58,7 @@ type EstateHandoffState = {
     id: string;
     referenceNumber?: string | null;
     stage: string;
+    isWon: boolean;
     amount: number;
     currency: string;
     actualCloseDate?: string | null;
@@ -1008,8 +1009,9 @@ function PropertyEnquiries() {
                   <div>
                     <h3 className="font-semibold">Sales qualification</h3>
                     <p className="text-sm text-slate-600">
-                      Work the public enquiry as a prospect. This does not
-                      create an ERP user, employee or customer.
+                      {prospect?.businessPartnerId && !prospect.leadId
+                        ? 'Qualify this enquiry against the linked customer account. A duplicate CRM lead will not be created.'
+                        : 'Work the public enquiry as a prospect. This does not create an ERP user, employee or customer.'}
                     </p>
                   </div>
                   <span className="rounded-full border border-sky-300 bg-white px-3 py-1 text-sm font-medium">
@@ -1608,7 +1610,7 @@ function PropertyEnquiries() {
                               businessPartnerId: prospect.businessPartnerId,
                               businessPartnerName:
                                 prospect.businessPartnerName || undefined,
-                              leadId: prospect.leadId,
+                              leadId: prospect.leadId || undefined,
                               leadName:
                                 ticket.propertyListing?.contactName ||
                                 ticket.subject,
@@ -1635,7 +1637,12 @@ function PropertyEnquiries() {
                   </div>
                 ) : (
                   <>
-                    {!depositThresholdMet ? (
+                    {!depositThresholdMet && prospect?.businessPartnerId ? (
+                      <p className="text-sm text-amber-800">
+                        The configured deposit threshold must still be met
+                        before finalizing this existing customer enquiry.
+                      </p>
+                    ) : !depositThresholdMet ? (
                       <p className="text-sm text-amber-800">
                         New customer registration is locked until a cleared
                         deposit meets the configured threshold. An already
@@ -1882,7 +1889,7 @@ function PropertyEnquiries() {
                     The enquiry needs a linked CRM opportunity before it can be
                     handed to Estate.
                   </p>
-                ) : opportunity.stage !== 'Closed Won' ? (
+                ) : !opportunity.isWon ? (
                   <div className="space-y-1 text-sm text-amber-800">
                     <p>
                       CRM opportunity:{' '}
@@ -1906,7 +1913,7 @@ function PropertyEnquiries() {
                           ? new Date(
                               opportunity.actualCloseDate
                             ).toLocaleDateString()
-                          : 'Recorded as Closed Won'}
+                          : 'Recorded as won'}
                       </p>
                       <p>
                         <span className="font-medium">Opportunity value:</span>{' '}

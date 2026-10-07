@@ -27,7 +27,7 @@ export interface PropertyEnquiryListFilters {
 
 export interface PropertyEnquiryProspect {
   ticketId: string;
-  leadId: string;
+  leadId?: string | null;
   opportunityId?: string | null;
   salesAllocationId?: string | null;
   salesAllocationStatus?: string | null;

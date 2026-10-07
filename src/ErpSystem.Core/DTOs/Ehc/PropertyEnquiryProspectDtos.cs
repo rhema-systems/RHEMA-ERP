@@ -4,7 +4,7 @@ namespace ErpSystem.Core.DTOs.Ehc;
 
 public sealed record PropertyEnquiryProspectDto(
     Guid TicketId,
-    Guid LeadId,
+    Guid? LeadId,
     Guid? OpportunityId,
     Guid? SalesAllocationId,
     Guid? BusinessPartnerId,

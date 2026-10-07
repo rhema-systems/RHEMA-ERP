@@ -48,12 +48,16 @@ public sealed class PropertyEnquiryProspectService(
             throw new InvalidOperationException("A disqualified prospect cannot record further qualification activity.");
         if (prospect.Status is not (EhcPropertyProspectStatuses.New or EhcPropertyProspectStatuses.Contacted))
             throw new InvalidOperationException("Contact activity cannot move a qualified or converted prospect back to Contacted.");
-        var lead = prospect.Lead ?? await db.Leads.SingleAsync(
-            x => x.Id == prospect.LeadId && x.TenantId == TenantId && !x.IsDeleted,
-            cancellationToken);
-        lead.LeadStatus = "Contacted";
-        lead.LastContactDate = DateTime.UtcNow;
-        if (!string.IsNullOrWhiteSpace(request.Notes)) lead.Notes = AppendNote(lead.Notes, request.Notes);
+        Lead? lead = null;
+        if (prospect.LeadId.HasValue)
+        {
+            lead = prospect.Lead ?? await db.Leads.SingleAsync(
+                x => x.Id == prospect.LeadId.Value && x.TenantId == TenantId && !x.IsDeleted,
+                cancellationToken);
+            lead.LeadStatus = "Contacted";
+            lead.LastContactDate = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(request.Notes)) lead.Notes = AppendNote(lead.Notes, request.Notes);
+        }
         prospect.Status = EhcPropertyProspectStatuses.Contacted;
         prospect.UpdatedAt = DateTime.UtcNow;
         await AddAuditAsync(ticket, "ProspectContacted", "Sales contacted the public property prospect",
@@ -86,17 +90,22 @@ public sealed class PropertyEnquiryProspectService(
             throw new InvalidOperationException(prospect.Status == EhcPropertyProspectStatuses.New
                 ? "Record Sales contact before qualifying this prospect."
                 : "Qualification cannot move an opportunity or converted prospect back to Qualified.");
-        var lead = await db.Leads.SingleAsync(x => x.Id == prospect.LeadId && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
+        Lead? lead = null;
+        if (prospect.LeadId.HasValue)
+            lead = await db.Leads.SingleAsync(x => x.Id == prospect.LeadId.Value && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
         var now = DateTime.UtcNow;
-        lead.LeadStatus = "Qualified";
-        lead.QualificationScore = request.QualificationScore;
-        lead.EstimatedValue = request.AgreedAmount;
-        lead.LeadSource = "Website";
-        lead.LastContactDate ??= now;
-        if (!string.IsNullOrWhiteSpace(request.Notes)) lead.Notes = AppendNote(lead.Notes, request.Notes);
-        lead.UpdatedAt = now;
-        lead.UpdatedBy = currentUser.UserName;
-        lead.LastModifiedById = ActorId;
+        if (lead is not null)
+        {
+            lead.LeadStatus = "Qualified";
+            lead.QualificationScore = request.QualificationScore;
+            lead.EstimatedValue = request.AgreedAmount;
+            lead.LeadSource = "Website";
+            lead.LastContactDate ??= now;
+            if (!string.IsNullOrWhiteSpace(request.Notes)) lead.Notes = AppendNote(lead.Notes, request.Notes);
+            lead.UpdatedAt = now;
+            lead.UpdatedBy = currentUser.UserName;
+            lead.LastModifiedById = ActorId;
+        }
 
         prospect.Status = EhcPropertyProspectStatuses.Qualified;
         prospect.QualifiedAt = now;
@@ -130,12 +139,15 @@ public sealed class PropertyEnquiryProspectService(
         var prospect = await GetOrCreateProspectAsync(ticket, property, cancellationToken);
         if (ticket.CrmOpportunityId.HasValue || prospect.OpportunityId.HasValue)
             throw new InvalidOperationException("A prospect with an opportunity cannot be disqualified. Close the opportunity through the Sales pipeline instead.");
-        var lead = await db.Leads.SingleAsync(x => x.Id == prospect.LeadId && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
-        lead.LeadStatus = "Unqualified";
-        lead.Notes = AppendNote(lead.Notes, $"Disqualified: {reason}");
-        lead.UpdatedAt = DateTime.UtcNow;
-        lead.UpdatedBy = currentUser.UserName;
-        lead.LastModifiedById = ActorId;
+        if (prospect.LeadId.HasValue)
+        {
+            var lead = await db.Leads.SingleAsync(x => x.Id == prospect.LeadId.Value && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
+            lead.LeadStatus = "Unqualified";
+            lead.Notes = AppendNote(lead.Notes, $"Disqualified: {reason}");
+            lead.UpdatedAt = DateTime.UtcNow;
+            lead.UpdatedBy = currentUser.UserName;
+            lead.LastModifiedById = ActorId;
+        }
         prospect.Status = EhcPropertyProspectStatuses.Disqualified;
         prospect.UpdatedAt = DateTime.UtcNow;
         prospect.UpdatedBy = currentUser.UserName;
@@ -153,9 +165,13 @@ public sealed class PropertyEnquiryProspectService(
         var (ticket, property) = await LoadTicketAsync(ticketId, cancellationToken);
         var prospect = await ProspectQuery(tracking: true).SingleOrDefaultAsync(x => x.TicketId == ticketId, cancellationToken)
             ?? throw new InvalidOperationException("Qualify this enquiry before creating an opportunity.");
-        var lead = await db.Leads.AsNoTracking().SingleAsync(x => x.Id == prospect.LeadId && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
-        if (!string.Equals(lead.LeadStatus, "Qualified", StringComparison.OrdinalIgnoreCase))
+        var lead = prospect.LeadId.HasValue
+            ? await db.Leads.AsNoTracking().SingleAsync(x => x.Id == prospect.LeadId.Value && x.TenantId == TenantId && !x.IsDeleted, cancellationToken)
+            : null;
+        if (lead is not null && !string.Equals(lead.LeadStatus, "Qualified", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Only a qualified lead can create an opportunity.");
+        if (lead is null && !prospect.BusinessPartnerId.HasValue)
+            throw new InvalidOperationException("The qualified prospect must be linked to either a lead or an approved Customer Business Partner.");
         if (prospect.Status is not (EhcPropertyProspectStatuses.Qualified or EhcPropertyProspectStatuses.Opportunity))
             throw new InvalidOperationException("Only a qualified prospect can create an opportunity.");
         if (request.Amount <= 0) throw new InvalidOperationException("Opportunity amount must be positive.");
@@ -190,14 +206,7 @@ public sealed class PropertyEnquiryProspectService(
         Guid? customerBusinessPartnerId = null;
         if (prospect.BusinessPartnerId.HasValue)
         {
-            var customer = await db.BusinessPartners.AsNoTracking().Include(x => x.Roles)
-                .SingleOrDefaultAsync(x => x.Id == prospect.BusinessPartnerId.Value
-                    && x.TenantId == TenantId && !x.IsDeleted, cancellationToken)
-                ?? throw new InvalidOperationException("The linked Customer Business Partner could not be found for this tenant.");
-            if (!customer.IsActive || !string.Equals(customer.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase)
-                || (!BusinessPartnerRoles.HasCustomer(customer.PartnerType)
-                    && !customer.Roles.Any(x => !x.IsDeleted && x.RoleType == BusinessPartnerRoleType.Customer)))
-                throw new InvalidOperationException("The linked Business Partner must be an approved, active Customer before it can be used as the opportunity account.");
+            var customer = await RequireApprovedCustomerAsync(prospect.BusinessPartnerId.Value, cancellationToken);
             customerBusinessPartnerId = customer.Id;
         }
 
@@ -212,8 +221,8 @@ public sealed class PropertyEnquiryProspectService(
             linkedOpportunity = await db.Opportunities.SingleOrDefaultAsync(x =>
                 x.Id == linkedOpportunityId.Value && x.TenantId == TenantId && !x.IsDeleted, cancellationToken)
                 ?? throw new InvalidOperationException("The linked Sales opportunity could not be found for this tenant.");
-            if (linkedOpportunity.LeadId != lead.Id)
-                throw new InvalidOperationException("The linked Sales opportunity does not belong to this prospect lead.");
+            if (linkedOpportunity.LeadId != prospect.LeadId)
+                throw new InvalidOperationException("The linked Sales opportunity does not belong to this prospect lineage.");
             if (!string.Equals(Currency(linkedOpportunity.Currency), prospectCurrency, StringComparison.Ordinal))
                 throw new InvalidOperationException("The linked Sales opportunity currency does not match the qualified prospect currency. Reconcile the Sales lineage before continuing.");
             if (customerBusinessPartnerId.HasValue)
@@ -253,7 +262,7 @@ public sealed class PropertyEnquiryProspectService(
             {
                 Name = Clip($"Property enquiry: {property.ListingName}", 200)!,
                 Description = Clip($"Originating enquiry {ticket.TicketNumber}. Property {property.ListingReference}: {property.ListingName}.", 2000),
-                LeadId = lead.Id,
+                LeadId = prospect.LeadId,
                 CustomerId = customerBusinessPartnerId,
                 Amount = request.Amount,
                 Currency = prospectCurrency,
@@ -281,8 +290,9 @@ public sealed class PropertyEnquiryProspectService(
                 SourceItemCode = Clip(property.ListingReference, 100),
                 SourceItemName = Clip(property.ListingName, 250)!,
                 SourceItemType = Clip(property.ListingType, 80),
+                BusinessPartnerId = customerBusinessPartnerId,
                 CustomerName = Clip(property.ContactName ?? property.BusinessPartnerName, 200),
-                LeadId = lead.Id,
+                LeadId = prospect.LeadId,
                 OpportunityId = opportunityId.Value,
                 AllocationType = "Reservation",
                 Status = "Reserved",
@@ -349,7 +359,9 @@ public sealed class PropertyEnquiryProspectService(
         var (ticket, _) = await LoadTicketAsync(ticketId, cancellationToken);
         var prospect = await ProspectQuery(tracking: true).SingleOrDefaultAsync(x => x.TicketId == ticketId, cancellationToken)
             ?? throw new InvalidOperationException("Qualify this enquiry before linking a Business Partner.");
-        var lead = await db.Leads.AsNoTracking().SingleAsync(x => x.Id == prospect.LeadId && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
+        if (!prospect.LeadId.HasValue)
+            throw new InvalidOperationException("This enquiry is already using its existing Customer account and does not require lead conversion.");
+        var lead = await db.Leads.AsNoTracking().SingleAsync(x => x.Id == prospect.LeadId.Value && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
         if (!string.Equals(lead.LeadStatus, "Qualified", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Only a qualified prospect can be linked to an existing Business Partner.");
         var partner = await db.BusinessPartners.Include(x => x.Roles).SingleOrDefaultAsync(x => x.Id == businessPartnerId
@@ -784,9 +796,12 @@ public sealed class PropertyEnquiryProspectService(
         prospect.BusinessPartnerLinkedById ??= ActorId;
         prospect.Status = EhcPropertyProspectStatuses.Converted;
         prospect.UpdatedAt = DateTime.UtcNow;
-        var lead = await db.Leads.SingleAsync(x => x.Id == prospect.LeadId && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
-        lead.LeadStatus = "Converted";
-        lead.ConvertedDate = DateTime.UtcNow;
+        if (prospect.LeadId.HasValue)
+        {
+            var lead = await db.Leads.SingleAsync(x => x.Id == prospect.LeadId.Value && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
+            lead.LeadStatus = "Converted";
+            lead.ConvertedDate = DateTime.UtcNow;
+        }
         opportunity.CustomerId = businessPartnerId;
         if (opportunity.StageDefinition?.IsWon != true)
         {
@@ -840,10 +855,14 @@ public sealed class PropertyEnquiryProspectService(
     {
         var existing = await ProspectQuery(tracking: true).SingleOrDefaultAsync(x => x.TicketId == ticket.Id, cancellationToken);
         if (existing is not null) return existing;
-        Lead lead;
+        BusinessPartner? customer = null;
+        if (property.BusinessPartnerId.HasValue)
+            customer = await RequireApprovedCustomerAsync(property.BusinessPartnerId.Value, cancellationToken);
+
+        Lead? lead = null;
         if (ticket.CrmLeadId.HasValue)
             lead = await db.Leads.SingleAsync(x => x.Id == ticket.CrmLeadId.Value && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
-        else
+        else if (customer is null)
         {
             var (first, last) = SplitName(property.ContactName ?? property.BusinessPartnerName);
             lead = new Lead
@@ -872,11 +891,11 @@ public sealed class PropertyEnquiryProspectService(
         {
             TenantId = TenantId,
             TicketId = ticket.Id,
-            LeadId = lead.Id,
+            LeadId = lead?.Id,
             Lead = lead,
             OpportunityId = ticket.CrmOpportunityId,
-            BusinessPartnerId = property.BusinessPartnerId,
-            BusinessPartnerLinkedAt = property.BusinessPartnerId.HasValue ? ticket.CreatedAt : null,
+            BusinessPartnerId = customer?.Id,
+            BusinessPartnerLinkedAt = customer is not null ? ticket.CreatedAt : null,
             Status = EhcPropertyProspectStatuses.New,
             AgreedAmount = property.Price ?? 0m,
             Currency = Currency(property.Currency),
@@ -885,6 +904,22 @@ public sealed class PropertyEnquiryProspectService(
         };
         db.Set<EhcPropertyEnquiryProspect>().Add(prospect);
         return prospect;
+    }
+
+    private async Task<BusinessPartner> RequireApprovedCustomerAsync(
+        Guid businessPartnerId,
+        CancellationToken cancellationToken)
+    {
+        var customer = await db.BusinessPartners.AsNoTracking().Include(x => x.Roles)
+            .SingleOrDefaultAsync(x => x.Id == businessPartnerId
+                && x.TenantId == TenantId && !x.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("The linked Customer Business Partner could not be found for this tenant.");
+        if (!customer.IsActive || !string.Equals(customer.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase)
+            || (!BusinessPartnerRoles.HasCustomer(customer.PartnerType)
+                && !customer.Roles.Any(x => !x.IsDeleted && x.RoleType == BusinessPartnerRoleType.Customer)))
+            throw new InvalidOperationException("The linked Business Partner must be an approved, active Customer before it can be used in the Sales qualification flow.");
+
+        return customer;
     }
 
     private async Task<(EhcTicket Ticket, EhcPropertyListingContextDto Property)> LoadTicketAsync(Guid ticketId, CancellationToken cancellationToken)

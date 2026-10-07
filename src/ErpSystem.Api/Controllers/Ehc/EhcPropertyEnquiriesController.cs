@@ -296,7 +296,10 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                     item.CrmOpportunity.Stage,
                     item.CrmOpportunity.Amount,
                     item.CrmOpportunity.Currency,
-                    item.CrmOpportunity.ActualCloseDate
+                    item.CrmOpportunity.ActualCloseDate,
+                    IsWon = item.CrmOpportunity.StageDefinition != null
+                        ? item.CrmOpportunity.StageDefinition.IsWon
+                        : item.CrmOpportunity.Stage == "Won" || item.CrmOpportunity.Stage == "Closed Won"
                 }
             })
             .SingleOrDefaultAsync(cancellationToken);
@@ -337,7 +340,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 ticket.EstateListingApplicationHandedOffAt,
                 canHandoff = ticket.CrmOpportunityId.HasValue
                     && ticket.Opportunity is not null
-                    && string.Equals(ticket.Opportunity.Stage, "Closed Won", StringComparison.OrdinalIgnoreCase)
+                    && ticket.Opportunity.IsWon
                     && estateCase is null
             }
         });
