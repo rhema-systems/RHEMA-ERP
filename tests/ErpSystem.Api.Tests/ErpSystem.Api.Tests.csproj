@@ -330,6 +330,7 @@
     <Compile Include="Services\Finance\CashBankTransactionPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\CashBankWorkflowApprovalHardeningTests.cs" />
     <Compile Include="Services\Finance\CashBankPermissionContractTests.cs" />
+    <Compile Include="Services\Finance\FinanceExchangeRateOverrideTests.cs" />
     <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
     <Compile Include="Services\Finance\BankingSettlementReleaseGateTests.cs" />
     <!-- Source-book authority is shared Finance posting evidence. This project disables

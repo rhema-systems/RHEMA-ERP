@@ -349,7 +349,9 @@ class ApiService {
         validationSummary ||
         (apiTitle && !isGenericValidationMessage(apiTitle) ? apiTitle : undefined) ||
         errorData.error ||
-        `HTTP ${response.status}: ${response.statusText}`;
+        (response.status === 403
+          ? 'You do not have permission to perform this action. Ask an administrator to grant the required role permission.'
+          : `HTTP ${response.status}: ${response.statusText}`);
       const responsePath = (() => {
         try { return new URL(response.url).pathname.toLowerCase(); }
         catch { return ''; }

@@ -87,7 +87,6 @@ function toMetadata(row: FinanceWorkflowApprovalQueueItem): ApprovalQueueItem['m
 function toWorkflowApprovalItem(row: FinanceWorkflowApprovalQueueItem): ApprovalQueueItem {
     const amount = row.amount === null || row.amount === undefined ? null : Number(row.amount);
     const reference = row.reference || row.entityId;
-
     return {
         id: row.approvalId,
         reference,

@@ -23,6 +23,7 @@ import {
 import { getJournalAuditActorLine } from '@/lib/finance/journal-entry-audit';
 import { getFinancePostingErrorPresentation } from '@/lib/finance/posting-error';
 import { getWorkflowVisibility } from '@/components/workflow/workflowVisibility';
+import { TransactionExchangeRateOverridePanel } from '@/components/finance/TransactionExchangeRateOverridePanel';
 
 export default function JournalEntryDetailPage() {
     const router = useRouter();
@@ -432,9 +433,21 @@ export default function JournalEntryDetailPage() {
         && ((canSubmitForApproval && workflowSummary?.canCurrentUserRecall === true) || canCancelAnyWorkflow);
     const pendingApproverText = workflowSummary ? formatPendingApprovers(workflowSummary.pendingApprovers || []) : '';
     const selectedBookName = getAccountingBookName(accountingBooks, entry.bookClassification);
+    const overrideLine = entry.transactions.find((line) => Boolean(line.exchangeRateId && line.currencyCode));
 
     return (
         <div className="space-y-6">
+            {overrideLine?.exchangeRateId && overrideLine.currencyCode && (
+                <TransactionExchangeRateOverridePanel
+                    sourceDocumentType="ManualJournalEntry"
+                    sourceDocumentId={entry.id}
+                    transactionCurrencyCode={overrideLine.currencyCode}
+                    governedExchangeRateId={overrideLine.exchangeRateId}
+                    governedRate={overrideLine.exchangeRate}
+                    canRequestForDocument={entry.postingStatus === 'Draft'}
+                    ineligibleReason="Only a Draft manual journal can request an override."
+                />
+            )}
             {/* Page Header */}
             <div className="flex items-center justify-between">
                 <div>

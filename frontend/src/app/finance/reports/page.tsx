@@ -12,6 +12,7 @@ import {
     Globe,
     ListTree,
     ListFilter,
+    Landmark,
     ArrowRight,
     type LucideIcon,
 } from 'lucide-react';
@@ -68,6 +69,14 @@ const REPORTS: FinanceReportLink[] = [
         href: '/finance/reports/cash-flow',
         icon: Banknote,
         color: 'bg-amber-500',
+    },
+    {
+        id: 'bank-reconciliation',
+        title: 'Bank Reconciliation',
+        description: 'Standard reconciliation statement with bank-side timing items, book-side adjustments, matched evidence, and sign-off',
+        href: '/finance/reports/bank-reconciliation',
+        icon: Landmark,
+        color: 'bg-teal-600',
     },
     {
         id: 'multi-currency',

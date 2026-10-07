@@ -9,6 +9,30 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class CashBankPermissionContractTests
 {
+    [Fact]
+    public void BankReconciliationMatches_ShouldBeReadableWithoutPreparationPermission()
+    {
+        var policies = FinancePermissionPolicyMap.GetRequiredPolicies(
+            "BankReconciliation",
+            "GetMatches",
+            ["GET"],
+            ["{id:guid}/matches"]);
+
+        policies.Should().Equal(FinancePermissions.ViewFinance);
+        policies.Should().NotContain(FinancePermissions.PerformBankReconciliation);
+    }
+
+    [Fact]
+    public void BankReconciliationReturnForCorrection_ShouldRequireApprovalPermission()
+    {
+        FinancePermissionPolicyMap.GetRequiredPolicies(
+                "BankReconciliation",
+                "ReturnForCorrection",
+                ["POST"],
+                ["{id:guid}/return-for-correction"])
+            .Should().Equal(FinancePermissions.ApproveBankReconciliation);
+    }
+
     [Theory]
     [InlineData(nameof(CashierTillController.UpdateOpening), "PUT")]
     [InlineData(nameof(CashierTillController.CancelSession), "POST")]

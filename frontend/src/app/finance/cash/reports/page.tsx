@@ -5,6 +5,7 @@ import {
     ArrowRight,
     Banknote,
     TrendingUp,
+    Landmark,
 } from 'lucide-react';
 import {
     Card,
@@ -22,6 +23,14 @@ const CASH_REPORTS = [
         href: '/finance/cash/reports/cash-position',
         icon: Banknote,
         color: 'bg-emerald-600',
+    },
+    {
+        id: 'bank-reconciliation',
+        title: 'Bank Reconciliation',
+        description: 'Printable bank-to-GL reconciliation statement with outstanding and unmatched items.',
+        href: '/finance/reports/bank-reconciliation',
+        icon: Landmark,
+        color: 'bg-teal-600',
     },
     {
         id: 'cash-flow-statement',

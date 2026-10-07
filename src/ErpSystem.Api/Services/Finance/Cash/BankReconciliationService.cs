@@ -22,6 +22,7 @@ public class BankReconciliationService : IBankReconciliationService
     private readonly IWorkflowService _workflowService;
     private readonly ICashTransactionService _cashTransactionService;
     private readonly IFinanceAuditService? _financeAuditService;
+    private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthority;
 
     public BankReconciliationService(
         ApplicationDbContext context,
@@ -29,7 +30,8 @@ public class BankReconciliationService : IBankReconciliationService
         ICurrentUserService currentUserService,
         IWorkflowService workflowService,
         ICashTransactionService cashTransactionService,
-        IFinanceAuditService? financeAuditService = null)
+        IFinanceAuditService? financeAuditService = null,
+        IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
     {
         _context = context;
         _reconciliationEngine = reconciliationEngine;
@@ -37,6 +39,7 @@ public class BankReconciliationService : IBankReconciliationService
         _workflowService = workflowService;
         _cashTransactionService = cashTransactionService;
         _financeAuditService = financeAuditService;
+        _sourceBookAuthority = sourceBookAuthority;
     }
 
     private Guid CurrentUserId => Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
@@ -693,7 +696,7 @@ public class BankReconciliationService : IBankReconciliationService
         adjustmentEntity.ApprovalComments = "Approved as an explicit bank reconciliation adjustment.";
         adjustmentEntity.UpdatedAt = now;
         adjustmentEntity.UpdatedBy = _currentUserService.UserName;
-        await _context.SaveChangesAsync(cancellationToken);
+        await FreezeAdjustmentBookAuthorityAsync(adjustmentEntity, cancellationToken);
 
         var postedAdjustment = await _cashTransactionService.PostForProducerAsync(
             adjustmentEntity.Id, ReconciliationAdjustmentProducer, cancellationToken);
@@ -776,6 +779,51 @@ public class BankReconciliationService : IBankReconciliationService
             ExchangeRateQuoteSide = postedAdjustment.ExchangeRateQuoteSide,
             FinanceDimensions = postedAdjustment.FinanceDimensions
         };
+    }
+
+    private async Task FreezeAdjustmentBookAuthorityAsync(
+        CashTransaction adjustment,
+        CancellationToken cancellationToken)
+    {
+        var sourceBookAuthority = _sourceBookAuthority
+            ?? throw new InvalidOperationException(
+                "Finance source-book authority is not configured for bank reconciliation adjustments.");
+        var request = new FinanceSourceBookAuthorityFreezeRequest
+        {
+            OriginModuleCode = ErpSystem.Core.Finance.FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                ReconciliationAdjustmentProducer.Definition.ProducerModule),
+            SourceDocumentType = ReconciliationAdjustmentProducer.Definition.DocumentType,
+            SourceDocumentId = adjustment.Id,
+            PostingAction = "Post",
+            EffectiveDate = adjustment.TransactionDate,
+            TransactionCurrencyCode = adjustment.Currency,
+            FreezeStage = FinanceSourceBookAuthorityFreezeStages.Authorized,
+            SourceWorkflowInstanceId = adjustment.WorkflowInstanceId,
+            SourceWorkflowEntityType = "CashTransaction"
+        };
+
+        async Task FreezeAsync()
+        {
+            var authority = await sourceBookAuthority.FreezeInitialPrimaryAsync(request, cancellationToken);
+            adjustment.SourceBookAuthorityId = authority.AuthorityId;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction is not null)
+        {
+            await FreezeAsync();
+            return;
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable,
+                cancellationToken);
+            await FreezeAsync();
+            await transaction.CommitAsync(cancellationToken);
+        });
     }
 
     public async Task<BankReconciliationDto> FinalizeReconciliationAsync(
@@ -1043,6 +1091,104 @@ public class BankReconciliationService : IBankReconciliationService
         }
 
         return bookBalance;
+    }
+
+    public async Task<BankReconciliationDto> ReturnForCorrectionAsync(
+        Guid id,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("A return-for-correction reason is required.", nameof(reason));
+        }
+
+        var normalizedReason = reason.Trim();
+
+        async Task<BankReconciliationDto> ReturnCoreAsync()
+        {
+            var tenantId = TenantId;
+            var reconciliation = await _context.Set<BankReconciliation>()
+                .FirstOrDefaultAsync(
+                    item => item.TenantId == tenantId && item.Id == id && !item.IsDeleted,
+                    cancellationToken)
+                ?? throw new Exception("Reconciliation not found");
+
+            if (reconciliation.Status != ReconciliationStatus.Completed)
+            {
+                throw new InvalidOperationException("Only a completed reconciliation awaiting approval can be returned for correction.");
+            }
+
+            if (CurrentUserId == Guid.Empty)
+            {
+                throw new UnauthorizedAccessException("Unable to resolve the current reviewer.");
+            }
+
+            if (!await _workflowService.CanUserApproveAsync("BankReconciliation", id, CurrentUserId))
+            {
+                throw new UnauthorizedAccessException("This bank reconciliation is assigned to another workflow reviewer.");
+            }
+
+            var workflowResult = await _workflowService.ProcessApprovalStepAsync(
+                "BankReconciliation",
+                id,
+                CurrentUserId,
+                "Reject",
+                normalizedReason);
+            if (!workflowResult.Success)
+            {
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to return the bank reconciliation for correction.");
+            }
+
+            reconciliation.Status = ReconciliationStatus.InProgress;
+            reconciliation.ApprovedBy = null;
+            reconciliation.ApprovedAt = null;
+            reconciliation.UpdatedAt = DateTime.UtcNow;
+            reconciliation.UpdatedBy = _currentUserService.UserName ?? "system";
+            reconciliation.Notes = string.IsNullOrWhiteSpace(reconciliation.Notes)
+                ? $"Returned for correction: {normalizedReason}"
+                : $"{reconciliation.Notes}{Environment.NewLine}Returned for correction: {normalizedReason}";
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await RecordReconciliationAuditAsync(
+                FinanceAuditEvents.BankReconciliationReturnedForCorrection,
+                reconciliation,
+                afterValues: new
+                {
+                    reconciliation.Status,
+                    reconciliation.Notes,
+                    ReturnedBy = CurrentUserId
+                },
+                reason: normalizedReason,
+                comment: normalizedReason,
+                cancellationToken: cancellationToken);
+
+            return await GetByIdAsync(id)
+                ?? throw new Exception("Failed to retrieve the returned reconciliation.");
+        }
+
+        if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
+        {
+            return await ReturnCoreAsync();
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var result = await ReturnCoreAsync();
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _context.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
     public async Task<ReconciliationSummaryDto> GetSummaryAsync(Guid id)

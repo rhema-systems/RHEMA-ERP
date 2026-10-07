@@ -259,10 +259,13 @@ export function ApprovalWorkbench({
         if (!rejectTarget) return;
 
         const reason = rejectReason.trim();
+        const isReturnForCorrection = rejectTarget.item.rejectLabel === 'Return for correction';
         if (!reason) {
             toast({
-                title: `${rejectTarget.item.rejectLabel || 'Rejection'} reason required`,
-                description: `Enter a reason before ${rejectTarget.item.rejectLabel ? rejectTarget.item.rejectLabel.toLowerCase() : 'rejecting this document'}.`,
+                title: isReturnForCorrection ? 'Correction reason required' : 'Rejection reason required',
+                description: isReturnForCorrection
+                    ? 'Enter the corrections required before returning this reconciliation.'
+                    : 'Enter a reason before rejecting this document.',
                 variant: 'destructive',
             });
             return;
@@ -284,18 +287,24 @@ export function ApprovalWorkbench({
         try {
             setActionKey(key);
             await definition.reject?.(item, reason);
-            const returnedForCorrection = item.rejectLabel === 'Return for correction';
             toast({
-                title: returnedForCorrection ? 'Returned for correction' : 'Rejected',
-                description: `${item.reference} has been ${returnedForCorrection ? 'returned for correction' : 'rejected'}.`,
+                title: isReturnForCorrection ? 'Returned for correction' : 'Rejected',
+                description: isReturnForCorrection
+                    ? `${item.reference} has been returned to the preparer for correction.`
+                    : `${item.reference} has been rejected.`,
             });
             setRejectTarget(null);
             setRejectReason('');
             await loadQueue(definition);
         } catch (error: any) {
             toast({
-                title: 'Rejection failed',
-                description: getErrorMessage(error, `Failed to reject ${item.reference}.`),
+                title: isReturnForCorrection ? 'Return failed' : 'Rejection failed',
+                description: getErrorMessage(
+                    error,
+                    isReturnForCorrection
+                        ? `Failed to return ${item.reference} for correction.`
+                        : `Failed to reject ${item.reference}.`
+                ),
                 variant: 'destructive',
             });
         } finally {
@@ -553,12 +562,18 @@ export function ApprovalWorkbench({
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-2">
-                        <Label htmlFor="approval-rejection-reason">Reason</Label>
+                        <Label htmlFor="approval-rejection-reason">
+                            {rejectTarget?.item.rejectLabel === 'Return for correction'
+                                ? 'Correction reason'
+                                : 'Rejection reason'}
+                        </Label>
                         <Textarea
                             id="approval-rejection-reason"
                             value={rejectReason}
                             onChange={event => setRejectReason(event.target.value)}
-                            placeholder="Explain why this document is being rejected..."
+                            placeholder={rejectTarget?.item.rejectLabel === 'Return for correction'
+                                ? 'Explain what the preparer must correct...'
+                                : 'Explain why this document is being rejected...'}
                         />
                     </div>
                     <DialogFooter>

@@ -520,6 +520,10 @@ class CashManagementDataService {
         return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/approve`, {});
     }
 
+    async returnReconciliationForCorrection(id: string, reason: string): Promise<BankReconciliation> {
+        return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/return-for-correction`, { reason });
+    }
+
     async cancelReconciliation(id: string, reason: string): Promise<BankReconciliation> {
         return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/cancel`, { reason });
     }

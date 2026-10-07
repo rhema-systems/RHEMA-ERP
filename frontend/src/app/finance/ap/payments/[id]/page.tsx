@@ -53,6 +53,7 @@ import {
     SettlementDimensionEvidence,
     SourceDocumentDimensionEvidence,
 } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { TransactionExchangeRateOverridePanel } from '@/components/finance/TransactionExchangeRateOverridePanel';
 
 const evidenceErrorDescription = (error: any) => {
     const problem = error?.response?.data ?? error?.response ?? error;
@@ -372,6 +373,15 @@ export default function VendorPaymentDetailsPage() {
 
     return (
         <div className="space-y-8 p-8 max-w-[1000px] mx-auto">
+            <TransactionExchangeRateOverridePanel
+                sourceDocumentType="VendorPayment"
+                sourceDocumentId={payment.id}
+                transactionCurrencyCode={payment.currencyCode}
+                governedExchangeRateId={payment.exchangeRateId}
+                governedRate={payment.exchangeRate}
+                canRequestForDocument={payment.status === 'Draft'}
+                ineligibleReason="Only a Draft AP payment can request an override."
+            />
             {/* Header Actions */}
             <div className="flex items-center justify-between no-print">
                 <div className="flex items-center space-x-4">

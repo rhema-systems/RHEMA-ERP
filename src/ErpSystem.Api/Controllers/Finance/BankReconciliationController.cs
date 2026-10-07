@@ -388,6 +388,40 @@ public class BankReconciliationController : ControllerBase
     }
 
     /// <summary>
+    /// Returns a completed reconciliation to its maker for controlled correction.
+    /// Existing matches and audit history are preserved; the maker must finalize again
+    /// before a fresh approval workflow can begin.
+    /// </summary>
+    [HttpPost("{id}/return-for-correction")]
+    [Authorize(Policy = FinancePermissions.ApproveBankReconciliation)]
+    public async Task<ActionResult<BankReconciliationDto>> ReturnForCorrection(
+        Guid id,
+        [FromBody] ReturnReconciliationForCorrectionDto dto,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+        {
+            return BadRequest(new { message = "A return-for-correction reason is required." });
+        }
+
+        try
+        {
+            return Ok(await _reconciliationService.ReturnForCorrectionAsync(id, dto.Reason, cancellationToken));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Return for correction not permitted",
+                detail: ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Retrieves a summary of the current reconciliation state including balance comparisons and match statistics.
     /// </summary>
     /// <remarks>

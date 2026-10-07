@@ -38,6 +38,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { GovernedOpeningPreflight } from '@/components/finance/opening-balances/GovernedOpeningPreflight';
 import { GovernedOpeningSources } from '@/components/finance/opening-balances/GovernedOpeningSources';
+import { TransactionExchangeRateOverridePanel } from '@/components/finance/TransactionExchangeRateOverridePanel';
 import { DEFAULT_ACCOUNTING_BOOKS, getAccountingBookName, isAccountEligibleForBook } from '@/lib/finance/accounting-books';
 import { getEligibleFixedAssetBookValueIds, getFixedAssetBulkSelectionState, reconcileFixedAssetSelection, toggleAllEligibleFixedAssets } from '@/lib/finance/fixed-asset-opening-selection';
 import { canLoadOpeningBalanceQueries, canPostOpeningBalanceBatch, hasCompleteGovernedOpeningHeader, isOpeningBalanceBatchImmutable, openingBalanceQueryKeys } from '@/lib/finance/opening-balance-governance';
@@ -958,6 +959,9 @@ export default function OpeningBalancesPage() {
     const immutableCurrentBatch = isOpeningBalanceBatchImmutable(currentBatch);
     const formReadOnly = !canPrepareOpeningBalances || immutableCurrentBatch || (Boolean(currentBatch) && !canEditCurrent);
     const selectedBookName = getAccountingBookName(accountingBooks, header.bookClassification);
+    const overrideOpeningLine = currentBatch?.lines.find((line) =>
+        Boolean(line.exchangeRateId)
+        && line.transactionCurrencyCode !== line.functionalCurrencyCode);
 
     if (authLoading || isLoadingTenants) {
         return <div className="flex min-h-[320px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
@@ -983,6 +987,16 @@ export default function OpeningBalancesPage() {
 
     return (
         <div className="space-y-6 p-8 max-w-[1600px] mx-auto">
+            {currentBatch && overrideOpeningLine?.exchangeRateId && (
+                <TransactionExchangeRateOverridePanel
+                    sourceDocumentType="OpeningBalanceBatch"
+                    sourceDocumentId={currentBatch.id}
+                    transactionCurrencyCode={overrideOpeningLine.transactionCurrencyCode}
+                    governedExchangeRateId={overrideOpeningLine.exchangeRateId}
+                    canRequestForDocument={!currentBatch.submittedAt && !currentBatch.postedAt}
+                    ineligibleReason="Only an unsubmitted opening-balance batch can request an override."
+                />
+            )}
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Opening Balances</h1>

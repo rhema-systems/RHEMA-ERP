@@ -38,6 +38,7 @@ import { useState } from 'react';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import { getFinancePostingErrorPresentation } from '@/lib/finance/posting-error';
+import { TransactionExchangeRateOverridePanel } from '@/components/finance/TransactionExchangeRateOverridePanel';
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
@@ -134,6 +135,15 @@ export default function InvoiceDetailsPage() {
     return (
         <>
         <div className={`${printStyles.screenRoot} space-y-8 p-8 max-w-[1000px] mx-auto`}>
+            <TransactionExchangeRateOverridePanel
+                sourceDocumentType="CustomerInvoice"
+                sourceDocumentId={invoice.id}
+                transactionCurrencyCode={invoice.currencyCode}
+                governedExchangeRateId={invoice.exchangeRateId}
+                governedRate={invoice.exchangeRate}
+                canRequestForDocument={invoice.status === 'Draft'}
+                ineligibleReason="Only a Draft AR invoice can request an override."
+            />
             {/* Header Actions */}
             <div className="flex items-center justify-between no-print">
                 <div className="flex items-center space-x-4">
