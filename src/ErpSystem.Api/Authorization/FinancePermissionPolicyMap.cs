@@ -181,6 +181,9 @@ public static class FinancePermissionPolicyMap
             "Currencies" => CurrencyPolicy(action, methods),
             "Customer" => CustomerPolicy(action, methods),
             "ExchangeRate" => ExchangeRatePolicy(action, methods),
+            "FinanceExchangeRateOverrides" => action == "Create"
+                ? One(FinancePermissions.RequestTransactionExchangeRateOverride)
+                : One(FinancePermissions.ViewFinance),
             "FinanceApprovals" => FinanceApprovalPolicy(action),
             "Finance" => FinanceControllerPolicy(action),
             "FinanceReportExports" => One(FinancePermissions.ExportFinanceReports),
@@ -343,7 +346,9 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> BankReconciliationPolicy(string action)
         => action switch
         {
-            "Approve" => One(FinancePermissions.ApproveBankReconciliation),
+            "Approve" or "ReturnForCorrection" => One(FinancePermissions.ApproveBankReconciliation),
+            // This is a read-only reviewer/reporting query; do not grant preparation rights.
+            "GetMatches" => One(FinancePermissions.ViewFinance),
             "StartReconciliation" or "CreateManualMatch" or "RemoveMatch" or "CreateAndPostAdjustment" or "Finalize" or "Cancel" => One(FinancePermissions.PerformBankReconciliation),
             _ when action.Contains("Match", StringComparison.OrdinalIgnoreCase) => One(FinancePermissions.PerformBankReconciliation),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.PerformBankReconciliation)

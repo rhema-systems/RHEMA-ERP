@@ -852,6 +852,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IExchangeRateService, ErpSystem.Api.Services.Finance.MultiCurrency.ExchangeRateService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.MultiCurrency.ExchangeRateWorkflowReconciliationService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.GL.RecurringJournalWorkflowReconciliationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceExchangeRateOverrideService, ErpSystem.Api.Services.Finance.MultiCurrency.FinanceExchangeRateOverrideService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFiscalPeriodService, ErpSystem.Api.Services.Finance.Fiscal.FiscalPeriodService>();
             // BudgetService is the single Finance-owned aggregate for scenarios,
             // departmental returns, consolidated reporting, and governed revisions.

@@ -40,6 +40,12 @@ public abstract class FinancePostingCommandDto
     public string? ExchangeRateOverrideReason { get; set; }
     public Guid? ExchangeRateOverrideApprovedByUserId { get; set; }
     public DateTime? ExchangeRateOverrideApprovedAt { get; set; }
+    /// <summary>
+    /// Durable workflow-backed request consumed for a numeric transaction-rate exception.
+    /// The posting engine resolves this value; API callers cannot use it as approval authority.
+    /// </summary>
+    public Guid? ExchangeRateOverrideRequestId { get; set; }
+    public Guid? ExchangeRateOverrideWorkflowInstanceId { get; set; }
 
     /// <summary>
     /// Allows a narrowly controlled corrective document to reuse the immutable exchange-rate

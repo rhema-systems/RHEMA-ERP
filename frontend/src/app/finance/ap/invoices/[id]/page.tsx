@@ -53,6 +53,7 @@ import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions
 import { InvoiceDistribution } from '@/components/finance/ap/InvoiceDistribution';
 import { getFinancePostingErrorPresentation } from '@/lib/finance/posting-error';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { TransactionExchangeRateOverridePanel } from '@/components/finance/TransactionExchangeRateOverridePanel';
 
 export default function VendorInvoiceDetailsPage() {
     const router = useRouter();
@@ -245,6 +246,15 @@ export default function VendorInvoiceDetailsPage() {
     return (
         <>
             <div className={`${printStyles.screenRoot} space-y-8 p-8 max-w-[1000px] mx-auto`}>
+            <TransactionExchangeRateOverridePanel
+                sourceDocumentType="VendorInvoice"
+                sourceDocumentId={invoice.id}
+                transactionCurrencyCode={invoice.currencyCode}
+                governedExchangeRateId={invoice.exchangeRateId}
+                governedRate={invoice.exchangeRate}
+                canRequestForDocument={invoice.status === 'Draft'}
+                ineligibleReason="Only a Draft AP invoice can request an override."
+            />
             {/* Header Actions */}
             <div className="flex flex-wrap items-center justify-between gap-3 no-print">
                 <div className="flex items-center space-x-4">

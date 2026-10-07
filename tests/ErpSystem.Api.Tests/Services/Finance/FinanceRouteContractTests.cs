@@ -82,6 +82,17 @@ public sealed class FinanceRouteContractTests
             "/finance/opening-balances?batchId=11111111-2222-3333-4444-555555555555");
     }
 
+    [Fact]
+    [Trait("Category", "RouteContract")]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    public void BankReconciliationApprovalWithoutDisplayRoute_ShouldDeepLinkToRequestedReconciliation()
+    {
+        var reconciliationId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+
+        FinanceApprovalsController.ResolveDetailHref("BankReconciliation", reconciliationId, null)
+            .Should().Be("/finance/cash/reconciliation?reconciliation=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    }
+
     [Theory]
     [Trait("Category", "RouteContract")]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]

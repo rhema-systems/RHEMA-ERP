@@ -100,6 +100,7 @@ export default function BankReconciliationPage() {
     const canPerformReconciliation = hasPermission('Finance.BankReconciliation.Perform');
     const canApproveReconciliation = hasPermission('Finance.BankReconciliation.Approve');
     const searchParams = useSearchParams();
+    const requestedReconciliationId = searchParams.get('reconciliation') ?? '';
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const [selectedAccountId, setSelectedAccountId] = useState(searchParams.get('account') ?? '');
@@ -129,10 +130,23 @@ export default function BankReconciliationPage() {
         queryFn: () => cashManagementDataService.getActiveBankAccounts(),
     });
 
+    const requestedReconciliationQuery = useQuery({
+        queryKey: ['bank-reconciliation', requestedReconciliationId],
+        queryFn: () => cashManagementDataService.getBankReconciliationById(requestedReconciliationId),
+        enabled: Boolean(requestedReconciliationId),
+    });
+
+    useEffect(() => {
+        const bankAccountId = requestedReconciliationQuery.data?.bankAccountId;
+        if (bankAccountId && bankAccountId !== selectedAccountId) {
+            setSelectedAccountId(bankAccountId);
+        }
+    }, [requestedReconciliationQuery.data?.bankAccountId, selectedAccountId]);
+
     const statementsQuery = useQuery({
         queryKey: ['bank-statements', selectedAccountId],
         queryFn: () => cashManagementDataService.getBankStatements(selectedAccountId),
-        enabled: Boolean(selectedAccountId),
+        enabled: Boolean(selectedAccountId) && !requestedReconciliationId,
     });
 
     const activeReconciliationQuery = useQuery({
@@ -210,6 +224,26 @@ export default function BankReconciliationPage() {
         setReconciliationDate(format(new Date(statement.statementDate), 'yyyy-MM-dd'));
     };
 
+    if (requestedReconciliationId && requestedReconciliationQuery.isLoading) {
+        return <div className="flex justify-center p-16"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+    }
+
+    if (requestedReconciliationId && requestedReconciliationQuery.isError) {
+        return (
+            <div className="mx-auto max-w-3xl p-8">
+                <Card className="border-destructive/40">
+                    <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
+                        <AlertCircle className="h-10 w-10 text-destructive" />
+                        <h2 className="text-lg font-semibold">Unable to open this reconciliation</h2>
+                        <p className="text-sm text-muted-foreground">
+                            {errorMessage(requestedReconciliationQuery.error, 'The reconciliation could not be loaded.')}
+                        </p>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
+
     if (!selectedAccountId) {
         return (
             <div className="mx-auto max-w-4xl space-y-6 p-8">
@@ -257,7 +291,7 @@ export default function BankReconciliationPage() {
         );
     }
 
-    const activeReconciliation = activeReconciliationQuery.data;
+    const activeReconciliation = requestedReconciliationQuery.data ?? activeReconciliationQuery.data;
 
     return (
         <div className="mx-auto max-w-[1600px] space-y-6 p-8">
@@ -288,7 +322,7 @@ export default function BankReconciliationPage() {
                 </div>
             </div>
 
-            {activeReconciliationQuery.isLoading ? (
+            {activeReconciliationQuery.isLoading && !requestedReconciliationId ? (
                 <div className="flex justify-center p-16"><Loader2 className="h-8 w-8 animate-spin" /></div>
             ) : activeReconciliation ? (
                 <ReconciliationWorkspace
@@ -508,6 +542,8 @@ function ReconciliationWorkspace({
     const [selectedLineId, setSelectedLineId] = useState('');
     const [adjustmentOpen, setAdjustmentOpen] = useState(false);
     const [cancelOpen, setCancelOpen] = useState(false);
+    const [returnOpen, setReturnOpen] = useState(false);
+    const [returnReason, setReturnReason] = useState('');
     const currency = account?.currency ?? '';
     const canEdit = canPerform && (reconciliation.status === ReconciliationStatus.InProgress || reconciliation.status === ReconciliationStatus.Pending);
 
@@ -530,6 +566,7 @@ function ReconciliationWorkspace({
             queryClient.invalidateQueries({ queryKey: ['reconciliation-matches', reconciliation.id] }),
             queryClient.invalidateQueries({ queryKey: ['active-reconciliation', reconciliation.bankAccountId] }),
             queryClient.invalidateQueries({ queryKey: ['bank-account-reconciliations', reconciliation.bankAccountId] }),
+            queryClient.invalidateQueries({ queryKey: ['bank-reconciliation', reconciliation.id] }),
         ]);
     };
 
@@ -591,6 +628,20 @@ function ReconciliationWorkspace({
             });
         },
         onError: mutationError('Approval failed', 'The approval workflow could not be completed.'),
+    });
+
+    const returnMutation = useMutation({
+        mutationFn: () => cashManagementDataService.returnReconciliationForCorrection(reconciliation.id, returnReason.trim()),
+        onSuccess: async () => {
+            await refresh();
+            setReturnOpen(false);
+            setReturnReason('');
+            toast({
+                title: 'Returned for correction',
+                description: 'The reconciliation is open for correction and must be finalized and submitted again.',
+            });
+        },
+        onError: mutationError('Unable to return reconciliation', 'The reconciliation could not be returned for correction.'),
     });
 
     const summary = summaryQuery.data;
@@ -733,10 +784,16 @@ function ReconciliationWorkspace({
                             Finalize reconciliation
                         </Button>
                     ) : canApprove && reconciliation.status === ReconciliationStatus.Completed ? (
-                        <Button onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending}>
-                            {approveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Approve reconciliation
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                            <Button variant="destructive" onClick={() => setReturnOpen(true)} disabled={approveMutation.isPending || returnMutation.isPending}>
+                                <XCircle className="mr-2 h-4 w-4" />
+                                Return for correction
+                            </Button>
+                            <Button onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending || returnMutation.isPending}>
+                                {approveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Approve reconciliation
+                            </Button>
+                        </div>
                     ) : isMaker && reconciliation.status === ReconciliationStatus.Completed ? (
                         <p className="text-sm text-muted-foreground">A different authorized user must approve this reconciliation.</p>
                     ) : null}
@@ -771,6 +828,37 @@ function ReconciliationWorkspace({
                 </div>
                 <p className="mt-6 text-xs">Generated {format(new Date(), 'dd MMM yyyy HH:mm')}</p>
             </section>
+
+            <Dialog open={returnOpen} onOpenChange={setReturnOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Return reconciliation for correction</DialogTitle>
+                        <DialogDescription>
+                            The existing matches and audit history will be preserved. The maker must correct and finalize the reconciliation before it can be approved again.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <Label htmlFor="return-reason">Reason</Label>
+                        <Textarea
+                            id="return-reason"
+                            value={returnReason}
+                            onChange={(event) => setReturnReason(event.target.value)}
+                            placeholder="Describe the correction required"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setReturnOpen(false)} disabled={returnMutation.isPending}>Cancel</Button>
+                        <Button
+                            variant="destructive"
+                            onClick={() => returnMutation.mutate()}
+                            disabled={!returnReason.trim() || returnMutation.isPending}
+                        >
+                            {returnMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Return for correction
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {canPerform && <>
                 <AdjustmentDialog

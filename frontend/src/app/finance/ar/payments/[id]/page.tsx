@@ -31,6 +31,7 @@ import {
     SettlementDimensionEvidence,
     SourceDocumentDimensionEvidence,
 } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { TransactionExchangeRateOverridePanel } from '@/components/finance/TransactionExchangeRateOverridePanel';
 
 export default function CustomerReceiptDetailsPage() {
     const router = useRouter();
@@ -111,6 +112,15 @@ export default function CustomerReceiptDetailsPage() {
 
     return (
         <div className="space-y-8 p-8 max-w-[1100px] mx-auto">
+            <TransactionExchangeRateOverridePanel
+                sourceDocumentType="CustomerPayment"
+                sourceDocumentId={payment.id}
+                transactionCurrencyCode={payment.currencyCode}
+                governedExchangeRateId={payment.exchangeRateId}
+                governedRate={payment.exchangeRate}
+                canRequestForDocument={!payment.journalEntryId && payment.status === 'Pending'}
+                ineligibleReason="Only an unposted Pending AR receipt can request an override."
+            />
             <div className="flex flex-wrap items-center justify-between gap-4 no-print">
                 <div className="flex items-center gap-4">
                     <Button variant="ghost" size="icon" onClick={() => router.push('/finance/ar/receipts')}>

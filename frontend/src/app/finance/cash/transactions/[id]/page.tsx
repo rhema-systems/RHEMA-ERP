@@ -29,6 +29,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { TransactionExchangeRateOverridePanel } from '@/components/finance/TransactionExchangeRateOverridePanel';
 
 export default function CashTransactionDetailsPage() {
     const router = useRouter();
@@ -110,6 +111,15 @@ export default function CashTransactionDetailsPage() {
 
     return (
         <div className="mx-auto max-w-[1100px] space-y-8 p-8">
+            <TransactionExchangeRateOverridePanel
+                sourceDocumentType="CashTransaction"
+                sourceDocumentId={transaction.id}
+                transactionCurrencyCode={transaction.currency}
+                governedExchangeRateId={transaction.exchangeRateId}
+                governedRate={transaction.exchangeRate}
+                canRequestForDocument={!transaction.isPosted && transaction.approvalStatusName === 'Captured'}
+                ineligibleReason="Only a captured, unposted cash/bank transaction can request an override."
+            />
             <div className="flex flex-wrap items-center justify-between gap-4 no-print">
                 <div className="flex items-center gap-4">
                     <Button variant="ghost" size="icon" onClick={() => router.push('/finance/cash/transactions')}><ArrowLeft className="h-4 w-4" /></Button>

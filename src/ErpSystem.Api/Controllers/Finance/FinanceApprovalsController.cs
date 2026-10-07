@@ -66,6 +66,7 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("BudgetReturn"),
         Normalize("BudgetRevision"),
         Normalize("FinanceBudgetOverride"),
+        Normalize("FinanceExchangeRateOverride"),
         Normalize("UnitJournalEntry"),
         Normalize("UnitAccountBudget"),
         Normalize("AllocationRule"),
@@ -105,6 +106,7 @@ public class FinanceApprovalsController : ControllerBase
     private readonly ILeaseAccountingService? _leaseAccountingService;
     private readonly IBankingSettlementService? _bankingSettlementService;
     private readonly IBankReconciliationService? _bankReconciliationService;
+    private readonly IFinanceExchangeRateOverrideService? _exchangeRateOverrides;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
@@ -124,7 +126,8 @@ public class FinanceApprovalsController : ControllerBase
         IFinanceBudgetControlService? budgetControl = null,
         ILeaseAccountingService? leaseAccountingService = null,
         IBankingSettlementService? bankingSettlementService = null,
-        IBankReconciliationService? bankReconciliationService = null)
+        IBankReconciliationService? bankReconciliationService = null,
+        IFinanceExchangeRateOverrideService? exchangeRateOverrides = null)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -144,6 +147,7 @@ public class FinanceApprovalsController : ControllerBase
         _leaseAccountingService = leaseAccountingService;
         _bankingSettlementService = bankingSettlementService;
         _bankReconciliationService = bankReconciliationService;
+        _exchangeRateOverrides = exchangeRateOverrides;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -188,6 +192,8 @@ public class FinanceApprovalsController : ControllerBase
             .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookPeriods)).Succeeded;
         var canApproveBookInitialization = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookInitialization)).Succeeded;
+        var canApproveTransactionFxOverride = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveTransactionExchangeRateOverride)).Succeeded;
 
         var currentRoles = roleSet.ToArray();
         var pageRows = await QueryPendingApprovals(tenantId)
@@ -479,6 +485,7 @@ public class FinanceApprovalsController : ControllerBase
             var isPaymentApproval =
                 string.Equals(Normalize(entityType), Normalize("VendorPayment"), StringComparison.Ordinal) ||
                 string.Equals(Normalize(entityType), Normalize("PaymentBatch"), StringComparison.Ordinal);
+            var isTransactionFxOverride = Normalize(entityType) == Normalize("FinanceExchangeRateOverride");
             if (isPaymentApproval)
             {
                 if (!canApproveApPayments)
@@ -526,21 +533,29 @@ public class FinanceApprovalsController : ControllerBase
                 : null;
             var approveDisabledReason = GetActionDisabledReason(
                 "approve",
-                FinancePermissions.WorkflowApprove,
-                canApproveByPermission,
+                isTransactionFxOverride
+                    ? FinancePermissions.ApproveTransactionExchangeRateOverride
+                    : FinancePermissions.WorkflowApprove,
+                canApproveByPermission && (!isTransactionFxOverride || canApproveTransactionFxOverride),
                 submitterApprovalBlocked || paymentSodBlocked || bankDepositPermissionBlocked || bankReconciliationPermissionBlocked,
                 paymentSodReason ?? bankDepositPermissionReason ?? bankReconciliationPermissionReason);
             var rejectDisabledReason = GetActionDisabledReason(
                 "reject",
-                FinancePermissions.WorkflowReject,
-                canRejectByPermission,
+                isTransactionFxOverride
+                    ? FinancePermissions.ApproveTransactionExchangeRateOverride
+                    : FinancePermissions.WorkflowReject,
+                canRejectByPermission && (!isTransactionFxOverride || canApproveTransactionFxOverride),
                 submitterApprovalBlocked || bankDepositPermissionBlocked || bankReconciliationPermissionBlocked,
                 bankDepositPermissionReason ?? bankReconciliationPermissionReason);
 
             results.Add(await MapApprovalAsync(
                 approval,
-                canApproveByPermission && !submitterApprovalBlocked && !paymentSodBlocked && !bankDepositPermissionBlocked && !bankReconciliationPermissionBlocked,
-                canRejectByPermission && !submitterApprovalBlocked && !bankDepositPermissionBlocked && !bankReconciliationPermissionBlocked,
+                canApproveByPermission && (!isTransactionFxOverride || canApproveTransactionFxOverride)
+                    && !submitterApprovalBlocked && !paymentSodBlocked
+                    && !bankDepositPermissionBlocked && !bankReconciliationPermissionBlocked,
+                canRejectByPermission && (!isTransactionFxOverride || canApproveTransactionFxOverride)
+                    && !submitterApprovalBlocked
+                    && !bankDepositPermissionBlocked && !bankReconciliationPermissionBlocked,
                 approveDisabledReason,
                 rejectDisabledReason,
                 cancellationToken));
@@ -665,6 +680,16 @@ public class FinanceApprovalsController : ControllerBase
                 statusCode: StatusCodes.Status403Forbidden,
                 title: "Bank reconciliation decision not permitted",
                 detail: $"Your roles do not include {FinancePermissions.ApproveBankReconciliation}.");
+        }
+
+        if (Normalize(entityType) == Normalize("FinanceExchangeRateOverride")
+            && !(await _authorizationService.AuthorizeAsync(
+                User, FinancePermissions.ApproveTransactionExchangeRateOverride)).Succeeded)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Transaction exchange-rate override approval not permitted",
+                detail: $"Your roles do not include {FinancePermissions.ApproveTransactionExchangeRateOverride}.");
         }
 
         if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
@@ -1228,6 +1253,14 @@ public class FinanceApprovalsController : ControllerBase
             if (journalId.HasValue)
                 detailHref = $"/finance/journal-entries/{journalId.Value:D}";
         }
+        if (Normalize(entityType) == Normalize("FinanceExchangeRateOverride"))
+        {
+            var item = await _db.FinanceExchangeRateOverrideRequests.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.TenantId == approval.TenantId
+                    && x.Id == instance.EntityId && !x.IsDeleted, cancellationToken);
+            if (item != null)
+                detailHref = ResolveExchangeRateOverrideDetailHref(item.SourceDocumentType, item.SourceDocumentId);
+        }
 
         return new FinanceApprovalQueueItemDto
         {
@@ -1278,6 +1311,16 @@ public class FinanceApprovalsController : ControllerBase
                 item.RequestedAt,
                 item.ShortfallAmount,
                 item.CurrencyCode);
+        }
+
+        if (key == Normalize("FinanceExchangeRateOverride"))
+        {
+            var item = await _db.FinanceExchangeRateOverrideRequests.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted, cancellationToken);
+            return item == null ? FinanceApprovalFacts.Empty : new(
+                $"FX override - {item.SourceDocumentReference ?? item.SourceDocumentId.ToString()}",
+                $"{item.TransactionCurrencyCode} governed {item.GovernedRate:0.######} -> requested {item.RequestedRate:0.######}. {item.Reason}",
+                item.Status, item.RequestedAtUtc, null, item.TransactionCurrencyCode);
         }
 
         if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
@@ -1684,6 +1727,15 @@ public class FinanceApprovalsController : ControllerBase
             if (_budgetControl == null)
                 throw new InvalidOperationException("Finance budget control is not configured.");
             await _budgetControl.ApplyOverrideOutcomeAsync(entityId, true, userId, comments, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("FinanceExchangeRateOverride"))
+        {
+            if (_exchangeRateOverrides == null)
+                throw new InvalidOperationException("Transaction exchange-rate override control is not configured.");
+            await _exchangeRateOverrides.ApplyWorkflowOutcomeAsync(
+                entityId, true, userId, comments, cancellationToken);
             return;
         }
 
@@ -2354,6 +2406,15 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
+        if (key == Normalize("FinanceExchangeRateOverride"))
+        {
+            if (_exchangeRateOverrides == null)
+                throw new InvalidOperationException("Transaction exchange-rate override control is not configured.");
+            await _exchangeRateOverrides.ApplyWorkflowOutcomeAsync(
+                entityId, false, userId, reason, cancellationToken);
+            return;
+        }
+
         if (key == Normalize("FinancePurchaseOrder"))
         {
             await UpdateIfFoundAsync(_db.FinancePurchaseOrders, tenantId, entityId, item =>
@@ -2642,6 +2703,8 @@ public class FinanceApprovalsController : ControllerBase
                 return;
             }
 
+            // A workflow rejection is a controlled return to the maker. Preserve the
+            // reconciliation and its matches; the rejected workflow remains audit history.
             reconciliation.Status = ReconciliationStatus.InProgress;
             reconciliation.ReconciledAt = null;
             reconciliation.ReconciledBy = null;
@@ -2649,7 +2712,9 @@ public class FinanceApprovalsController : ControllerBase
             reconciliation.ApprovedBy = null;
             reconciliation.UpdatedAt = now;
             reconciliation.UpdatedBy = _currentUserService.UserName ?? "system";
-            reconciliation.Notes = AppendReason(reconciliation.Notes, reason);
+            reconciliation.Notes = string.IsNullOrWhiteSpace(reconciliation.Notes)
+                ? $"Returned for correction: {reason.Trim()}"
+                : $"{reconciliation.Notes}{Environment.NewLine}Returned for correction: {reason.Trim()}";
             await _db.SaveChangesAsync(cancellationToken);
             await RecordBankReconciliationAuditAsync(
                 tenantId,
@@ -3277,6 +3342,7 @@ public class FinanceApprovalsController : ControllerBase
         return key is "EXCHANGERATE"
             or "FINANCEBUDGETOVERRIDE"
             or "JOURNALBATCH"
+            or "FINANCEEXCHANGERATEOVERRIDE"
             or "VENDORPAYMENT"
             or "PAYMENTBATCH"
             or "OPENINGBALANCEBATCH"
@@ -3291,6 +3357,19 @@ public class FinanceApprovalsController : ControllerBase
             or "RECURRINGJOURNALOCCURRENCE"
             or "RECURRINGJOURNALOCCURRENCEWAIVER";
     }
+
+    private static string ResolveExchangeRateOverrideDetailHref(string sourceDocumentType, Guid sourceDocumentId)
+        => Normalize(sourceDocumentType) switch
+        {
+            "VENDORINVOICE" => $"/finance/ap/invoices/{sourceDocumentId:D}",
+            "VENDORPAYMENT" => $"/finance/ap/payments/{sourceDocumentId:D}",
+            "CUSTOMERINVOICE" => $"/finance/ar/invoices/{sourceDocumentId:D}",
+            "CUSTOMERPAYMENT" => $"/finance/ar/payments/{sourceDocumentId:D}",
+            "MANUALJOURNALENTRY" => $"/finance/journal-entries/{sourceDocumentId:D}",
+            "OPENINGBALANCEBATCH" => $"/finance/opening-balances?batchId={sourceDocumentId:D}",
+            "ASSETDISPOSAL" => $"/finance/fixed-assets/disposals?disposalId={sourceDocumentId:D}",
+            _ => "/finance/approvals"
+        };
 
     private static string? GetActionDisabledReason(
         string action,

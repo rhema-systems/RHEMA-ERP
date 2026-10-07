@@ -96,6 +96,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     // Finance entities
     public DbSet<ExchangeRate> ExchangeRates { get; set; }
+    public DbSet<FinanceExchangeRateOverrideRequest> FinanceExchangeRateOverrideRequests { get; set; }
     public DbSet<FiscalYear> FiscalYears { get; set; }
     public DbSet<FiscalPeriod> FiscalPeriods { get; set; }
     public DbSet<FinanceCloseCycle> FinanceCloseCycles { get; set; }
@@ -6260,6 +6261,26 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
           });
 
         // Configure ReconciliationMatch â†’ BankStatementLine 1:1 (ReconciliationMatch is dependent)
+          builder.Entity<FinanceExchangeRateOverrideRequest>(entity =>
+          {
+              entity.ToTable("FinanceExchangeRateOverrideRequests");
+              entity.HasIndex(e => new { e.TenantId, e.SourceDocumentType, e.SourceDocumentId, e.TransactionCurrencyCode, e.RequestedAtUtc });
+              entity.HasIndex(e => new { e.TenantId, e.SourceDocumentType, e.SourceDocumentId, e.TransactionCurrencyCode })
+                  .IsUnique()
+                  .HasFilter("[IsDeleted] = 0 AND [Status] IN ('PendingApproval', 'Approved')");
+              entity.HasIndex(e => e.WorkflowInstanceId)
+                  .IsUnique()
+                  .HasFilter("[WorkflowInstanceId] IS NOT NULL");
+              entity.HasOne(e => e.GovernedExchangeRate).WithMany()
+                  .HasForeignKey(e => e.GovernedExchangeRateId).OnDelete(DeleteBehavior.Restrict);
+              entity.HasOne(e => e.WorkflowInstance).WithMany()
+                  .HasForeignKey(e => e.WorkflowInstanceId).OnDelete(DeleteBehavior.Restrict);
+              entity.HasOne(e => e.ConsumedByPostingEvent).WithMany()
+                  .HasForeignKey(e => e.ConsumedByPostingEventId).OnDelete(DeleteBehavior.Restrict);
+              entity.HasOne(e => e.Tenant).WithMany()
+                  .HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+          });
+
         builder.Entity<ReconciliationMatch>(entity =>
         {
             entity.HasIndex(e => e.TenantId);
@@ -6978,6 +6999,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         // Configure decimal precision globally
         ConfigureDecimalPrecision(builder);
+        builder.Entity<FinanceExchangeRateOverrideRequest>(entity =>
+        {
+            entity.Property(e => e.GovernedRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.RequestedRate).HasColumnType("decimal(18,6)");
+        });
         ConfigureQuantitySurveyRateDecimalPrecision(builder);
 
         // Retained receipt/return evidence must preserve the source conversion and rate,

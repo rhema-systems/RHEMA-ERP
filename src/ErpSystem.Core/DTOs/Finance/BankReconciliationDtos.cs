@@ -110,6 +110,11 @@ public class CancelReconciliationDto
     public string Reason { get; set; } = string.Empty;
 }
 
+public class ReturnReconciliationForCorrectionDto
+{
+    public string Reason { get; set; } = string.Empty;
+}
+
 public class ReconciliationSummaryDto
 {
     public Guid ReconciliationId { get; set; }

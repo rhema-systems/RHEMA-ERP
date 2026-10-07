@@ -58,13 +58,8 @@ public sealed class BankReconciliationPostingMigrationTests
         statementLine.TransactionDate = fixture.Transaction.TransactionDate.AddDays(4);
         statementLine.ReferenceNumber = fixture.Transaction.ReferenceNumber;
         statementLine.Description = fixture.Transaction.Description;
-        var settings = new FinanceSettings
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            BankStatementMatchDateToleranceDays = 3
-        };
-        db.FinanceSettings.Add(settings);
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.BankStatementMatchDateToleranceDays = 3;
         await db.SaveChangesAsync();
 
         var service = CreateReconciliationService(db, tenantId);
@@ -1226,6 +1221,45 @@ public sealed class BankReconciliationPostingMigrationTests
             .IsDeleted.Should().BeTrue();
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task ReturnForCorrection_ShouldPreserveMatchesAndRequireFreshFinalization()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedPostedCashTransactionAsync(db, tenantId, CashTransactionType.Receipt, 100m);
+        var statementLine = SeedStatementLine(db, tenantId, fixture.BankAccount.Id, creditAmount: 100m);
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(db, tenantId);
+        var reconciliation = await service.StartReconciliationAsync(new StartReconciliationDto
+        {
+            BankAccountId = fixture.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 100m,
+            StatementId = statementLine.BankStatementId
+        });
+        var match = await service.CreateManualMatchAsync(new CreateManualMatchDto
+        {
+            ReconciliationId = reconciliation.Id,
+            CashTransactionId = fixture.Transaction.Id,
+            BankStatementLineId = statementLine.Id
+        });
+        await service.FinalizeReconciliationAsync(reconciliation.Id);
+
+        var returned = await service.ReturnForCorrectionAsync(reconciliation.Id, "Confirm the deposit reference");
+
+        returned.Status.Should().Be(ReconciliationStatus.InProgress);
+        returned.Notes.Should().Contain("Returned for correction: Confirm the deposit reference");
+        (await db.Set<ReconciliationMatch>().SingleAsync(item => item.Id == match.Id)).IsDeleted.Should().BeFalse();
+        (await db.AuditLogs.CountAsync(item =>
+            item.TenantId == tenantId &&
+            item.Action == FinanceAuditEvents.BankReconciliationReturnedForCorrection)).Should().Be(1);
+
+        var resubmitted = await service.FinalizeReconciliationAsync(reconciliation.Id);
+        resubmitted.Status.Should().Be(ReconciliationStatus.Completed);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -1254,7 +1288,10 @@ public sealed class BankReconciliationPostingMigrationTests
         Guid? currentUserId = null,
         WorkflowExecutionResult? workflowStartResult = null)
     {
+        EnsureSourceBookAuthorityTenantConfiguration(db, tenantId);
+        db.SaveChanges();
         var currentUser = CreateCurrentUserService(tenantId, currentUserId);
+        var sourceBookAuthority = new FinanceSourceBookAuthorityService(db, currentUser.Object);
         var auditService = new FinanceAuditService(
             db,
             currentUser.Object,
@@ -1272,7 +1309,7 @@ public sealed class BankReconciliationPostingMigrationTests
                 new FinanceDimensionAdministrationService(db, currentUser.Object));
         }
         var cashService = CreateCashTransactionService(
-            db, currentUser.Object, auditService, documentPrefix, sourceDimensions);
+            db, currentUser.Object, auditService, documentPrefix, sourceDimensions, sourceBookAuthority);
         var workflow = new Mock<IWorkflowService>();
         workflow.Setup(x => x.StartApprovalWorkflowAsync("BankReconciliation", It.IsAny<Guid>()))
             .ReturnsAsync(workflowStartResult ?? new WorkflowExecutionResult
@@ -1286,6 +1323,8 @@ public sealed class BankReconciliationPostingMigrationTests
             .ReturnsAsync(true);
         workflow.Setup(x => x.ProcessApprovalStepAsync("BankReconciliation", It.IsAny<Guid>(), It.IsAny<Guid>(), "Approve", It.IsAny<string?>()))
             .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
+        workflow.Setup(x => x.ProcessApprovalStepAsync("BankReconciliation", It.IsAny<Guid>(), It.IsAny<Guid>(), "Reject", It.IsAny<string?>()))
+            .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Cancelled });
 
         return new BankReconciliationService(
             db,
@@ -1293,7 +1332,8 @@ public sealed class BankReconciliationPostingMigrationTests
             currentUser.Object,
             workflow.Object,
             cashService,
-            auditService);
+            auditService,
+            sourceBookAuthority);
     }
 
     private static CashTransactionService CreateCashTransactionService(
@@ -1301,7 +1341,8 @@ public sealed class BankReconciliationPostingMigrationTests
         ICurrentUserService currentUser,
         IFinanceAuditService auditService,
         string documentPrefix,
-        IFinanceSourceDimensionService? sourceDimensions = null)
+        IFinanceSourceDimensionService? sourceDimensions = null,
+        IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
     {
         var postingEngine = new FinancePostingEngine(
             db,
@@ -1334,7 +1375,8 @@ public sealed class BankReconciliationPostingMigrationTests
             new FinanceReversalPolicyService(db, currentUser),
             postingEngine,
             auditService,
-            sourceDimensions: sourceDimensions);
+            sourceDimensions: sourceDimensions,
+            sourceBookAuthority: sourceBookAuthority ?? new FinanceSourceBookAuthorityService(db, currentUser));
     }
 
     private static Mock<IFinanceAccessScopeService> CreateUnrestrictedFinanceAccessScope()
@@ -1367,6 +1409,7 @@ public sealed class BankReconciliationPostingMigrationTests
         CashTransactionType transactionType,
         decimal amount)
     {
+        EnsureSourceBookAuthorityTenantConfiguration(db, tenantId);
         var setup = SeedBankSetup(db, tenantId, "BANK-001", 0m);
         var offset = SeedAccount(
             db,
@@ -1384,17 +1427,91 @@ public sealed class BankReconciliationPostingMigrationTests
             isPosted: false,
             amount: amount);
         await db.SaveChangesAsync();
+        var currentUser = CreateCurrentUserService(tenantId);
+        var sourceBookAuthority = new FinanceSourceBookAuthorityService(db, currentUser.Object);
+        var producer = new FinancePostingProducerContext(transactionType switch
+        {
+            CashTransactionType.Receipt => FinanceDimensionRouteId.FinanceCashReceipt,
+            CashTransactionType.Payment => FinanceDimensionRouteId.FinanceCashPayment,
+            CashTransactionType.Transfer => FinanceDimensionRouteId.FinanceCashBankTransfer,
+            _ => throw new InvalidOperationException("Unsupported cash transaction type.")
+        });
+        var authority = await sourceBookAuthority.FreezeInitialPrimaryAsync(
+            new FinanceSourceBookAuthorityFreezeRequest
+            {
+                OriginModuleCode = ErpSystem.Core.Finance.FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                    producer.Definition.ProducerModule),
+                SourceDocumentType = producer.Definition.DocumentType,
+                SourceDocumentId = transaction.Id,
+                PostingAction = "Post",
+                EffectiveDate = transaction.TransactionDate,
+                TransactionCurrencyCode = transaction.Currency,
+                FreezeStage = FinanceSourceBookAuthorityFreezeStages.Authorized,
+                SourceWorkflowInstanceId = transaction.WorkflowInstanceId,
+                SourceWorkflowEntityType = "CashTransaction"
+            });
+        transaction.SourceBookAuthorityId = authority.AuthorityId;
+        await db.SaveChangesAsync();
         var cashService = CreateCashTransactionService(
             db,
-            CreateCurrentUserService(tenantId).Object,
+            currentUser.Object,
             new FinanceAuditService(
                 db,
-                CreateCurrentUserService(tenantId).Object,
+                currentUser.Object,
                 new HttpContextAccessor { HttpContext = new DefaultHttpContext() }),
-            "SEED");
+            "SEED",
+            sourceBookAuthority: sourceBookAuthority);
         await cashService.PostAsync(transaction.Id);
         var posted = await db.Set<CashTransaction>().SingleAsync(t => t.Id == transaction.Id);
         return new CashFixture(posted, setup.BankAccount, setup.BankGlAccount, offset);
+    }
+
+    private static void EnsureSourceBookAuthorityTenantConfiguration(
+        ApplicationDbContext db,
+        Guid tenantId)
+    {
+        if (!db.Tenants.Local.Any(item => item.Id == tenantId)
+            && !db.Tenants.Any(item => item.Id == tenantId))
+        {
+            db.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Code = $"BRC{tenantId:N}"[..12].ToUpperInvariant(),
+                Name = "Bank reconciliation test tenant",
+                Status = TenantStatus.Active,
+                BaseCurrency = "GHS"
+            });
+        }
+
+        if (!db.FinanceSettings.Local.Any(item => item.TenantId == tenantId)
+            && !db.FinanceSettings.Any(item => item.TenantId == tenantId))
+        {
+            db.FinanceSettings.Add(new FinanceSettings
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                BaseCurrency = "GHS"
+            });
+        }
+
+        if (!db.AccountingBooks.Local.Any(item => item.TenantId == tenantId && item.Code == "IFRS")
+            && !db.AccountingBooks.Any(item => item.TenantId == tenantId && item.Code == "IFRS"))
+        {
+            db.AccountingBooks.Add(new AccountingBook
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Code = "IFRS",
+                Name = "IFRS Primary",
+                Purpose = "Primary",
+                BookType = AccountingBookType.PrimaryFull,
+                LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                FunctionalCurrencyCode = "GHS",
+                IsDefault = true,
+                IsActive = true,
+                AllowsPosting = true
+            });
+        }
     }
 
     private static CashTransaction SeedCashTransaction(

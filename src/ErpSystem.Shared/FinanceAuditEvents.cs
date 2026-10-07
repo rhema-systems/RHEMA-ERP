@@ -371,6 +371,12 @@ public static class FinanceAuditEvents
     public const string ExchangeRateEditRejectedAfterUse = "Finance.FX.ExchangeRateEditRejectedAfterUse";
     public const string ExchangeRatePolicyChanged = "Finance.FX.RatePolicyChanged";
     public const string ExchangeRatePolicyOverrideUsed = "Finance.FX.RatePolicyOverrideUsed";
+    public const string TransactionExchangeRateOverrideRequested = "Finance.FX.TransactionRateOverride.Requested";
+    public const string TransactionExchangeRateOverrideApproved = "Finance.FX.TransactionRateOverride.Approved";
+    public const string TransactionExchangeRateOverrideRejected = "Finance.FX.TransactionRateOverride.Rejected";
+    public const string TransactionExchangeRateOverrideSuperseded = "Finance.FX.TransactionRateOverride.Superseded";
+    public const string TransactionExchangeRateOverrideConsumed = "Finance.FX.TransactionRateOverride.Consumed";
+    public const string TransactionExchangeRateOverridePostingBlocked = "Finance.FX.TransactionRateOverride.PostingBlocked";
     public const string ForeignCurrencyPostingBlockedInvalidRate = "Finance.FX.ForeignCurrencyPostingBlockedInvalidRate";
     public const string CurrencySnapshotCapturedInPosting = "Finance.FX.CurrencySnapshotCapturedInPosting";
     public const string FxAccountMappingChanged = "Finance.FX.AccountMappingChanged";

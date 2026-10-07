@@ -26,6 +26,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IFinanceBudgetControlService? _budgetControl;
     private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
+    private readonly IFinanceExchangeRateOverrideService? _exchangeRateOverrides;
     private readonly IBookBalanceReadModelService _bookBalances;
 
     public FinancePostingEngine(
@@ -35,7 +36,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         IFinanceAuditService? financeAuditService = null,
         IFinanceBudgetControlService? budgetControl = null,
         IFinanceBudgetCommitmentService? budgetCommitments = null,
-        IBookBalanceReadModelService? bookBalances = null)
+        IBookBalanceReadModelService? bookBalances = null,
+        IFinanceExchangeRateOverrideService? exchangeRateOverrides = null)
     {
         _context = context;
         _currentUserService = currentUserService;
@@ -44,6 +46,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         _budgetControl = budgetControl;
         _budgetCommitments = budgetCommitments;
         _bookBalances = bookBalances ?? new BookBalanceReadModelService(context);
+        _exchangeRateOverrides = exchangeRateOverrides;
     }
 
     public async Task<FinancePostingResultDto> PostAsync(
@@ -103,7 +106,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             producerContext: null, allowHistoricalMappingException: reverse, cancellationToken, cycle);
         if (validation.AccountingBookId != cycle.AccountingBookId)
             throw new InvalidOperationException("The resolved accounting book differs from the frozen close cycle.");
-        return await ExecutePostingAsync(tenantId, validation, request, accountingEventContext: null, cancellationToken, cycle);
+        return await ExecutePostingAsync(tenantId, validation, request, Array.Empty<Guid>(),
+            accountingEventContext: null, cancellationToken, cycle);
     }
 
     private async Task<FinancePostingResultDto> PostCoreAsync(
@@ -116,6 +120,18 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         ArgumentNullException.ThrowIfNull(request);
 
         var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+        if (_exchangeRateOverrides == null
+            && (request.ExchangeRateOverrideRequestId.HasValue
+                || request.ExchangeRateOverrideWorkflowInstanceId.HasValue))
+        {
+            throw new InvalidOperationException(
+                "Exchange-rate override evidence cannot be validated because the override service is unavailable.");
+        }
+
+        var exchangeRateOverrideRequestIds = _exchangeRateOverrides == null
+            ? Array.Empty<Guid>()
+            : (await _exchangeRateOverrides.ApplyApprovedOverridesForPostingAsync(
+                tenantId, request, cancellationToken)).ToArray();
         var validation = await ValidatePostingRequestAsync(tenantId, request, accountingBookCode, producerContext, allowHistoricalMappingException, cancellationToken);
 
         await EnsureNoParallelBookPostingAsync(tenantId, validation, acquireLock: false,
@@ -134,7 +150,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
 
         if (_context.Database.CurrentTransaction != null)
         {
-            return await ExecutePostingAsync(tenantId, validation, request,
+            return await ExecutePostingAsync(tenantId, validation, request, exchangeRateOverrideRequestIds,
                 accountingEventContext: null, cancellationToken);
         }
 
@@ -144,7 +160,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
             try
             {
-                var result = await ExecutePostingAsync(tenantId, validation, request,
+                var result = await ExecutePostingAsync(tenantId, validation, request, exchangeRateOverrideRequestIds,
                     accountingEventContext: null, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 return result;
@@ -185,6 +201,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         Guid tenantId,
         ValidatedPosting validation,
         FinancePostingCommandDto request,
+        IReadOnlyList<Guid> exchangeRateOverrideRequestIds,
         AccountingEventPostingAuthority? accountingEventContext,
         CancellationToken cancellationToken,
         YearEndBookCloseCycle? yearEndCycle = null)
@@ -215,6 +232,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
 
         var postingEvent = BuildPostingEvent(tenantId, validation, journalEntry.Id, now, postedByUserId);
         await MarkExchangeRatesUsedAsync(tenantId, validation, postingEvent.Id, now, cancellationToken);
+        if (exchangeRateOverrideRequestIds.Count > 0)
+        {
+            if (_exchangeRateOverrides == null)
+                throw new InvalidOperationException("Transaction exchange-rate override control is unavailable.");
+            await _exchangeRateOverrides.ConsumeAsync(
+                tenantId, exchangeRateOverrideRequestIds, postingEvent.Id, cancellationToken);
+        }
 
         // Resolve every active foreign-currency representation before any ledger row is
         // committed. Missing rates, mappings, or rounding authority therefore roll the
@@ -326,7 +350,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             producerContext: null, allowHistoricalMappingException: false, cancellationToken);
         await RequireAccountingEventBookAuthorityAsync(tenantId, eventTracked, validation.AccountingBookId,
             validation.AccountingBookCode, authority, cancellationToken);
-        return await ExecutePostingAsync(tenantId, validation, request,
+        return await ExecutePostingAsync(tenantId, validation, request, Array.Empty<Guid>(),
             authority, cancellationToken);
     }
 
@@ -387,7 +411,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             producerContext: null, allowHistoricalMappingException: true, cancellationToken);
         await RequireAccountingEventBookAuthorityAsync(tenantId, eventTracked, validation.AccountingBookId,
             validation.AccountingBookCode, authority, cancellationToken);
-        return await ExecutePostingAsync(tenantId, validation, request,
+        return await ExecutePostingAsync(tenantId, validation, request, Array.Empty<Guid>(),
             authority, cancellationToken);
     }
 
@@ -2596,7 +2620,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         var functionalMultiplier = rate.InverseRate;
         if (functionalMultiplier <= 0m)
             throw new InvalidOperationException("Exchange rate has no positive target-to-functional reciprocal.");
-        if (suppliedRate.HasValue && RoundRate(suppliedRate.Value) != RoundRate(functionalMultiplier))
+        var approvedNumericTransactionOverride =
+            request.ExchangeRateOverrideRequestId.HasValue
+            && request.ExchangeRateOverrideWorkflowInstanceId.HasValue
+            && suppliedRate.HasValue
+            && RoundRate(suppliedRate.Value) != RoundRate(functionalMultiplier);
+        if (suppliedRate.HasValue && RoundRate(suppliedRate.Value) != RoundRate(functionalMultiplier)
+            && !approvedNumericTransactionOverride)
         {
             await RecordForeignCurrencyPostingBlockedAuditAsync(
                 tenantId,
@@ -2606,8 +2636,18 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 cancellationToken);
             throw new InvalidOperationException("Supplied exchange-rate snapshot does not match the tenant exchange-rate record.");
         }
+        if (approvedNumericTransactionOverride)
+        {
+            EnsureExchangeRateOverrideApproval(request, requireApproval: true);
+            policyOverrideUsed = true;
+        }
 
-        return new ExchangeRateSnapshot(rate.Id, functionalMultiplier, rate.RateSource, rate.EffectiveDate.Date, policyOverrideUsed);
+        return new ExchangeRateSnapshot(
+            rate.Id,
+            approvedNumericTransactionOverride ? suppliedRate!.Value : functionalMultiplier,
+            approvedNumericTransactionOverride ? $"Transaction override ({request.ExchangeRateOverrideRequestId:N})" : rate.RateSource,
+            rate.EffectiveDate.Date,
+            policyOverrideUsed);
     }
 
     private static bool IsBankOfGhanaRateSource(string? source) =>
@@ -3494,6 +3534,8 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
         Add("exchangeRateOverrideReason", NormalizeOptional(request.ExchangeRateOverrideReason, 500, "Exchange-rate override reason"));
         AddGuid("exchangeRateOverrideApprovedByUserId", request.ExchangeRateOverrideApprovedByUserId);
         AddDate("exchangeRateOverrideApprovedAt", request.ExchangeRateOverrideApprovedAt);
+        AddGuid("exchangeRateOverrideRequestId", request.ExchangeRateOverrideRequestId);
+        AddGuid("exchangeRateOverrideWorkflowInstanceId", request.ExchangeRateOverrideWorkflowInstanceId);
         AddBool("preserveHistoricalExchangeRateSnapshot", request.PreserveHistoricalExchangeRateSnapshot);
         AddBool("allowPostingToClosedPeriod", request.AllowPostingToClosedPeriod);
         Add("budgetReservationSourceDocumentType", budgetReservationSourceDocumentType);
