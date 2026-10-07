@@ -3,7 +3,7 @@ integration_cycle: FIN-UAT-2026-10-07-A
 integration_status: merged_hotfix_in_progress
 integration_decision: include
 candidate_branch: codex/fix-external-logout-finance-build
-candidate_head: working_tree
+candidate_head: 0472d49c925
 base_commit: f25faf38ee08fb2954746f689125e386eb014c39
 target_ref: origin/master
 depends_on: none
@@ -11,7 +11,7 @@ migration_status: generated_and_applied_to_named_local_uat_only
 verification_status: hotfix_frontend_build_and_focused_tests_passed
 integration_commit: 0875a5a3e30
 pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/364
-hotfix_pull_request: pending
+hotfix_pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/368
 ---
 
 # Finance UAT consolidation: bank reconciliation and transaction FX overrides
