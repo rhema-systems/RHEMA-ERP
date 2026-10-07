@@ -54,6 +54,8 @@ export interface EstateManagedAsset {
   town?: string;
   areaValue?: number;
   areaUnit?: string;
+  squareMetersPerPlot?: number | null;
+  plotEquivalentCount?: number | null;
   surveyorName?: string;
   surveyDate?: string;
   beaconCount?: number;

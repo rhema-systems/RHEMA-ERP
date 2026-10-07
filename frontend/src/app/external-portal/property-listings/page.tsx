@@ -101,14 +101,21 @@ function listingTypeBadgeClass(value: string) {
 }
 
 function areaLabel(listing: ExternalEstateListing) {
+  const plotSuffix =
+    listing.plotEquivalentCount != null && listing.squareMetersPerPlot != null
+      ? ` (${listing.plotEquivalentCount.toLocaleString(undefined, {
+          maximumFractionDigits: 2,
+        })} plot${listing.plotEquivalentCount === 1 ? '' : 's'})`
+      : '';
+
   if (listing.areaSquareMeters) {
     return `${listing.areaSquareMeters.toLocaleString(undefined, {
       maximumFractionDigits: 2,
-    })} sqm`;
+    })} sqm${plotSuffix}`;
   }
 
   if (listing.areaValue && listing.areaUnit) {
-    return `${listing.areaValue.toLocaleString()} ${listing.areaUnit}`;
+    return `${listing.areaValue.toLocaleString()} ${listing.areaUnit}${plotSuffix}`;
   }
 
   return 'Area not recorded';
