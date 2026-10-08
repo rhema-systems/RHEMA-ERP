@@ -20,6 +20,8 @@ Audit and incrementally align the existing Property Listing -> Enquiry -> Opport
 - Worktree: `D:\DEVELOPMENTS\ASP.NET\TDC\DEV\erp-system\erp-system - Aug2\.worktrees\property-sales-order-deposit`
 - Exact base: `dd6fb224a1eaa7512087ed3bf0dd767d490c0f12`
 - Base description: merge of PR #383 on `origin/master`.
+- Latest integrated upstream: `2f5ccdda0aea7a4ac0d3b37e779036975ae90cdd`, merge of PR #384 (`Fix AR profile replacement and credit authority`).
+- Upstream integration commit: `c37d59c71876a915e9cbbf45c74cf552d80f39a2`.
 - Existing older worktree `codex/public-property-enquiry-sales-crm` was preserved because it is 289 commits behind current master and contains 12 divergent commits.
 
 ## Current phase
@@ -43,7 +45,8 @@ No runtime implementation has started. The repository model, APIs, UI, workflows
 
 ## Commits
 
-None yet.
+- `216a3bcaef1` - start this audit ledger.
+- `c37d59c7187` - merge the latest `origin/master` after teammate PR #384.
 
 ## Migrations and application status
 
@@ -55,6 +58,7 @@ None yet.
 ## Verification evidence
 
 - Confirmed the isolated worktree starts clean from `origin/master` at the exact base above.
+- Re-fetched and verified both GitHub and `git ls-remote` on 2026-10-08: PR #384 at `2f5ccdda0ae` is the current remote `master` head and is already integrated in this worktree.
 - Inspected existing Sales/CRM tracker `docs/tdc-sales-marketing-crm-gap-implementation-tracker.md` to avoid duplicating prior requirements analysis.
 - Confirmed the older property-enquiry worktree is divergent and unsuitable as the implementation base.
 
