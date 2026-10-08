@@ -128,3 +128,12 @@ The audited design has been implemented in the isolated worktree. The implementa
 2. Record screenshots and the matching posting-event/journal rows for one accepted end-to-end record chain.
 3. Re-fetch `origin/master` immediately before publication and integrate any newer teammate commits.
 4. Push/open/merge a PR and deploy only when the user explicitly authorizes publication of this workstream.
+
+## Active local UAT session
+
+- Started on 2026-10-08 for user-led browser acceptance.
+- Frontend: `http://localhost:3000`; API: `http://localhost:5001/api`.
+- Disposable database: `RhemaERP_PropertyDepositBrowser_20261008215346`.
+- The complete pending EF migration chain was applied to the disposable clone after the first startup exposed missing unrelated HR probation columns in the source snapshot.
+- Independent post-launch probes passed after the launching command exited: frontend `/login` HTTP 200, API `/api/health/live` HTTP 200, and unauthenticated `/api/auth/me` HTTP 401 as expected.
+- Both services use persistent PowerShell wrappers. Stop them and remove the disposable database, backup, copied local configuration and frontend dependency junction when the user finishes testing.
