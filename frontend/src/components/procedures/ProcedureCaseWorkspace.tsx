@@ -2119,15 +2119,31 @@ export function ProcedureCaseWorkspace({
       return;
     }
 
+    const previewWindow = window.open('about:blank', '_blank');
+    if (previewWindow) {
+      previewWindow.opener = null;
+      previewWindow.document.title = document.fileName || document.name;
+      previewWindow.document.body.textContent = 'Loading document...';
+    }
+
     try {
       const blob = await procedureCaseService.downloadDocumentContent(
         selectedCase.id,
         document.id
       );
       const objectUrl = URL.createObjectURL(blob);
-      window.open(objectUrl, '_blank', 'noopener,noreferrer');
+      if (previewWindow) {
+        previewWindow.location.replace(objectUrl);
+      } else {
+        const link = window.document.createElement('a');
+        link.href = objectUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.click();
+      }
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
     } catch (err) {
+      previewWindow?.close();
       setError(err instanceof Error ? err.message : 'Unable to open document.');
     }
   };
@@ -3843,8 +3859,7 @@ export function ProcedureCaseWorkspace({
                       const isPropertyAgreementSourceDocument =
                         entityType === 'LegalPropertyAgreementReview' &&
                         (document.name === 'Customer signed agreement' ||
-                          document.name === 'Signed property agreement' ||
-                          document.name === 'Generated draft agreement');
+                          document.name === 'Signed property agreement');
                       const propertyAgreementSigned = entityType === 'LegalPropertyAgreementReview' &&
                         selectedCase.documents.some((item) => item.name === 'Head of Legal signed agreement' && Boolean(item.fileUrl));
                       const canSignPropertyAgreement =
