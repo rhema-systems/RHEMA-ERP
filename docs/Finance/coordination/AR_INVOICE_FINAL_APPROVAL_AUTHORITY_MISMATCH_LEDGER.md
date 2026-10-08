@@ -68,11 +68,11 @@ Diagnose and remediate the `SOURCE_BOOK_AUTHORITY_POSTING_MISMATCH` raised when 
 
 - Migrations added/applied: none.
 - VPS deployment/database changes: none.
-- Push/PR: branch prepared for the user-authorized pull request; deployment remains pending and unauthorized.
+- Push/PR: branch pushed and PR #381 opened at `https://github.com/rhema-systems/RHEMA-ERP/pull/381`; deployment remains pending and unauthorized.
 
 ## Remaining work
 
-1. Deploy a build containing commit `311c34698` and regression commit `aa3ca1d15` after explicit authorization.
+1. Merge PR #381, then deploy a current `master` build containing functional fix `311c34698` and the regression coverage after explicit deployment authorization.
 2. Re-submit or otherwise re-freeze `INV-202610-0005` through the supported workflow if its persisted authority was created by the pre-fix build; do not manually edit authority or journal rows.
 3. Retry final approval and confirm a single posted AR journal is created and bound.
 
