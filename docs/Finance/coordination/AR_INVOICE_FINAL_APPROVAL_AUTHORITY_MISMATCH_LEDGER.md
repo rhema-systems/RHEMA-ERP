@@ -7,14 +7,16 @@ Diagnose and remediate the `SOURCE_BOOK_AUTHORITY_POSTING_MISMATCH` raised when 
 ## Scope and authorization
 
 - Repository implementation and verification are authorized.
-- Deployment, VPS/database mutation, workflow mutation, push, and pull-request creation remain unauthorized.
+- Push and pull-request creation are authorized as of 2026-10-08.
+- Deployment, VPS/database mutation, and workflow mutation remain unauthorized.
 - Remote investigation remains read-only.
 
 ## Repository state
 
 - Worktree: `.w/latest-master-test-20261008`
 - Branch: `codex/ar-invoice-authority-mismatch-fix`
-- Exact base: `cec3306f49ae02d2ce6842936d456106e90c2e46` (`origin/master` on 2026-10-08)
+- Exact base: `f5e389ada` (`origin/master` on 2026-10-08)
+- Completed implementation/test commit: `bd753c15e` (`test(finance): cover AR approval authority binding`)
 - The primary checkout was already materially dirty and was not modified.
 - Deployed API reported release commit `10036aff220647e37cb2c43318a5e95fd4127f69`; that object is unavailable in the local repository.
 
@@ -66,14 +68,13 @@ Diagnose and remediate the `SOURCE_BOOK_AUTHORITY_POSTING_MISMATCH` raised when 
 
 - Migrations added/applied: none.
 - VPS deployment/database changes: none.
-- Push/PR: none.
+- Push/PR: branch prepared for the user-authorized pull request; deployment remains pending and unauthorized.
 
 ## Remaining work
 
-1. Commit the regression on the fix branch.
-2. Deploy a build containing commit `311c34698` and this regression after explicit authorization.
-3. Re-submit or otherwise re-freeze `INV-202610-0005` through the supported workflow if its persisted authority was created by the pre-fix build; do not manually edit authority or journal rows.
-4. Retry final approval and confirm a single posted AR journal is created and bound.
+1. Deploy a build containing commit `311c34698` and regression commit `aa3ca1d15` after explicit authorization.
+2. Re-submit or otherwise re-freeze `INV-202610-0005` through the supported workflow if its persisted authority was created by the pre-fix build; do not manually edit authority or journal rows.
+3. Retry final approval and confirm a single posted AR journal is created and bound.
 
 ## Known limitations
 
