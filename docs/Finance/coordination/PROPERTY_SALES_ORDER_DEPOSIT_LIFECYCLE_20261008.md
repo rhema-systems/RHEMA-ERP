@@ -80,6 +80,7 @@ The audited design has been implemented in the isolated worktree. The implementa
 - `4146f66678f` - integrate the latest teammate estate uploaded-document viewer cleanup.
 - `f984077b3e7` - record the user-led local UAT server session.
 - `5391cbdc21f` - integrate teammate PR #386 before publication.
+- `f2f15200e1d` - record PR #386 integration and local UAT cleanup.
 
 ## Migrations and application status
 
@@ -113,6 +114,7 @@ The audited design has been implemented in the isolated worktree. The implementa
 - After integrating PR #385, the full API build passed again with zero errors, the 23 focused backend tests passed, all 17 focused frontend tests passed, and TypeScript validation passed.
 - Disposable migration evidence: the model compiler preserved 88 full models, 347,374 ordered statements and 8,989 distinct statements; forward apply and idempotent re-apply passed; expected lifecycle tables, ticket/quote fields, six target indexes and the Estate module row were present; rollback removed the new lifecycle schema while retaining the Estate module row.
 - Isolated application startup evidence: API `/api/health/live` returned HTTP 200 and the Next.js `/login` route returned HTTP 200 before all temporary resources were cleaned up.
+- Pre-publication verification after PR #386: the Release API build passed with zero errors; the property lifecycle backend tests passed 23/23; the focused frontend tests passed 17/17; TypeScript validation passed; and the full Next.js production build completed successfully.
 - Deposit service coverage verifies exact Cash, Cheque and Bank Deposit references; unallocated customer-advance posting with property lineage; and rejection of unapproved customers before Finance posting.
 - Manual code review confirmed the full identification number is retained only on the protected EHC ticket, is not copied to Business Partner TaxNumber, and the customer dialog presents it read-only to authorized internal users.
 - Manual migration review removed an unsafe rollback delete that could have removed a preexisting shared Estate module row.
@@ -124,6 +126,7 @@ The audited design has been implemented in the isolated worktree. The implementa
 - The installed local machine currently exposes .NET SDK/runtime 10 while the repository pins SDK 9 and the test application targets .NET 8. Verification used a guarded temporary SDK/compiler target override and `DOTNET_ROLL_FORWARD=Major`; both repository files were restored afterward.
 - A real visible browser lifecycle remains required before describing the 46-step business flow as accepted end to end. This session had no controllable browser surface, so the UI was not represented as visually accepted.
 - The local readiness endpoint is expectedly unhealthy without ClamAV even though the API live probe is healthy. This development-environment limitation did not affect the focused sales/deposit tests.
+- The Estate regression suite on the integrated PR #386 baseline has four source-inspection failures: `ListingApproval_OwnsRentalMoveInDateBeforeCustomerAcceptance`, `PortalPropertyBilling_ShowsIssuedFinanceInvoicesAndAllocatedReceipts`, `DisabledSaleListingAction_DoesNotRenderANavigableLink`, and `DemarcationDialogAndReadinessAction_PreserveFrontendGuards`. The first, third and fourth inspect files identical to `origin/master`; the second is triggered by a brittle single-line method-signature marker while this branch's functional change in that controller is the additive Estate identification-type/enquiry flow. These failures are outside the property-deposit acceptance suite and were not hidden or converted into passing results.
 
 ## Remaining work
 
