@@ -20,15 +20,15 @@ Audit and incrementally align the existing Property Listing -> Enquiry -> Opport
 - Worktree: `D:\DEVELOPMENTS\ASP.NET\TDC\DEV\erp-system\erp-system - Aug2\.worktrees\property-sales-order-deposit`
 - Exact base: `dd6fb224a1eaa7512087ed3bf0dd767d490c0f12`
 - Base description: merge of PR #383 on `origin/master`.
-- Latest integrated upstream: `2f5ccdda0aea7a4ac0d3b37e779036975ae90cdd`, merge of PR #384 (`Fix AR profile replacement and credit authority`).
-- Upstream integration commit: `c37d59c71876a915e9cbbf45c74cf552d80f39a2`.
+- Latest integrated upstream: `c1c3728343b46dc670c5f97a9bcda88999605829`, merge of PR #385 (`Fix customer agreement preview and legal signing`).
+- Latest upstream integration commit: `d3cc40053c4`, merged `origin/master` into this workstream after the implementation checkpoint.
 - Existing older worktree `codex/public-property-enquiry-sales-crm` was preserved because it is 289 commits behind current master and contains 12 divergent commits.
 
 ## Current phase
 
-`Implementation complete; upstream integration and visible acceptance pending`
+`Implementation complete; automated and disposable-database verification complete; visible browser acceptance pending`
 
-The audited design has been implemented in the isolated worktree. The implementation preserves the historical prospect-deposit path as read/clear/reverse only, moves all new deposits to approved-customer Sales Orders, posts those receipts as customer advances through the existing AR posting engine, and exposes their exact payment/property lineage in the Customer Detailed Ledger. No migration has been applied and no local or VPS database has been changed by this workstream.
+The audited design has been implemented in the isolated worktree. The implementation preserves the historical prospect-deposit path as read/clear/reverse only, moves all new deposits to approved-customer Sales Orders, posts those receipts as customer advances through the existing AR posting engine, and exposes their exact payment/property lineage in the Customer Detailed Ledger. The migration was rehearsed against disposable clones only. The source local database and VPS database were not changed by this workstream.
 
 ## Required 29-point audit deliverable
 
@@ -74,7 +74,8 @@ The audited design has been implemented in the isolated worktree. The implementa
 - `c37d59c7187` - merge the latest `origin/master` after teammate PR #384.
 - `a98518808b5` - record the integrated upstream base.
 - `567eeb0b8d4` - complete the audit and implementation decision record.
-- Implementation checkpoint: pending commit after the verification recorded below.
+- `3428aab56b6` - implement and verify the property Sales Order deposit lifecycle.
+- `d3cc40053c4` - integrate PR #385 from the latest `origin/master`.
 
 ## Migrations and application status
 
@@ -82,15 +83,18 @@ The audited design has been implemented in the isolated worktree. The implementa
 - The migration adds only the audited identification-module mapping, protected enquiry identity fields, property quote lineage, and Sales Order customer-deposit lineage. It does not alter historical prospect-deposit rows or unrelated Security schema.
 - `dotnet ef migrations list` includes the new migration.
 - `dotnet ef migrations has-pending-model-changes` reports no pending model changes after a full API build.
-- Migration application: not performed. A specifically identified non-production database is still required for apply/rollback evidence.
-- Local application: not started for this workstream; no visible browser acceptance has been claimed.
+- Migration application and rollback were rehearsed against an isolated SQL Server clone. The forward migration applied successfully, a second application was idempotent, the migration history row and all expected tables/columns/indexes were present, and the rollback removed only the new schema/history row while preserving the pre-existing Estate module row.
+- A second isolated clone was migrated for browser startup validation and removed afterward. The API live probe returned HTTP 200 on port 5001 and the frontend login route returned HTTP 200 on port 3001. Full readiness remained degraded because ClamAV is unavailable in the local development environment.
+- The application processes, disposable databases, backups, temporary dependency junction and copied local configuration files were removed after verification.
+- Visible browser acceptance was attempted, but the Computer Use inventory exposed no browser and the in-app browser provider was unavailable. No visible browser acceptance or screenshots are claimed.
 - VPS/test application: unchanged by this workstream.
-- Database: no writes performed.
+- Source local database: unchanged; the migration was never applied to it.
 
 ## Verification evidence
 
 - Confirmed the isolated worktree starts clean from `origin/master` at the exact base above.
-- Re-fetched and verified both GitHub and `git ls-remote` on 2026-10-08: PR #384 at `2f5ccdda0ae` is the current remote `master` head and is already integrated in this worktree.
+- Earlier integration checkpoint: PR #384 at `2f5ccdda0ae` was fetched and integrated before implementation verification.
+- Latest integration checkpoint: PR #385 at `c1c3728343b` was fetched and integrated; post-merge worktree commit is `d3cc40053c4`.
 - Inspected existing Sales/CRM tracker `docs/tdc-sales-marketing-crm-gap-implementation-tracker.md` to avoid duplicating prior requirements analysis.
 - Confirmed the older property-enquiry worktree is divergent and unsuitable as the implementation base.
 - Full API source build passed with zero errors. The remaining output was the repository's existing warning set, including ImageSharp package-advisory warnings.
@@ -100,6 +104,9 @@ The audited design has been implemented in the isolated worktree. The implementa
 - Focused frontend tests passed: 17/17 across the property-enquiry dialog, opportunity lead context and Sales Order service.
 - Frontend TypeScript validation passed after excluding generated Next production output.
 - A full Next.js production build passed, including route generation.
+- After integrating PR #385, the full API build passed again with zero errors, the 23 focused backend tests passed, all 17 focused frontend tests passed, and TypeScript validation passed.
+- Disposable migration evidence: the model compiler preserved 88 full models, 347,374 ordered statements and 8,989 distinct statements; forward apply and idempotent re-apply passed; expected lifecycle tables, ticket/quote fields, six target indexes and the Estate module row were present; rollback removed the new lifecycle schema while retaining the Estate module row.
+- Isolated application startup evidence: API `/api/health/live` returned HTTP 200 and the Next.js `/login` route returned HTTP 200 before all temporary resources were cleaned up.
 - Deposit service coverage verifies exact Cash, Cheque and Bank Deposit references; unallocated customer-advance posting with property lineage; and rejection of unapproved customers before Finance posting.
 - Manual code review confirmed the full identification number is retained only on the protected EHC ticket, is not copied to Business Partner TaxNumber, and the customer dialog presents it read-only to authorized internal users.
 - Manual migration review removed an unsafe rollback delete that could have removed a preexisting shared Estate module row.
@@ -109,14 +116,12 @@ The audited design has been implemented in the isolated worktree. The implementa
 - Existing prospect deposits may already be posted in production. Any prospective Sales Order deposit path must coexist with them without rewriting history.
 - The broad `PropertyListingEnquiryTests` fixture still has unrelated legacy failures outside this slice, including a null reference in `EstateManagedAssetsController` and a SQLite fixture missing `OpportunityStageDefinitions`. The focused identity/enquiry tests pass.
 - The installed local machine currently exposes .NET SDK/runtime 10 while the repository pins SDK 9 and the test application targets .NET 8. Verification used a guarded temporary SDK/compiler target override and `DOTNET_ROLL_FORWARD=Major`; both repository files were restored afterward.
-- A real visible browser lifecycle and database verification remain required before describing the 46-step business flow as accepted end to end.
-- Upstream `master` must be fetched and integrated again because the user reported another teammate PR after this worktree's last integration.
+- A real visible browser lifecycle remains required before describing the 46-step business flow as accepted end to end. This session had no controllable browser surface, so the UI was not represented as visually accepted.
+- The local readiness endpoint is expectedly unhealthy without ClamAV even though the API live probe is healthy. This development-environment limitation did not affect the focused sales/deposit tests.
 
 ## Remaining work
 
-1. Commit the verified implementation checkpoint.
-2. Fetch and integrate the latest teammate changes from `origin/master`, then rerun impacted checks.
-3. Apply and roll back the forward migration against an explicitly identified non-production database.
-4. Start the local application against that non-production database and complete visible browser acceptance for the configured Identification Type, public enquiry, opportunity, quote PDF, approved customer, Sales Order deposit and Customer Detailed Ledger sequence.
-5. Record database rows, posting-event/journal evidence and screenshots for the same record chain.
-6. Update this ledger with the integration commit, application/database evidence and any remaining acceptance failures before handoff.
+1. In a session with an available controllable browser, complete visible acceptance for Identification Type module configuration, public enquiry identity capture, opportunity, quote/PDF, approved customer, Sales Order deposit and Customer Detailed Ledger.
+2. Record screenshots and the matching posting-event/journal rows for one accepted end-to-end record chain.
+3. Re-fetch `origin/master` immediately before publication and integrate any newer teammate commits.
+4. Push/open/merge a PR and deploy only when the user explicitly authorizes publication of this workstream.
