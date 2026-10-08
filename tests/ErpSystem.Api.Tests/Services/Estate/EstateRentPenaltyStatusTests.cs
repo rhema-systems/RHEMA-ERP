@@ -78,18 +78,18 @@ public sealed class EstateRentPenaltyStatusTests
 public sealed class EstateSaleInvoicePaymentStatusTests
 {
     [Fact]
-    public void TaxInclusiveInvoice_MatchesEstateBalanceByPrincipal()
+    public void TaxInclusiveInvoice_MatchesEstateBalanceByTotal()
     {
         var invoice = Invoice(
-            subTotal: 120000m,
-            taxAmount: 24900m,
-            totalAmount: 144900m,
-            paidAmount: 144900m,
+            subTotal: 99378.88m,
+            taxAmount: 20621.12m,
+            totalAmount: 120000m,
+            paidAmount: 120000m,
             balanceAmount: 0m,
             status: "Paid");
 
         PropertyManagementArBillingController
-            .SaleInvoicePrincipalMatchesEstateBalance(invoice, 120000m)
+            .SaleInvoiceTotalMatchesEstateBalance(invoice, 120000m)
             .Should().BeTrue();
         PropertyManagementArBillingController
             .IsSaleInvoicePaidInFull(invoice, 120000m)
@@ -97,14 +97,14 @@ public sealed class EstateSaleInvoicePaymentStatusTests
     }
 
     [Fact]
-    public void TaxInclusiveInvoice_RequiresTaxInclusiveTotalToBePaid()
+    public void TaxInclusiveInvoice_RequiresEntireTotalToBePaid()
     {
         var invoice = Invoice(
-            subTotal: 120000m,
-            taxAmount: 24900m,
-            totalAmount: 144900m,
-            paidAmount: 120000m,
-            balanceAmount: 24900m,
+            subTotal: 99378.88m,
+            taxAmount: 20621.12m,
+            totalAmount: 120000m,
+            paidAmount: 99378.88m,
+            balanceAmount: 20621.12m,
             status: "PartiallyPaid");
 
         PropertyManagementArBillingController
@@ -113,18 +113,18 @@ public sealed class EstateSaleInvoicePaymentStatusTests
     }
 
     [Fact]
-    public void InvoicePrincipal_MustMatchEstateHandoffBalance()
+    public void InvoiceTotal_MustMatchTaxInclusiveEstateBalance()
     {
         var invoice = Invoice(
-            subTotal: 144900m,
-            taxAmount: 0m,
+            subTotal: 120000m,
+            taxAmount: 24900m,
             totalAmount: 144900m,
             paidAmount: 144900m,
             balanceAmount: 0m,
             status: "Paid");
 
         PropertyManagementArBillingController
-            .SaleInvoicePrincipalMatchesEstateBalance(invoice, 120000m)
+            .SaleInvoiceTotalMatchesEstateBalance(invoice, 120000m)
             .Should().BeFalse();
         PropertyManagementArBillingController
             .IsSaleInvoicePaidInFull(invoice, 120000m)

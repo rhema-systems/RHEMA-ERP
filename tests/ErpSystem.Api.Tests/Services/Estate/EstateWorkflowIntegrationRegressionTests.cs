@@ -1088,7 +1088,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         completion.Should().Contain("var payableAmount = salePayable.EstateBalance;");
         completion.Should().Contain("if (payableAmount > 0m)");
         completion.Should().Contain("Create and complete the Finance AR sale invoice for the Estate balance first.");
-        completion.Should().Contain("SaleInvoicePrincipalMatchesEstateBalance(invoice, payableAmount)");
+        completion.Should().Contain("SaleInvoiceTotalMatchesEstateBalance(invoice, payableAmount)");
         completion.Should().Contain("IsSaleInvoicePaidInFull(invoice, payableAmount)");
         controller.Should().Contain("invoice.PaidAmount >= invoice.TotalAmount");
         controller.Should().Contain("invoice.BalanceAmount <= 0m");
@@ -1108,7 +1108,9 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "public async Task<ActionResult<EstateSaleInvoiceResult>> CreateSaleInvoice",
             "private static string BuildSaleInvoiceReference");
         billing.Should().Contain("Sales has already recorded the full agreed amount. No Estate balance remains to invoice.");
-        billing.Should().Contain("UnitPrice = salePayable.EstateBalance");
+        billing.Should().Contain("ResolveTaxInclusivePriceAsync(");
+        billing.Should().Contain("UnitPrice = taxInclusivePrice.NetAmount");
+        billing.Should().Contain("TaxTreatment = TaxTreatment.Standard");
 
         var frontend = ReadSource(
             "frontend",
