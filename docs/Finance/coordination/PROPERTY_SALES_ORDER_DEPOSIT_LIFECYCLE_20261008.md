@@ -20,8 +20,8 @@ Audit and incrementally align the existing Property Listing -> Enquiry -> Opport
 - Worktree: `D:\DEVELOPMENTS\ASP.NET\TDC\DEV\erp-system\erp-system - Aug2\.worktrees\property-sales-order-deposit`
 - Exact base: `dd6fb224a1eaa7512087ed3bf0dd767d490c0f12`
 - Base description: merge of PR #383 on `origin/master`.
-- Latest integrated upstream: `578a41dec66aa570c7e587091c959e47c2e90185`, merge of the teammate estate uploaded-document viewer cleanup.
-- Latest upstream integration commit: `4146f66678f`, merged `origin/master` into this workstream after the final verification ledger checkpoint.
+- Latest integrated upstream: `cd5b529f0e1d26e9f9e1a868dcdfdde32f7ee1df`, merge of teammate PR #386 (`Correct Estate tax-inclusive balance invoices`).
+- Latest upstream integration commit: `5391cbdc21f`, merged `origin/master` into this workstream before publication.
 - Existing older worktree `codex/public-property-enquiry-sales-crm` was preserved because it is 289 commits behind current master and contains 12 divergent commits.
 
 ## Current phase
@@ -78,6 +78,8 @@ The audited design has been implemented in the isolated worktree. The implementa
 - `d3cc40053c4` - integrate PR #385 from the latest `origin/master`.
 - `028695d5880` - record disposable migration, startup and cleanup evidence.
 - `4146f66678f` - integrate the latest teammate estate uploaded-document viewer cleanup.
+- `f984077b3e7` - record the user-led local UAT server session.
+- `5391cbdc21f` - integrate teammate PR #386 before publication.
 
 ## Migrations and application status
 
@@ -98,6 +100,7 @@ The audited design has been implemented in the isolated worktree. The implementa
 - Earlier integration checkpoint: PR #384 at `2f5ccdda0ae` was fetched and integrated before implementation verification.
 - Latest integration checkpoint: PR #385 at `c1c3728343b` was fetched and integrated; post-merge worktree commit is `d3cc40053c4`.
 - Final upstream checkpoint: `578a41dec66` was fetched and integrated at `4146f66678f`. Its only source change is in `ProcedureCaseWorkspace.tsx`, outside this property Sales/Finance slice.
+- Publication checkpoint: teammate PR #386 at `cd5b529f0e1` was fetched and integrated at `5391cbdc21f`. Its four changed paths concern Estate balance-invoice billing/workspace behavior and tests and do not overlap this property deposit slice.
 - Inspected existing Sales/CRM tracker `docs/tdc-sales-marketing-crm-gap-implementation-tracker.md` to avoid duplicating prior requirements analysis.
 - Confirmed the older property-enquiry worktree is divergent and unsuitable as the implementation base.
 - Full API source build passed with zero errors. The remaining output was the repository's existing warning set, including ImageSharp package-advisory warnings.
@@ -129,11 +132,11 @@ The audited design has been implemented in the isolated worktree. The implementa
 3. Re-fetch `origin/master` immediately before publication and integrate any newer teammate commits.
 4. Push/open/merge a PR and deploy only when the user explicitly authorizes publication of this workstream.
 
-## Active local UAT session
+## Completed local UAT startup session
 
 - Started on 2026-10-08 for user-led browser acceptance.
 - Frontend: `http://localhost:3000`; API: `http://localhost:5001/api`.
 - Disposable database: `RhemaERP_PropertyDepositBrowser_20261008215346`.
 - The complete pending EF migration chain was applied to the disposable clone after the first startup exposed missing unrelated HR probation columns in the source snapshot.
 - Independent post-launch probes passed after the launching command exited: frontend `/login` HTTP 200, API `/api/health/live` HTTP 200, and unauthenticated `/api/auth/me` HTTP 401 as expected.
-- Both services use persistent PowerShell wrappers. Stop them and remove the disposable database, backup, copied local configuration and frontend dependency junction when the user finishes testing.
+- The frontend and API processes were stopped after the user requested publication. The disposable database, SQL backup, copied local configuration and frontend dependency junction were removed and the Git worktree was confirmed clean.
