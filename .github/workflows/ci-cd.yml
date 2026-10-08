@@ -68,6 +68,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           .\scripts\vps\Test-CanonicalMigrationPreflight.ps1
           .\scripts\vps\Test-RhemaZipPackage.ps1
+          .\scripts\vps\Test-NativeWarningHandling.ps1
           .\scripts\vps\Test-RhemaReleaseArtifactFlow.ps1
 
   build-release:

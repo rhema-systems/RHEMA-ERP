@@ -137,8 +137,27 @@ function Invoke-TimedStep {
 
 function Invoke-NativeChecked {
     param([string]$Command, [string[]]$Arguments, [string]$FailureMessage)
-    & $Command @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "$FailureMessage (exit code $LASTEXITCODE)." }
+    $priorErrorActionPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 promotes native stderr warnings to
+        # NativeCommandError when the script preference is Stop. Preserve the
+        # diagnostics as text and use the native exit code as the failure gate.
+        $ErrorActionPreference = 'Continue'
+        $nativeOutput = @(& $Command @Arguments 2>&1 | ForEach-Object {
+                if ($_ -is [Management.Automation.ErrorRecord]) {
+                    [string]$_.Exception.Message
+                }
+                else {
+                    [string]$_
+                }
+            })
+        $nativeExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $priorErrorActionPreference
+    }
+    if ($nativeOutput.Count -gt 0) { $nativeOutput | Out-Host }
+    if ($nativeExitCode -ne 0) { throw "$FailureMessage (exit code $nativeExitCode)." }
 }
 
 function Invoke-RobocopyChecked {
