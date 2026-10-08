@@ -152,6 +152,7 @@ describe('business partner governed finance setup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith('partner-1', expect.any(Object)));
     const request = vi.mocked(businessPartnerService.updatePartner).mock.calls[0][1];
+    expect(request).not.toHaveProperty('creditLimit');
     expect(request).not.toHaveProperty('status');
     expect(request).not.toHaveProperty('postingDefaults');
     expect(request).not.toHaveProperty('receivablesDefaults');

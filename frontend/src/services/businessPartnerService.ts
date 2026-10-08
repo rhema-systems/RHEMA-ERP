@@ -343,7 +343,6 @@ export interface CreateBusinessPartnerDto {
   paymentTerms?: string;
   paymentTermId?: string | null;
   currency?: string;
-  creditLimit?: number;
   notes?: string;
   categoryIds?: string[];
   specializationIds?: string[];
@@ -368,7 +367,6 @@ export interface UpdateBusinessPartnerDto {
   partnerType?: string;
   receivablesDefaults?: BusinessPartnerReceivablesDefaults;
   postingDefaults?: BusinessPartnerPostingDefaults;
-  creditLimit?: number | null;
   partnerName: string;
   tradingName?: string;
   registrationNumber?: string;
@@ -690,11 +688,6 @@ export const businessPartnerService = {
   async createPartner(
     data: CreateBusinessPartnerDto
   ): Promise<BusinessPartnerDetailDto> {
-    if (
-      data.creditLimit !== undefined &&
-      (!Number.isFinite(data.creditLimit) || data.creditLimit < 0)
-    )
-      throw new Error('Credit Limit must be zero or greater.');
     // ASP.NET nullable Guid properties accept a Guid or null, but not an empty string.
     const cleanedData = {
       ...data,
@@ -729,11 +722,6 @@ export const businessPartnerService = {
     id: string,
     data: UpdateBusinessPartnerDto
   ): Promise<BusinessPartnerDetailDto> {
-    if (
-      data.creditLimit != null &&
-      (!Number.isFinite(data.creditLimit) || data.creditLimit < 0)
-    )
-      throw new Error('Credit Limit must be zero or greater.');
     // Keep nullable Guid fields out of JSON when the corresponding optional select is blank.
     const cleanedData = {
       ...data,

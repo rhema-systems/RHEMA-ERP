@@ -291,7 +291,6 @@ export function PartnerTaxDefaultsFields({
 export interface PartnerOptionValues {
   paymentTermId: string;
   taxNumber: string;
-  creditLimit: string;
 }
 
 export function PartnerOptionsFields({
@@ -372,20 +371,6 @@ export function PartnerOptionsFields({
           }
         />
       </div>}
-      <div className="space-y-1.5">
-        <Label htmlFor="creditLimit">Credit Limit</Label>
-        <Input
-          id="creditLimit"
-          type="number"
-          min="0"
-          step="0.01"
-          value={options.creditLimit}
-          disabled={disabled}
-          onChange={(event) =>
-            onOptionsChange({ creditLimit: event.target.value })
-          }
-        />
-      </div>
     </div>
   );
 }

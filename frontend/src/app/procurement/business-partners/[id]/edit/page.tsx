@@ -101,7 +101,6 @@ export default function EditBusinessPartnerPage() {
   const [priceLists, setPriceLists] = useState<PriceListDto[]>([]);
   const [allPartners, setAllPartners] = useState<BusinessPartnerDto[]>([]);
   const [formData, setFormData] = useState<UpdateBusinessPartnerDto>(emptyForm);
-  const [creditLimit, setCreditLimit] = useState('');
   const catalogues = useBusinessPartnerPostingCatalogues(partner?.partnerType);
   useEffect(() => {
     if (requestedTab && partnerEditTabs.includes(requestedTab)) {
@@ -148,9 +147,6 @@ export default function EditBusinessPartnerPage() {
           priceList: data.priceList || '',
           parentId: data.parentId || '',
         });
-        setCreditLimit(
-          data.creditLimit == null ? '' : String(data.creditLimit)
-        );
       })
       .catch((error) => {
         if (current)
@@ -175,20 +171,9 @@ export default function EditBusinessPartnerPage() {
       toast.error('Enter the company name.');
       return;
     }
-    if (
-      creditLimit !== '' &&
-      (!Number.isFinite(Number(creditLimit)) || Number(creditLimit) < 0)
-    ) {
-      setActiveTab('options');
-      toast.error('Credit Limit must be zero or greater.');
-      return;
-    }
     try {
       setSaving(true);
-      await businessPartnerService.updatePartner(id, {
-        ...formData,
-        creditLimit: creditLimit === '' ? null : Number(creditLimit),
-      });
+      await businessPartnerService.updatePartner(id, formData);
       toast.success('Business partner updated successfully');
       router.push(`/procurement/business-partners/${id}`);
     } catch (error) {

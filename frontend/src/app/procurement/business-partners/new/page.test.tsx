@@ -46,6 +46,7 @@ describe('new business partner canonical finance setup', () => {
       ssnitNumber: 'SSNIT-NEW',
     })));
     const request = vi.mocked(businessPartnerService.createPartner).mock.calls[0][0];
+    expect(request).not.toHaveProperty('creditLimit');
     expect(request).not.toHaveProperty('postingDefaults');
     expect(request).not.toHaveProperty('receivablesDefaults');
     expect(push).toHaveBeenCalledWith('/procurement/business-partners/new-supplier/edit?tab=finance-profiles');

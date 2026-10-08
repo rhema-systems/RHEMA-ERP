@@ -132,12 +132,18 @@ public static class BusinessPartnerFinanceProfilePolicy
         DateTime accountingDate) => profiles
         .Where(x =>
             x.BusinessPartnerRoleId == roleId &&
-            x.Status == BusinessPartnerFinanceProfileStatus.Approved &&
+            IsHistoricallyEffective(x.Status, x.EffectiveTo) &&
             x.EffectiveFrom.Date <= accountingDate.Date &&
             (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= accountingDate.Date))
         .OrderByDescending(x => x.EffectiveFrom)
         .ThenByDescending(x => x.VersionNumber)
         .FirstOrDefault();
+
+    private static bool IsHistoricallyEffective(
+        BusinessPartnerFinanceProfileStatus status,
+        DateTime? effectiveTo) =>
+        status == BusinessPartnerFinanceProfileStatus.Approved ||
+        (status == BusinessPartnerFinanceProfileStatus.Superseded && effectiveTo.HasValue);
 
     private static BusinessPartnerArProfileVersion? SelectEffective(
         IEnumerable<BusinessPartnerArProfileVersion> profiles,
@@ -145,7 +151,7 @@ public static class BusinessPartnerFinanceProfilePolicy
         DateTime accountingDate) => profiles
         .Where(x =>
             x.BusinessPartnerRoleId == roleId &&
-            x.Status == BusinessPartnerFinanceProfileStatus.Approved &&
+            IsHistoricallyEffective(x.Status, x.EffectiveTo) &&
             x.EffectiveFrom.Date <= accountingDate.Date &&
             (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= accountingDate.Date))
         .OrderByDescending(x => x.EffectiveFrom)

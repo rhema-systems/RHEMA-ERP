@@ -82,7 +82,7 @@ describe('business partner posting fields', () => {
     ('shows the AP chequebook for %s roles', (partnerType) => {
       render(<PartnerOptionsFields partnerType={partnerType}
         value={{ ...emptyBusinessPartnerPostingDefaults(), defaultBankAccountId: 'saved-bank' }}
-        onChange={vi.fn()} options={{ paymentTermId: '', taxNumber: '', creditLimit: '' }}
+        onChange={vi.fn()} options={{ paymentTermId: '', taxNumber: '' }}
         onOptionsChange={vi.fn()} paymentTerms={[]} bankAccounts={[]} />);
       expect(screen.getByRole('combobox', { name: 'ChequeBook ID' })).toHaveTextContent('Saved selection (unavailable)');
     });
@@ -90,7 +90,7 @@ describe('business partner posting fields', () => {
   it('hides the AP chequebook for a customer while preserving its saved supplier mapping', () => {
     const value = { ...emptyBusinessPartnerPostingDefaults(), defaultBankAccountId: 'saved-bank' };
     const onChange = vi.fn();
-    const props = { value, onChange, options: { paymentTermId: '', taxNumber: '', creditLimit: '' },
+    const props = { value, onChange, options: { paymentTermId: '', taxNumber: '' },
       onOptionsChange: vi.fn(), paymentTerms: [], bankAccounts: [] };
     const { rerender } = render(<PartnerOptionsFields {...props} partnerType="Customer" />);
     expect(screen.queryByRole('combobox', { name: 'ChequeBook ID' })).not.toBeInTheDocument();
@@ -153,7 +153,7 @@ describe('business partner posting fields', () => {
     expect(screen.getByLabelText('WHT Rate (%)')).toBeDisabled();
   });
 
-  it('provides searchable payment terms and reuses TIN/credit limit fields', () => {
+  it('provides searchable payment terms and reuses the TIN field without legacy credit editing', () => {
     const onOptionsChange = vi.fn();
     render(
       <PartnerOptionsFields
@@ -162,7 +162,6 @@ describe('business partner posting fields', () => {
         options={{
           paymentTermId: '',
           taxNumber: 'TIN-123',
-          creditLimit: '500',
         }}
         onOptionsChange={onOptionsChange}
         bankAccounts={[]}
@@ -175,7 +174,7 @@ describe('business partner posting fields', () => {
       />
     );
     expect(screen.getByLabelText('TIN')).toHaveValue('TIN-123');
-    expect(screen.getByLabelText('Credit Limit')).toHaveValue(500);
+    expect(screen.queryByLabelText('Credit Limit')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('combobox', { name: 'Payment Terms' }));
     fireEvent.change(screen.getByPlaceholderText('Search payment terms...'), {
       target: { value: 'N30' },
@@ -248,7 +247,7 @@ describe('business partner posting fields', () => {
           defaultBankAccountId: 'saved-bank',
         }}
         onChange={onChange}
-        options={{ paymentTermId: '', taxNumber: '', creditLimit: '' }}
+        options={{ paymentTermId: '', taxNumber: '' }}
         onOptionsChange={vi.fn()}
         bankAccounts={[]}
         paymentTerms={[]}
