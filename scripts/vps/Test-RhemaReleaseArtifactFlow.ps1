@@ -312,6 +312,8 @@ Assert-Test (-not $workflow.Contains("-P ''")) `
     'The active Windows VPS workflow passes an empty native argument that Windows PowerShell drops.'
 Assert-Test ($workflow.Contains('$keygenProcess.StandardInput.Close()')) `
     'The active Windows VPS workflow can prompt indefinitely for an encrypted SSH key.'
+Assert-Test ($workflow -match '(?ms)- name: Upload verified release without recompressing nested ZIPs\r?\n.*?if-no-files-found: error\r?\n\s+retention-days: 3\r?\n\s+compression-level: 0') `
+    'The large immutable release transport artifacts are not limited to the three-day retention window.'
 Assert-Test ($workflow -match '(?ms)- name: Retain sanitized deployment evidence\r?\n\s+if: always\(\) && steps\.deploy-freshness\.outputs\.is_current == ''true''\r?\n(?:\s+#.*\r?\n)*\s+continue-on-error: true\r?\n\s+uses: actions/upload-artifact@v4') `
     'The optional GitHub copy of VPS deployment evidence can falsely fail a verified deployment.'
 Assert-Test (-not (Test-Path (Join-Path $repositoryRoot `

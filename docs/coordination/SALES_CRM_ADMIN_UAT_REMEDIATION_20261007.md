@@ -123,3 +123,16 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 - Migration and application status: no migration and no application-runtime change. The already deployed application remains merge commit `c8d781c355eaa75767a186f26e3d4e5ffc337347`, verified HTTP 200/Healthy.
 - Verification: `scripts/vps/Test-RhemaReleaseArtifactFlow.ps1` passed with its new assertion for the nonblocking evidence-upload contract; `git diff --check` passed.
 - Remaining work: none. The PR and merged-master release-contract validations passed. No VPS redeployment is required for this workflow-only correction.
+
+## Follow-up: GitHub Actions artifact quota cleanup and prevention
+
+- Branch/worktree: `codex/reduce-vps-artifact-retention` in the retained `sales-opportunities-roles` worktree.
+- Exact base: `9061198c7778c8d4cb3376d18df310d6f88988ff` (`origin/master`, merged ledger PR #376).
+- Implementation commit: `2cc660b8c03` (`Reduce VPS release artifact retention`).
+- Publication: PR #377 contains the retention policy, contract-test, runbook, and ledger changes.
+- Cleanup authorization and result: after explicit user approval, 22 older `rhema-vps-*` GitHub Actions artifacts were deleted. They accounted for approximately 13,677.80 MB. The three newest reviewed release packages were preserved: `c8d781c3`, `4c32bbb2`, and `22fd949a`.
+- Verified inventory after cleanup: 98 total artifacts using approximately 1,890.44 MB, including three immutable VPS release packages using approximately 1,887.27 MB.
+- Prevention: immutable VPS release transport artifacts now retain for three days instead of 14. The mandatory release upload remains blocking; the VPS continues retaining its current, previous, and recent rollback releases independently.
+- Migration and application status: no migration and no application-runtime change. No VPS deployment is required for this workflow-only retention correction.
+- Verification: `scripts/vps/Test-RhemaReleaseArtifactFlow.ps1` passed with a new assertion for the three-day release artifact contract; `git diff --check` passed.
+- Remaining work: merge PR #377 after its required release-contract validation passes. GitHub may take 6-12 hours to recalculate the account-level quota after deletion.

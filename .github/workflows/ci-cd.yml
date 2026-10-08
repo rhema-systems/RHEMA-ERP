@@ -207,7 +207,7 @@ jobs:
           name: ${{ steps.release.outputs.artifact_name }}
           path: ${{ steps.release.outputs.artifact_directory }}
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
           compression-level: 0
 
   deploy-test-vps:
