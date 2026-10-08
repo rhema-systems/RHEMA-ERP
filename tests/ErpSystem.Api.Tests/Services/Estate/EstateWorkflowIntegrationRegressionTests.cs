@@ -1088,8 +1088,11 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         completion.Should().Contain("var payableAmount = salePayable.EstateBalance;");
         completion.Should().Contain("if (payableAmount > 0m)");
         completion.Should().Contain("Create and complete the Finance AR sale invoice for the Estate balance first.");
-        completion.Should().Contain("invoice.BalanceAmount <= 0m");
-        completion.Should().Contain("invoice.Status, \"Paid\"");
+        completion.Should().Contain("SaleInvoicePrincipalMatchesEstateBalance(invoice, payableAmount)");
+        completion.Should().Contain("IsSaleInvoicePaidInFull(invoice, payableAmount)");
+        controller.Should().Contain("invoice.PaidAmount >= invoice.TotalAmount");
+        controller.Should().Contain("invoice.BalanceAmount <= 0m");
+        controller.Should().Contain("invoice.Status, \"Paid\"");
         completion.Should().Contain("legalConveyanceStatus");
         completion.Should().Contain("\"Completed by Legal\"");
         completion.Should().Contain("item.EntityType == \"LegalTransfer\"");

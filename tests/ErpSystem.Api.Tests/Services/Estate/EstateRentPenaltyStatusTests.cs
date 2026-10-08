@@ -1,4 +1,5 @@
 using ErpSystem.Api.Controllers.Estate;
+using ErpSystem.Core.DTOs.Finance;
 using FluentAssertions;
 using Xunit;
 
@@ -72,4 +73,78 @@ public sealed class EstateRentPenaltyStatusTests
             lastPenaltySourceInvoiceId,
             today);
     }
+}
+
+public sealed class EstateSaleInvoicePaymentStatusTests
+{
+    [Fact]
+    public void TaxInclusiveInvoice_MatchesEstateBalanceByPrincipal()
+    {
+        var invoice = Invoice(
+            subTotal: 120000m,
+            taxAmount: 24900m,
+            totalAmount: 144900m,
+            paidAmount: 144900m,
+            balanceAmount: 0m,
+            status: "Paid");
+
+        PropertyManagementArBillingController
+            .SaleInvoicePrincipalMatchesEstateBalance(invoice, 120000m)
+            .Should().BeTrue();
+        PropertyManagementArBillingController
+            .IsSaleInvoicePaidInFull(invoice, 120000m)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void TaxInclusiveInvoice_RequiresTaxInclusiveTotalToBePaid()
+    {
+        var invoice = Invoice(
+            subTotal: 120000m,
+            taxAmount: 24900m,
+            totalAmount: 144900m,
+            paidAmount: 120000m,
+            balanceAmount: 24900m,
+            status: "PartiallyPaid");
+
+        PropertyManagementArBillingController
+            .IsSaleInvoicePaidInFull(invoice, 120000m)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void InvoicePrincipal_MustMatchEstateHandoffBalance()
+    {
+        var invoice = Invoice(
+            subTotal: 144900m,
+            taxAmount: 0m,
+            totalAmount: 144900m,
+            paidAmount: 144900m,
+            balanceAmount: 0m,
+            status: "Paid");
+
+        PropertyManagementArBillingController
+            .SaleInvoicePrincipalMatchesEstateBalance(invoice, 120000m)
+            .Should().BeFalse();
+        PropertyManagementArBillingController
+            .IsSaleInvoicePaidInFull(invoice, 120000m)
+            .Should().BeFalse();
+    }
+
+    private static InvoiceDto Invoice(
+        decimal subTotal,
+        decimal taxAmount,
+        decimal totalAmount,
+        decimal paidAmount,
+        decimal balanceAmount,
+        string status)
+        => new()
+        {
+            SubTotal = subTotal,
+            TaxAmount = taxAmount,
+            TotalAmount = totalAmount,
+            PaidAmount = paidAmount,
+            BalanceAmount = balanceAmount,
+            Status = status
+        };
 }
