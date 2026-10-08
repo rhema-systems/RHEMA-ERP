@@ -2109,45 +2109,6 @@ export function ProcedureCaseWorkspace({
     };
   };
 
-  const openDocument = async (document: ProcedureCaseDocument) => {
-    if (!selectedCase || !document.fileUrl) {
-      return;
-    }
-
-    if (!document.fileUrl.startsWith('/api/')) {
-      window.open(document.fileUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
-
-    const previewWindow = window.open('about:blank', '_blank');
-    if (previewWindow) {
-      previewWindow.opener = null;
-      previewWindow.document.title = document.fileName || document.name;
-      previewWindow.document.body.textContent = 'Loading document...';
-    }
-
-    try {
-      const blob = await procedureCaseService.downloadDocumentContent(
-        selectedCase.id,
-        document.id
-      );
-      const objectUrl = URL.createObjectURL(blob);
-      if (previewWindow) {
-        previewWindow.location.replace(objectUrl);
-      } else {
-        const link = window.document.createElement('a');
-        link.href = objectUrl;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.click();
-      }
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-    } catch (err) {
-      previewWindow?.close();
-      setError(err instanceof Error ? err.message : 'Unable to open document.');
-    }
-  };
-
   const updateDocumentNotes = (documentId: string, value: string) => {
     setSelectedCase((current) => {
       if (!current) {
@@ -3911,18 +3872,7 @@ export function ProcedureCaseWorkspace({
                                         <Eye className="h-3 w-3" />
                                         View / annotate
                                       </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        className="inline-flex items-center gap-1 text-primary hover:underline"
-                                        onClick={() =>
-                                          void openDocument(document)
-                                        }
-                                      >
-                                        <ExternalLink className="h-3 w-3" />
-                                        Open uploaded file
-                                      </button>
-                                    )}
+                                    ) : null}
                                     {isDmsDocument ? (
                                       <button
                                         type="button"
