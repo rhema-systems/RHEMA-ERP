@@ -1673,6 +1673,16 @@ export function ListingApplicationWorkspace() {
   const completionRequirements = propertyListingCompletionRequirements(
     selectedCase?.currentStageName
   );
+  const currentStageName =
+    selectedCase?.currentStageName.trim().toLowerCase() || '';
+  const missingMandatoryStageDocuments = selectedCase
+    ? selectedCase.documents.filter(
+        (document) =>
+          document.isMandatory &&
+          document.requiredFrom?.trim().toLowerCase() === currentStageName &&
+          !document.fileUrl
+      )
+    : [];
   const rentalApplication = selectedCase
     ? isRentalApplication(selectedCase)
     : false;
@@ -1778,8 +1788,8 @@ export function ListingApplicationWorkspace() {
   );
   const missingLegalAgreementReview = Boolean(
     selectedCase &&
-      approvedDecision &&
       completionRequirements.requiresLegalAgreementReview &&
+      (approvedDecision || currentStageName === 'legal agreement review') &&
       !legalAgreementReviewComplete
   );
   const fullyExecuted = Boolean(
@@ -1857,6 +1867,71 @@ export function ListingApplicationWorkspace() {
       selectedCase &&
       caseFieldValue(selectedCase, 'signedAgreementReference')
   );
+  const missingCustomerAgreementSignature = Boolean(
+    selectedCase &&
+      currentStageName === 'customer agreement execution' &&
+      !caseFieldValue(selectedCase, 'signedAgreementReference')
+  );
+  const missingFinalAgreementExecution = Boolean(
+    selectedCase &&
+      currentStageName === 'customer agreement execution' &&
+      (!fullyExecuted ||
+        !caseFieldValue(selectedCase, 'finalSignedAgreementReference'))
+  );
+  const financePaymentReady = Boolean(
+    selectedCase && isSalePaymentSatisfied(selectedCase)
+  );
+  const missingFinancePayment = Boolean(
+    selectedCase &&
+      currentStageName === 'payment, billing and finance check' &&
+      !financePaymentReady
+  );
+  const missingRentBillingReadiness = Boolean(
+    selectedCase &&
+      currentStageName === 'payment, billing and finance check' &&
+      rentalApplication &&
+      !leaseApplication &&
+      (!caseFieldValue(selectedCase, 'billingStartDate') ||
+        !containsAny(caseFieldValue(selectedCase, 'billingStartStatus'), [
+          'Ready for billing',
+          'Billing active',
+          'Rent billing activated',
+        ]))
+  );
+  const atLegalConveyanceFollowUp =
+    currentStageName === 'legal conveyance or lease follow-up';
+  const missingLegalConveyance = Boolean(
+    selectedCase &&
+      atLegalConveyanceFollowUp &&
+      (!rentalApplication || leaseApplication) &&
+      !legalConveyanceCompleted
+  );
+  const missingMoveInReadiness = Boolean(
+    selectedCase &&
+      atLegalConveyanceFollowUp &&
+      rentalApplication &&
+      !containsAny(caseFieldValue(selectedCase, 'moveInEffectiveStatus'), [
+        'Effective',
+        'Move-in complete',
+        'Handover complete',
+      ])
+  );
+  const missingOwnershipTransfer = Boolean(
+    selectedCase &&
+      atLegalConveyanceFollowUp &&
+      !rentalApplication &&
+      !ownershipTransferCompleted
+  );
+  const hasIncompleteStageActivities =
+    !stageConfirmed ||
+    missingMandatoryStageDocuments.length > 0 ||
+    missingCustomerAgreementSignature ||
+    missingFinalAgreementExecution ||
+    missingFinancePayment ||
+    missingRentBillingReadiness ||
+    missingLegalConveyance ||
+    missingMoveInReadiness ||
+    missingOwnershipTransfer;
   const agreementLifecycle =
     agreementRecord?.lifecycleStatus.trim().toLowerCase() || '';
   const canManageAgreementApproval = hasAnyRole([
@@ -3359,7 +3434,7 @@ export function ListingApplicationWorkspace() {
                               !selectedCase.canEditCurrentStage ||
                               hasUnsavedStageUpdates ||
                               missingRequiredStageFields.length > 0 ||
-                              !stageConfirmed ||
+                              hasIncompleteStageActivities ||
                               missingPremiumChargeAmount ||
                               missingApprovedMoveInDate ||
                               missingApprovedRentTerm ||
@@ -3401,6 +3476,21 @@ export function ListingApplicationWorkspace() {
                           .
                         </p>
                       ) : null}
+                      {!stageConfirmed ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Complete every required checklist activity before
+                          routing this stage forward.
+                        </p>
+                      ) : null}
+                      {missingMandatoryStageDocuments.length > 0 ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Upload the required current-stage document(s):{' '}
+                          {missingMandatoryStageDocuments
+                            .map((document) => document.name)
+                            .join(', ')}
+                          .
+                        </p>
+                      ) : null}
                       {missingLegalAgreementReview &&
                       !missingApprovedAgreement ? (
                         <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -3431,6 +3521,50 @@ export function ListingApplicationWorkspace() {
                         <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                           Premium charge payment is still pending. Refresh the
                           Finance payment status after Finance receives payment.
+                        </p>
+                      ) : null}
+                      {missingCustomerAgreementSignature ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Wait for the customer to sign and submit the agreement
+                          before routing this stage forward.
+                        </p>
+                      ) : null}
+                      {!missingCustomerAgreementSignature &&
+                      missingFinalAgreementExecution ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Complete the internal approval and digital signature,
+                          and record the final signed agreement before routing
+                          this stage forward.
+                        </p>
+                      ) : null}
+                      {missingFinancePayment ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Complete the required Finance payment check before
+                          routing this stage forward.
+                        </p>
+                      ) : null}
+                      {missingRentBillingReadiness ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Confirm the rent billing start date and billing
+                          readiness before routing this stage forward.
+                        </p>
+                      ) : null}
+                      {missingLegalConveyance ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Wait for Legal to complete conveyance and registration
+                          before routing this stage forward.
+                        </p>
+                      ) : null}
+                      {missingMoveInReadiness ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Confirm agreement effectiveness and move-in readiness
+                          before routing this stage forward.
+                        </p>
+                      ) : null}
+                      {missingOwnershipTransfer ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Complete the ownership transfer before routing this
+                          stage forward.
                         </p>
                       ) : null}
                       {!caseIsCompleted && selectedCase.canEditCurrentStage ? (
