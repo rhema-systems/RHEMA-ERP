@@ -6,8 +6,10 @@ using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -412,6 +414,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Property Officer,Finance Officer")]
     public async Task<ActionResult<EstateSaleInvoiceResult>> CreateSaleInvoice(
         Guid procedureCaseId,
+        [FromServices] ITaxCalculationEngine taxEngine,
         CancellationToken cancellationToken)
     {
         var sourceCase = await LoadSaleProcedureCaseAsync(procedureCaseId, cancellationToken, allowLease: true, allowRent: true);
@@ -465,14 +468,24 @@ public sealed class PropertyManagementArBillingController : ControllerBase
 
         var propertyUnit = FieldValue(fields, "propertyUnit") ?? FieldValue(fields, "listingReference") ?? sourceCase.Title;
         var agreementReference = FieldValue(fields, "finalSignedAgreementReference") ?? FieldValue(fields, "generatedAgreementReference");
+        var invoiceDate = DateTime.UtcNow.Date;
+        var currencyCode = FieldValue(fields, "currency") ?? "GHS";
+        var taxInclusivePrice = await ResolveTaxInclusivePriceAsync(
+            taxEngine,
+            customerId,
+            currencyCode,
+            invoiceDate,
+            salePayable.EstateBalance,
+            cancellationToken);
         var invoice = await _invoiceService.CreateAsync(new InvoiceCreateDto
         {
             BusinessPartnerId = customerId,
-            InvoiceDate = DateTime.UtcNow.Date,
-            DueDate = DateTime.UtcNow.Date,
+            InvoiceDate = invoiceDate,
+            DueDate = invoiceDate,
             Reference = BuildSaleInvoiceReference(sourceCase.ReferenceNumber ?? sourceCase.Id.ToString(), isLease, isRent),
-            CurrencyCode = FieldValue(fields, "currency") ?? "GHS",
+            CurrencyCode = currencyCode,
             ExchangeRate = 1m,
+            TaxGroupId = taxInclusivePrice.TaxGroupId,
             Notes = EnsureSourceLabel($"Property {paymentLabel} for {propertyUnit}; agreement {agreementReference}."),
             LineItems =
             [
@@ -484,11 +497,17 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                         ? $"First month rent balance: {propertyUnit}"
                         : $"Property {(isLease ? "lease" : "sale")}: {propertyUnit}",
                     Quantity = 1m,
-                    UnitPrice = salePayable.EstateBalance,
+                    UnitPrice = taxInclusivePrice.NetAmount,
+                    TaxGroupId = taxInclusivePrice.TaxGroupId,
+                    TaxTreatment = TaxTreatment.Standard,
                     DiscountPercentage = 0m
                 }
             ]
         }, cancellationToken);
+
+        if (!SaleInvoiceTotalMatchesEstateBalance(invoice, salePayable.EstateBalance))
+            throw new InvalidOperationException(
+                $"Invoice total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match the tax-inclusive Estate balance {invoice.CurrencyCode} {salePayable.EstateBalance:N2}. Review the Finance tax configuration before issuing this invoice.");
 
         var now = DateTime.UtcNow;
         UpsertCaseField(sourceCase, fields, "saleInvoiceId", "Balance invoice ID", invoice.Id.ToString(), now);
@@ -498,7 +517,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Balance invoice paid amount", invoice.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Balance invoice remaining", invoice.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "estateRemainingAmount", "Balance for Estate processing", salePayable.EstateBalance.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", BuildSalePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice.PaidAmount, invoice.BalanceAmount), now);
+        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", BuildSaleInvoicePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice), now);
         UpsertCaseField(sourceCase, fields, "salePaymentStatus", "Sale payment status", "Pending full payment", now);
         if (isRent)
         {
@@ -557,13 +576,12 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                 throw new InvalidOperationException("Create and complete the Finance AR sale invoice for the Estate balance first.");
             invoice = await _invoiceService.GetByIdAsync(invoiceId, cancellationToken)
                 ?? throw new InvalidOperationException("The linked Finance AR sale invoice was not found.");
-            var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
-            var paidInFull = invoiceAmountMatches
-                && invoice.PaidAmount >= payableAmount
-                && invoice.BalanceAmount <= 0m
-                && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
+            var invoiceAmountMatches = SaleInvoiceTotalMatchesEstateBalance(invoice, payableAmount);
+            var paidInFull = IsSaleInvoicePaidInFull(invoice, payableAmount);
             if (!paidInFull)
-                throw new InvalidOperationException($"Invoice {invoice.InvoiceNumber} must match the Estate balance and be fully paid before ownership transfer.");
+                throw new InvalidOperationException(invoiceAmountMatches
+                    ? $"Invoice {invoice.InvoiceNumber} must be fully paid before ownership transfer."
+                    : $"Invoice {invoice.InvoiceNumber} total must match the tax-inclusive Estate balance before ownership transfer.");
         }
         if (!string.Equals(FieldValue(fields, "legalConveyanceStatus"), "Completed by Legal", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Legal must complete conveyance and registration before ownership transfer.");
@@ -647,7 +665,9 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Sale invoice paid amount", (invoice?.PaidAmount ?? 0m).ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Sale invoice balance", (invoice?.BalanceAmount ?? 0m).ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "estateRemainingAmount", "Balance for Estate processing", salePayable.EstateBalance.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", BuildSalePaymentCheckMessage(FieldValue(fields, "currency") ?? invoice?.CurrencyCode ?? "GHS", salePayable, invoice?.PaidAmount ?? 0m, invoice?.BalanceAmount ?? 0m), now);
+        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", invoice is null
+            ? BuildSalePaymentCheckMessage(FieldValue(fields, "currency") ?? "GHS", salePayable, 0m, 0m)
+            : BuildSaleInvoicePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice), now);
         UpsertCaseField(sourceCase, fields, "salePaymentStatus", "Sale payment status", "Paid in full", now);
         UpsertCaseField(sourceCase, fields, "ownershipTransferStatus", "Ownership transfer status", "Completed - purchaser recorded as owner", now);
         UpsertCaseField(sourceCase, fields, "applicationStatus", "Request status", "Sale completed", now);
@@ -1179,15 +1199,9 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             ?? throw new InvalidOperationException("The linked Finance AR sale invoice was not found.");
 
         var payableAmount = salePayable.EstateBalance;
-        var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
-        var paidInFull = invoiceAmountMatches
-            && invoice.PaidAmount >= payableAmount
-            && invoice.BalanceAmount <= 0m
-            && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
+        var paidInFull = IsSaleInvoicePaidInFull(invoice, payableAmount);
         var paymentStatus = paidInFull ? "Paid in full" : "Pending full payment";
-        var paymentCheckStatus = invoiceAmountMatches
-            ? BuildSalePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice.PaidAmount, invoice.BalanceAmount)
-            : $"Invoice total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match Estate balance {invoice.CurrencyCode} {payableAmount:N2}. Sales already recorded {invoice.CurrencyCode} {salePayable.SalesAmountPaid:N2} against approved amount {invoice.CurrencyCode} {salePayable.ApprovedAmount:N2}.";
+        var paymentCheckStatus = BuildSaleInvoicePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice);
         var legalCompleted = string.Equals(
             FieldValue(fields, "legalConveyanceStatus"),
             "Completed by Legal",
@@ -1255,7 +1269,9 @@ public sealed class PropertyManagementArBillingController : ControllerBase
     {
         var now = DateTime.UtcNow;
         var currentUserId = GetUserId();
-        var isRent = IsRentPaymentCase(CaseFields(sourceCase));
+        var caseFields = CaseFields(sourceCase);
+        var isRent = IsRentPaymentCase(caseFields);
+        var estateBalance = ResolveSalePayable(caseFields).EstateBalance;
         var fieldValues = new List<SalePaymentFieldUpdate>
         {
             new SalePaymentFieldUpdate("saleInvoiceReference", "Balance invoice reference", result.InvoiceNumber),
@@ -1263,7 +1279,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             new SalePaymentFieldUpdate("saleInvoiceAmount", "Balance invoice amount", result.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("saleInvoicePaidAmount", "Balance invoice paid amount", result.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("saleInvoiceBalance", "Balance invoice remaining", result.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture)),
-            new SalePaymentFieldUpdate("estateRemainingAmount", "Balance for Estate processing", result.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)),
+            new SalePaymentFieldUpdate("estateRemainingAmount", "Balance for Estate processing", estateBalance.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("salePaymentCheckStatus", "Sale or lease payment check", result.Message),
             new SalePaymentFieldUpdate("salePaymentStatus", "Sale or lease payment status", result.PaymentStatus)
         };
@@ -1579,6 +1595,95 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         return $"Awaiting Estate balance; Sales paid {currency} {salePayable.SalesAmountPaid:N2}, Estate paid {currency} {estatePaidAmount:N2}, total paid {currency} {totalPaid:N2} of {currency} {salePayable.ApprovedAmount:N2}; Estate balance {currency} {estateBalanceAmount:N2}.";
     }
 
+    private static string BuildSaleInvoicePaymentCheckMessage(
+        string currency,
+        SalePayableSnapshot salePayable,
+        InvoiceDto invoice)
+    {
+        var invoicePrincipal = SaleInvoicePrincipalAmount(invoice);
+        var comparison = SaleInvoiceTotalMatchesEstateBalance(invoice, salePayable.EstateBalance)
+            ? "matches"
+            : "does not match";
+
+        return $"Invoice total {currency} {invoice.TotalAmount:N2} {comparison} tax-inclusive Estate balance {currency} {salePayable.EstateBalance:N2}; "
+            + $"taxable subtotal after discount {currency} {invoicePrincipal:N2}; tax and levies {currency} {invoice.TaxAmount:N2}; "
+            + $"invoice paid {currency} {invoice.PaidAmount:N2}; invoice outstanding {currency} {invoice.BalanceAmount:N2}. "
+            + $"Sales already recorded {currency} {salePayable.SalesAmountPaid:N2} against approved property amount {currency} {salePayable.ApprovedAmount:N2}.";
+    }
+
+    private static async Task<TaxInclusivePriceBreakdown> ResolveTaxInclusivePriceAsync(
+        ITaxCalculationEngine taxEngine,
+        Guid businessPartnerId,
+        string currencyCode,
+        DateTime transactionDate,
+        decimal inclusiveAmount,
+        CancellationToken cancellationToken)
+    {
+        if (inclusiveAmount <= 0m)
+            throw new InvalidOperationException("The tax-inclusive invoice amount must be greater than zero.");
+
+        var documentLineId = Guid.NewGuid();
+        async Task<TaxCalculationResultDto> CalculateAsync(decimal baseAmount, Guid? taxGroupId)
+            => await taxEngine.CalculateDocumentTaxesAsync(new TaxDocumentCalculationRequestDto
+            {
+                CurrencyCode = currencyCode,
+                TransactionDate = transactionDate,
+                BusinessPartnerId = businessPartnerId,
+                BusinessPartnerRole = BusinessPartnerRoleType.Customer,
+                Lines =
+                [
+                    new TaxDocumentLineRequestDto
+                    {
+                        DocumentLineId = documentLineId,
+                        BaseAmount = baseAmount,
+                        TaxGroupId = taxGroupId,
+                        TransactionType = TaxTransactionType.SaleOfServices
+                    }
+                ]
+            }, cancellationToken);
+
+        var initial = await CalculateAsync(inclusiveAmount, null);
+        var decimalPlaces = initial.CurrencyDecimalPlaces;
+        var targetTotal = CurrencyMinorUnitPolicy.Round(inclusiveAmount, decimalPlaces);
+        var minorUnit = CurrencyMinorUnitPolicy.MinorUnit(decimalPlaces);
+        var taxGroupId = initial.TaxBreakdowns
+            .Select(item => item.TaxGroupId)
+            .FirstOrDefault(id => id.HasValue);
+
+        if (initial.TotalTaxAmount == 0m)
+            return new TaxInclusivePriceBreakdown(targetTotal, 0m, taxGroupId);
+
+        var multiplier = initial.GrandTotal / initial.BaseAmount;
+        var candidate = CurrencyMinorUnitPolicy.Round(targetTotal / multiplier, decimalPlaces);
+
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            var result = await CalculateAsync(candidate, taxGroupId);
+            var calculatedTotal = CurrencyMinorUnitPolicy.Round(result.GrandTotal, decimalPlaces);
+            if (calculatedTotal == targetTotal)
+                return new TaxInclusivePriceBreakdown(candidate, result.TotalTaxAmount, taxGroupId);
+
+            var difference = targetTotal - calculatedTotal;
+            var adjustment = CurrencyMinorUnitPolicy.Round(difference / multiplier, decimalPlaces);
+            if (adjustment == 0m)
+                adjustment = difference > 0m ? minorUnit : -minorUnit;
+
+            var nextCandidate = CurrencyMinorUnitPolicy.Round(
+                Math.Clamp(candidate + adjustment, minorUnit, targetTotal),
+                decimalPlaces);
+            if (nextCandidate == candidate)
+                break;
+
+            candidate = nextCandidate;
+            multiplier = result.GrandTotal > 0m && result.BaseAmount > 0m
+                ? result.GrandTotal / result.BaseAmount
+                : multiplier;
+        }
+
+        throw new InvalidOperationException(
+            $"Finance tax configuration could not derive a taxable subtotal whose total equals {currencyCode} {targetTotal:N2}.");
+    }
+
     private sealed record SalePayableSnapshot(
         decimal ApprovedAmount,
         decimal SalesAmountPaid,
@@ -1586,6 +1691,23 @@ public sealed class PropertyManagementArBillingController : ControllerBase
 
     private static bool AmountsMatch(decimal left, decimal right)
         => Math.Abs(left - right) < 0.01m;
+
+    internal static decimal SaleInvoicePrincipalAmount(InvoiceDto invoice)
+        => invoice.SubTotal - invoice.DiscountAmount;
+
+    internal static bool SaleInvoiceTotalMatchesEstateBalance(InvoiceDto invoice, decimal estateBalance)
+        => AmountsMatch(invoice.TotalAmount, estateBalance);
+
+    internal static bool IsSaleInvoicePaidInFull(InvoiceDto invoice, decimal estateBalance)
+        => SaleInvoiceTotalMatchesEstateBalance(invoice, estateBalance)
+            && invoice.PaidAmount >= invoice.TotalAmount
+            && invoice.BalanceAmount <= 0m
+            && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
+
+    private sealed record TaxInclusivePriceBreakdown(
+        decimal NetAmount,
+        decimal TaxAmount,
+        Guid? TaxGroupId);
 
     private static bool IsPremiumChargeInvoicePaid(InvoiceDto invoice, decimal premiumAmount)
         => AmountsMatch(invoice.TotalAmount, premiumAmount)
