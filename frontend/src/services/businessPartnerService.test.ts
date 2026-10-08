@@ -103,19 +103,18 @@ describe('business partner posting defaults', () => {
 
   beforeEach(() => vi.restoreAllMocks());
 
-  it('sends supplier credit limit and nested defaults on create without requiring every mapping', async () => {
+  it('sends nested defaults on create without a legacy credit limit', async () => {
     const fetch = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(successfulPartnerResponse);
     await businessPartnerService.createPartner({
       partnerName: 'Supplier',
       partnerType: 'Supplier',
-      creditLimit: 4500,
       taxNumber: 'TIN-001',
       postingDefaults: defaults,
     });
     const payload = JSON.parse(String(fetch.mock.calls[0][1]?.body));
-    expect(payload.creditLimit).toBe(4500);
+    expect(payload).not.toHaveProperty('creditLimit');
     expect(payload.taxNumber).toBe('TIN-001');
     expect(payload.postingDefaults).toEqual(defaults);
   });
@@ -126,7 +125,6 @@ describe('business partner posting defaults', () => {
       .mockImplementation(successfulPartnerResponse);
     await businessPartnerService.updatePartner(PARTNER_ID, {
       partnerName: 'Supplier',
-      creditLimit: null,
       postingDefaults: {
         ...defaults,
         defaultApAccountId: '',
@@ -137,7 +135,7 @@ describe('business partner posting defaults', () => {
     expect(payload.postingDefaults.defaultApAccountId).toBeNull();
     expect(payload.postingDefaults.defaultFreightAccountId).toBe(PARTNER_ID);
     expect(payload.postingDefaults.defaultTaxGroupId).toBe(PAYMENT_TERM_ID);
-    expect(payload.creditLimit).toBeNull();
+    expect(payload).not.toHaveProperty('creditLimit');
   });
 
   it('keeps legacy updates from overwriting absent posting defaults', async () => {
@@ -180,20 +178,6 @@ describe('business partner posting defaults', () => {
       JSON.parse(String(fetch.mock.calls[0][1]?.body)).postingDefaults
         .withholdingTaxRate
     ).toBe(0);
-  });
-
-  it('rejects a negative supplier credit limit', async () => {
-    const fetch = vi
-      .spyOn(globalThis, 'fetch')
-      .mockImplementation(successfulPartnerResponse);
-    await expect(
-      businessPartnerService.createPartner({
-        partnerName: 'Supplier',
-        partnerType: 'Supplier',
-        creditLimit: -1,
-      })
-    ).rejects.toThrow('Credit Limit');
-    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('shows server validation detail and code while leaving the caller form intact', async () => {

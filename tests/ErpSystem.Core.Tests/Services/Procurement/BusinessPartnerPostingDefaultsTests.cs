@@ -185,7 +185,7 @@ public sealed class BusinessPartnerPostingDefaultsTests
     }
 
     [Fact]
-    public async Task SupplierCreditLimitSavesAndUntickedWithholdingClearsTheRate()
+    public async Task UntickedWithholdingClearsTheRateWithoutChangingLegacyCreditData()
     {
         var partner = Partner();
         partner.SubjectToWithholdingDeduction = true;
@@ -193,10 +193,10 @@ public sealed class BusinessPartnerPostingDefaultsTests
         var fixture = Fixture(partner);
         var result = await fixture.Service.UpdateAsync(partner.Id, new UpdateBusinessPartnerDto
         {
-            PartnerName = partner.PartnerName, CreditLimit = 5000m,
+            PartnerName = partner.PartnerName,
             PostingDefaults = new() { SubjectToWithholdingDeduction = false, WithholdingTaxRate = 7.5m }
         });
-        result.CreditLimit.Should().Be(5000m);
+        result.CreditLimit.Should().BeNull();
         result.PostingDefaults.WithholdingTaxRate.Should().Be(0);
         result.PostingDefaults.SubjectToWithholdingDeduction.Should().BeFalse();
     }
@@ -216,16 +216,6 @@ public sealed class BusinessPartnerPostingDefaultsTests
         });
         await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WHT rate*");
         fixture.Partners.Verify(x => x.UpdateAsync(It.IsAny<BusinessPartner>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task NegativeCreditLimitIsRejected()
-    {
-        var partner = Partner();
-        var fixture = Fixture(partner);
-        var action = () => fixture.Service.UpdateAsync(partner.Id,
-            new UpdateBusinessPartnerDto { PartnerName = partner.PartnerName, CreditLimit = -1 });
-        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Credit limit*");
     }
 
     [Fact]
@@ -411,26 +401,6 @@ public sealed class BusinessPartnerPostingDefaultsTests
         });
         await write.Should().ThrowAsync<UnauthorizedAccessException>();
         fixture.Partners.Verify(x => x.UpdateAsync(It.IsAny<BusinessPartner>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task ExternalUserCannotSetTopLevelCreditLimitEvenWithoutPostingDefaults()
-    {
-        var partner = Partner();
-        partner.CreditLimit = 100m;
-        var fixture = Fixture(partner, external: true);
-        var update = () => fixture.Service.UpdateAsync(partner.Id, new UpdateBusinessPartnerDto
-        {
-            PartnerName = partner.PartnerName, CreditLimit = 1000m
-        });
-        await update.Should().ThrowAsync<UnauthorizedAccessException>();
-        var create = () => fixture.Service.CreateAsync(new CreateBusinessPartnerDto
-        {
-            PartnerName = "External supplier", PartnerType = "Supplier", CreditLimit = 1000m
-        });
-        await create.Should().ThrowAsync<UnauthorizedAccessException>();
-        partner.CreditLimit.Should().Be(100m);
-        fixture.Partners.Verify(repository => repository.UpdateAsync(It.IsAny<BusinessPartner>()), Times.Never);
     }
 
     [Fact]

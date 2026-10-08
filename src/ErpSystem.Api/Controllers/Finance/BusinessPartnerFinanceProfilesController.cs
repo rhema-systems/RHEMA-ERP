@@ -273,12 +273,32 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
             return ConflictProblem("MAKER_CHECKER_REQUIRED", "The user who submitted this AR profile cannot approve it.");
         var termsValidation = await ValidatePaymentTermAsync(profile.PaymentTermId, BusinessPartnerRoleType.Customer, cancellationToken);
         if (termsValidation is not null) return termsValidation;
-        var candidates = await _db.BusinessPartnerArProfileVersions.AsNoTracking()
+        var candidates = await _db.BusinessPartnerArProfileVersions
             .Where(item => item.TenantId == TenantId && item.BusinessPartnerRoleId == profile.BusinessPartnerRoleId)
             .ToListAsync(cancellationToken);
-        if (BusinessPartnerFinanceProfilePolicy.HasApprovedOverlap(
-            candidates, profile.BusinessPartnerRoleId, profile.EffectiveFrom, profile.EffectiveTo, profile.Id))
-            return ConflictProblem("PROFILE_EFFECTIVE_PERIOD_OVERLAP", "An approved AR profile already covers some or all of this effective period.");
+        var overlaps = candidates
+            .Where(item =>
+                item.Id != profile.Id &&
+                item.Status == BusinessPartnerFinanceProfileStatus.Approved &&
+                item.EffectiveFrom.Date <= (profile.EffectiveTo ?? DateTime.MaxValue).Date &&
+                (item.EffectiveTo ?? DateTime.MaxValue).Date >= profile.EffectiveFrom.Date)
+            .ToList();
+        if (overlaps.Count > 1)
+            return ConflictProblem(
+                "PROFILE_APPROVED_CARDINALITY",
+                "More than one approved AR profile overlaps this version. Resolve the existing profile data before approval.");
+        if (overlaps.Count == 1)
+        {
+            var current = overlaps[0];
+            if (current.EffectiveFrom.Date >= profile.EffectiveFrom.Date)
+                return ConflictProblem(
+                    "PROFILE_EFFECTIVE_PERIOD_OVERLAP",
+                    "A replacement AR profile must start after the approved profile it replaces.");
+            current.EffectiveTo = profile.EffectiveFrom.Date.AddDays(-1);
+            current.Status = BusinessPartnerFinanceProfileStatus.Superseded;
+            current.UpdatedAt = DateTime.UtcNow;
+            current.LastModifiedById = UserId;
+        }
         profile.Status = BusinessPartnerFinanceProfileStatus.Approved;
         profile.ApprovedById = UserId;
         profile.ApprovedAtUtc = DateTime.UtcNow;

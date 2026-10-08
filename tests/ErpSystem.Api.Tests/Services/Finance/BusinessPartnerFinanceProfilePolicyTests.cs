@@ -59,4 +59,44 @@ public sealed class BusinessPartnerFinanceProfilePolicyTests
         result.IsReady.Should().BeFalse();
         result.Code.Should().Be("BUSINESS_PARTNER_NOT_APPROVED");
     }
+
+    [Fact]
+    public void ResolveAr_Uses_end_dated_superseded_profile_for_historical_accounting_date()
+    {
+        var role = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(),
+            RoleType = BusinessPartnerRoleType.Customer,
+            Status = BusinessPartnerRoleStatus.Active
+        };
+        var partner = new BusinessPartner
+        {
+            RegistrationStatus = "Active",
+            ApprovalStatus = "Approved",
+            IsActive = true
+        };
+        var historical = new BusinessPartnerArProfileVersion
+        {
+            BusinessPartnerRoleId = role.Id,
+            VersionNumber = 1,
+            Status = BusinessPartnerFinanceProfileStatus.Superseded,
+            EffectiveFrom = new DateTime(2026, 1, 1),
+            EffectiveTo = new DateTime(2026, 10, 1),
+            CreditLimit = 500m
+        };
+        var current = new BusinessPartnerArProfileVersion
+        {
+            BusinessPartnerRoleId = role.Id,
+            VersionNumber = 2,
+            Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2026, 10, 2),
+            CreditLimit = 5_000m
+        };
+
+        var result = BusinessPartnerFinanceProfilePolicy.ResolveAr(
+            partner, role, new[] { current, historical }, new DateTime(2026, 9, 30));
+
+        result.IsReady.Should().BeTrue();
+        result.ArProfile.Should().BeSameAs(historical);
+    }
 }

@@ -11,6 +11,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Core.Services.Finance;
 using ErpSystem.Core.Services.Projects;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -851,12 +852,29 @@ public class SalesOrderService : ISalesOrderService
             if (bp.IsOnCreditHold)
                 return false;
 
-            // If no credit limit is set, allow the order
-            if (!bp.CreditLimit.HasValue || bp.CreditLimit.Value == 0)
+            var role = (await _unitOfWork.Repository<BusinessPartnerRole>().FindAsync(item =>
+                    item.TenantId == _currentUserProvider.TenantId &&
+                    item.BusinessPartnerId == businessPartnerId &&
+                    item.RoleType == BusinessPartnerRoleType.Customer))
+                .SingleOrDefault();
+            if (role is null)
+                return false;
+            var profiles = await _unitOfWork.Repository<BusinessPartnerArProfileVersion>().FindAsync(item =>
+                item.TenantId == _currentUserProvider.TenantId &&
+                item.BusinessPartnerRoleId == role.Id);
+            var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAr(
+                bp, role, profiles, DateTime.UtcNow.Date);
+            if (!readiness.IsReady)
+                return false;
+
+            // The governed AR profile is the only credit-limit authority. The similarly named
+            // BusinessPartner column is retained for historical compatibility and is ignored.
+            var creditLimit = readiness.ArProfile!.CreditLimit;
+            if (!creditLimit.HasValue || creditLimit.Value == 0)
                 return true;
 
             var outstandingBalance = await GetCustomerOutstandingBalanceAsync(businessPartnerId);
-            var availableCredit = bp.CreditLimit.Value - outstandingBalance;
+            var availableCredit = creditLimit.Value - outstandingBalance;
 
             return orderAmount <= availableCredit;
         }
