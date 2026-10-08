@@ -1429,6 +1429,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             return BadRequest(new { success = false, message = "Select the signed agreement document to upload." });
         }
+        if (!string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "Upload the signed agreement as a PDF document." });
+        }
 
         var procedureCase = await LoadOwnedExternalListingCaseAsync(tenantId, userId.Value, requestId, cancellationToken);
         if (procedureCase is null)

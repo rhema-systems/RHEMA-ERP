@@ -34,6 +34,7 @@ export default function ProcedurePdfViewer({
 }: ProcedurePdfViewerProps) {
   const viewerHostRef = React.useRef<HTMLDivElement | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
   const viewerId = React.useMemo(
     () => `procedure-pdf-${Math.random().toString(36).slice(2)}`,
     []
@@ -44,6 +45,7 @@ export default function ProcedurePdfViewer({
     if (!host || !fileUrl) return;
     let disposed = false;
     setLoadError(null);
+    setIsLoading(true);
 
     registerSyncfusionLicense();
 
@@ -86,9 +88,25 @@ export default function ProcedurePdfViewer({
       enableTextSelection: true,
       enableAnnotation: false,
       enableAnnotationToolbar: false,
+      documentLoad: () => {
+        if (!disposed) {
+          setIsLoading(false);
+        }
+      },
+      documentLoadFailed: (event) => {
+        if (!disposed) {
+          setIsLoading(false);
+          setLoadError(
+            event.documentName
+              ? `Unable to load ${event.documentName}.`
+              : 'Unable to load the secured PDF preview.'
+          );
+        }
+      },
       resourcesLoaded: () => {
         void loadDocument(viewer).catch((error) => {
           if (!disposed) {
+            setIsLoading(false);
             setLoadError(
               error instanceof Error
                 ? error.message
@@ -119,11 +137,18 @@ export default function ProcedurePdfViewer({
       {loadError ? (
         <div className="p-4 text-sm text-destructive">{loadError}</div>
       ) : (
-        <div
-          id={viewerId}
-          ref={viewerHostRef}
-          style={{ display: 'block', height, width: '100%' }}
-        />
+        <div className="relative" style={{ height }}>
+          {isLoading ? (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-background text-sm text-muted-foreground">
+              Loading PDF...
+            </div>
+          ) : null}
+          <div
+            id={viewerId}
+            ref={viewerHostRef}
+            style={{ display: 'block', height: '100%', width: '100%' }}
+          />
+        </div>
       )}
     </div>
   );
