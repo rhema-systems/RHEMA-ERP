@@ -67,6 +67,7 @@ import {
   type GeneratedCentralDocumentResult,
 } from '@/services/document-management.service';
 import {
+  isLegalAgreementReviewCompleteForSigningLocation,
   isLegalAgreementReviewSigned,
   propertyListingCompletionRequirements,
 } from './property-workspace-utils';
@@ -417,9 +418,14 @@ const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
     case 2:
       return rental && approved
         ? isLeaseApplication(procedureCase)
-          ? ['decisionStatus', 'requestedLeaseTerm', 'moveInDate']
-          : ['decisionStatus', 'moveInDate']
-        : ['decisionStatus'];
+          ? [
+              'decisionStatus',
+              'agreementSigningLocation',
+              'requestedLeaseTerm',
+              'moveInDate',
+            ]
+          : ['decisionStatus', 'agreementSigningLocation', 'moveInDate']
+        : ['decisionStatus', 'agreementSigningLocation'];
     case 3:
       return ['legalAgreementReviewStatus'];
     case 4:
@@ -979,6 +985,15 @@ export function ListingApplicationWorkspace() {
       caseFieldValue(selectedCase, 'decisionStatus')
     );
     const stageName = selectedCase.currentStageName.trim().toLowerCase();
+    const agreementSigningLocation = caseFieldValue(
+      selectedCase,
+      'agreementSigningLocation'
+    );
+    const legalAgreementReviewComplete =
+      isLegalAgreementReviewCompleteForSigningLocation(
+        caseFieldValue(selectedCase, 'legalAgreementReviewStatus'),
+        agreementSigningLocation
+      );
     if (
       stageName === 'commercial and availability review' &&
       isPremiumChargeRequired(selectedCase) &&
@@ -1019,7 +1034,8 @@ export function ListingApplicationWorkspace() {
       return;
     }
     if (
-      stageName === 'estate decision and agreement' &&
+      (stageName === 'management decision' ||
+        stageName === 'estate decision and agreement') &&
       approved &&
       !caseFieldValue(selectedCase, 'generatedAgreementReference')
     ) {
@@ -1034,13 +1050,15 @@ export function ListingApplicationWorkspace() {
       return;
     }
     if (
-      stageName === 'legal agreement review' &&
-      !isLegalAgreementReviewSigned(
-        caseFieldValue(selectedCase, 'legalAgreementReviewStatus')
-      )
+      (stageName === 'management decision' ||
+        stageName === 'legal agreement review') &&
+      approved &&
+      !legalAgreementReviewComplete
     ) {
       setError(
-        'Legal must approve the generated agreement before the customer can sign.'
+        agreementSigningLocation.toLowerCase().includes('estate')
+          ? 'Legal must approve and release the agreement before Estate can handle customer execution.'
+          : 'Legal must receive the customer-signed agreement and complete the Head of Legal signature before Estate can continue.'
       );
       return;
     }
@@ -1731,6 +1749,12 @@ export function ListingApplicationWorkspace() {
   const legalAgreementReviewStatus = selectedCase
     ? caseFieldValue(selectedCase, 'legalAgreementReviewStatus')
     : '';
+  const agreementSigningLocation = selectedCase
+    ? caseFieldValue(selectedCase, 'agreementSigningLocation')
+    : '';
+  const customerAgreementSigningInLegal = !agreementSigningLocation
+    .toLowerCase()
+    .includes('estate');
   const legalAgreementReviewStarted = Boolean(
     selectedCase &&
       (caseFieldValue(selectedCase, 'legalAgreementReviewCaseId') ||
@@ -1742,6 +1766,11 @@ export function ListingApplicationWorkspace() {
   const legalAgreementReleasedForCustomer = isLegalAgreementReviewSigned(
     legalAgreementReviewStatus
   );
+  const legalAgreementReviewComplete =
+    isLegalAgreementReviewCompleteForSigningLocation(
+      legalAgreementReviewStatus,
+      agreementSigningLocation
+    );
   const customerAgreementAccepted = Boolean(
     selectedCase &&
       caseFieldValue(selectedCase, 'customerAcceptanceStatus').toLowerCase() ===
@@ -1751,7 +1780,7 @@ export function ListingApplicationWorkspace() {
     selectedCase &&
       approvedDecision &&
       completionRequirements.requiresLegalAgreementReview &&
-      !legalAgreementReleasedForCustomer
+      !legalAgreementReviewComplete
   );
   const fullyExecuted = Boolean(
     selectedCase &&
@@ -3368,9 +3397,9 @@ export function ListingApplicationWorkspace() {
                       {missingLegalAgreementReview &&
                       !missingApprovedAgreement ? (
                         <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                          Submit the generated agreement to Legal and wait for
-                          Legal release to customer signature before routing
-                          this stage forward.
+                          {customerAgreementSigningInLegal
+                            ? 'Submit the generated agreement to Legal, wait for the customer to return it, and wait for the Head of Legal signature before routing this stage forward.'
+                            : 'Submit the generated agreement to Legal and wait for Legal approval and release back to Estate before routing this stage forward.'}
                         </p>
                       ) : null}
                       {missingApprovedAgreement ? (

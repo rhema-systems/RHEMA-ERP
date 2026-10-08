@@ -828,7 +828,13 @@ export function ProcedureCaseWorkspace({
       LEGAL_SPECIFIC_DOCUMENT_ENTITY_TYPES.has(entityType)
     ) {
       return selectedCase.documents.filter((document) => {
-        if (LEGAL_GENERIC_DOCUMENT_NAMES.has(document.name)) {
+        const isPropertyAgreementReviewNote =
+          entityType === 'LegalPropertyAgreementReview' &&
+          document.name === 'Legal review note';
+        if (
+          LEGAL_GENERIC_DOCUMENT_NAMES.has(document.name) &&
+          !isPropertyAgreementReviewNote
+        ) {
           return false;
         }
 

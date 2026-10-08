@@ -25,7 +25,13 @@ import {
   type ExternalPropertyPortfolio,
 } from '@/services/external-estate-services.service';
 
-const PROPERTY_LISTING_SOURCE = 'External Portal - Estate Listings';
+const SALES_PROPERTY_HANDOFF_SOURCE = 'Sales - Estate Enquiry';
+const MY_PROPERTIES_TABS = new Set([
+  'properties',
+  'bills',
+  'transfers',
+  'requests',
+]);
 
 const assetStatusLabels: Record<number, string> = {
   3: 'Reserved',
@@ -96,8 +102,9 @@ export default function MyPropertiesPage() {
   const [activeTab, setActiveTab] = useState('properties');
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('tab') === 'bills') {
-      setActiveTab('bills');
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (requestedTab && MY_PROPERTIES_TABS.has(requestedTab)) {
+      setActiveTab(requestedTab);
     }
     const load = async () => {
       try {
@@ -110,7 +117,8 @@ export default function MyPropertiesPage() {
         setPortfolio(portfolioResult);
         setRequests(
           requestResult.filter(
-            (request) => request.sourceDepartment === PROPERTY_LISTING_SOURCE
+            (request) =>
+              request.sourceDepartment === SALES_PROPERTY_HANDOFF_SOURCE
           )
         );
       } catch (loadError) {
@@ -264,7 +272,7 @@ export default function MyPropertiesPage() {
           <TabsTrigger value="properties">Properties</TabsTrigger>
           <TabsTrigger value="bills">Bills &amp; Receipts</TabsTrigger>
           <TabsTrigger value="transfers">Transfers</TabsTrigger>
-          <TabsTrigger value="requests">Requests</TabsTrigger>
+          <TabsTrigger value="requests">My Requests</TabsTrigger>
         </TabsList>
 
         <TabsContent value="properties" className="space-y-4">
