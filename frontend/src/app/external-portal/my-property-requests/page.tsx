@@ -408,6 +408,10 @@ export function PropertyRequestsView({
       setError('Select the signed agreement document before uploading.');
       return;
     }
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setError('Upload the signed agreement as a PDF document.');
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
@@ -1050,6 +1054,7 @@ export function PropertyRequestsView({
                       <Input
                         type="file"
                         className="bg-white"
+                        accept="application/pdf,.pdf"
                         onChange={(event) =>
                           setSelectedFiles((current) => ({
                             ...current,

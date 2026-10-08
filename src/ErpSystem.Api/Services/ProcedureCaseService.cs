@@ -1912,8 +1912,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var signingCustomerCopy =
             string.Equals(sourceDocument.Name, "Customer signed agreement", StringComparison.OrdinalIgnoreCase)
             || string.Equals(sourceDocument.Name, "Signed property agreement", StringComparison.OrdinalIgnoreCase);
-        if (!signingCustomerCopy
-            && !string.Equals(sourceDocument.Name, "Generated draft agreement", StringComparison.OrdinalIgnoreCase))
+        if (!signingCustomerCopy)
             throw new InvalidOperationException("Sign the customer-signed agreement returned from the portal.");
         if (procedureCase.Documents.Any(item => !item.IsDeleted
             && string.Equals(item.Name, "Head of Legal signed agreement", StringComparison.OrdinalIgnoreCase)
@@ -1926,60 +1925,16 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             ? _currentUser.UserName ?? "Head of Legal"
             : _currentUser.FullName.Trim();
         var now = DateTime.UtcNow;
-        CentralDocumentRecord? record = null;
-        CentralDocumentVersion? version = null;
-        string? pdfPath = null;
-        Guid downloadRecordId = sourceDocument.Id;
-        if (signingCustomerCopy)
-        {
-            pdfPath = sourceDocument.FileUrl;
-            if (string.IsNullOrWhiteSpace(pdfPath))
-                throw new InvalidOperationException("The customer-signed agreement has no file to sign.");
-        }
-        else
-        {
-            var recordId = TryParseDocumentManagementRecordId(sourceDocument.FileUrl)
-                ?? throw new InvalidOperationException("The generated agreement is not linked to a DMS record.");
-            record = await _db.CentralDocumentRecords
-                .AsNoTracking()
-                .Include(item => item.Versions.Where(version => !version.IsDeleted))
-                .FirstOrDefaultAsync(item => item.Id == recordId && item.TenantId == tenantId && !item.IsDeleted)
-                ?? throw new InvalidOperationException("The generated agreement was not found in DMS.");
-            version = ResolveCurrentDocumentVersion(record)
-                ?? throw new InvalidOperationException("The generated agreement has no document version to sign.");
-            pdfPath = !string.IsNullOrWhiteSpace(version.RenditionPath)
-                ? version.RenditionPath
-                : version.RepositoryPath;
-            if (string.IsNullOrWhiteSpace(pdfPath))
-                throw new InvalidOperationException("The generated agreement has no file to sign.");
-            downloadRecordId = !string.IsNullOrWhiteSpace(version.RenditionPath)
-                ? record.Id
-                : version.FileUploadRecordId ?? record.Id;
-        }
-        await using var sourceStream = await _fileStorageService.DownloadFileAsync(pdfPath, downloadRecordId);
-        var needsPdfConversion = !signingCustomerCopy
-            && version is not null
-            && string.IsNullOrWhiteSpace(version.RenditionPath)
-            && version.FileName?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) != true;
-        CentralDocumentPdfPreviewResult? preview = null;
-        if (needsPdfConversion)
-        {
-            if (_renditionService is null)
-                throw new InvalidOperationException("The PDF rendition service is unavailable for signing this agreement.");
-            preview = await _renditionService.CreatePdfPreviewAsync(
-                new CentralDocumentPdfPreviewRequest(
-                    sourceStream,
-                    version!.FileName ?? $"{record!.DocumentReference}.docx",
-                    version.ContentType ?? "application/octet-stream"),
-                CancellationToken.None);
-            if (!preview.Success || preview.PdfStream is null)
-                throw new InvalidOperationException(preview.ErrorMessage ?? "The agreement could not be converted to PDF for signing.");
-        }
-        using var previewPdf = preview?.PdfStream;
+        if (string.IsNullOrWhiteSpace(sourceDocument.FileUrl))
+            throw new InvalidOperationException("The customer-signed agreement has no file to sign.");
+        if (!string.Equals(Path.GetExtension(sourceDocument.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The customer-signed agreement must be a PDF before Head of Legal can sign it.");
+
+        await using var sourceStream = await _fileStorageService.DownloadFileAsync(sourceDocument.FileUrl, sourceDocument.Id);
         var signature = await _pdfSigningService.SignAsync(
-            previewPdf ?? sourceStream,
+            sourceStream,
             new CentralDocumentPdfSigningRequest(
-                record?.DocumentReference ?? procedureCase.ReferenceNumber ?? procedureCase.Title,
+                procedureCase.ReferenceNumber ?? procedureCase.Title,
                 actor,
                 "Head of Legal",
                 request.Notes,
@@ -1990,9 +1945,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         {
             FileStream = signedStream,
             FileName = BuildSignedProcedureDocumentFileName(
-                signingCustomerCopy
-                    ? sourceDocument.FileName ?? "customer-signed-agreement.pdf"
-                    : version?.FileName ?? "property-agreement.pdf",
+                sourceDocument.FileName ?? "customer-signed-agreement.pdf",
                 "Head of Legal"),
             ContentType = "application/pdf",
             FileSize = signature.PdfBytes.LongLength,
