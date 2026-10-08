@@ -117,6 +117,50 @@ public sealed class BusinessPartnerFinanceProfilesControllerTests
     }
 
     [Fact]
+    public async Task Approving_later_ar_version_supersedes_current_profile_in_one_save()
+    {
+        await using var fixture = new Fixture();
+        fixture.Role.RoleType = BusinessPartnerRoleType.Customer;
+        fixture.Term.ApplicableTo = "Customer";
+        await fixture.SeedAsync();
+        var current = new BusinessPartnerArProfileVersion
+        {
+            TenantId = fixture.TenantId,
+            BusinessPartnerRoleId = fixture.Role.Id,
+            VersionNumber = 1,
+            Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2026, 1, 1),
+            PaymentTermId = fixture.Term.Id,
+            CreditLimit = 1_000m
+        };
+        var replacement = new BusinessPartnerArProfileVersion
+        {
+            TenantId = fixture.TenantId,
+            BusinessPartnerRoleId = fixture.Role.Id,
+            VersionNumber = 2,
+            Status = BusinessPartnerFinanceProfileStatus.Submitted,
+            EffectiveFrom = new DateTime(2026, 10, 2),
+            PaymentTermId = fixture.Term.Id,
+            CreditLimit = 5_000m,
+            SubmittedById = Guid.NewGuid()
+        };
+        fixture.Context.AddRange(current, replacement);
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Controller.ApproveAr(
+            fixture.Partner.Id, replacement.Id, new(), default);
+
+        ((BusinessPartnerArProfileDto)result.Result.Should().BeOfType<OkObjectResult>().Subject.Value!)
+            .Status.Should().Be("Approved");
+        var saved = await fixture.Context.BusinessPartnerArProfileVersions
+            .OrderBy(item => item.VersionNumber)
+            .ToListAsync();
+        saved[0].Status.Should().Be(BusinessPartnerFinanceProfileStatus.Superseded);
+        saved[0].EffectiveTo.Should().Be(new DateTime(2026, 10, 1));
+        saved[1].Status.Should().Be(BusinessPartnerFinanceProfileStatus.Approved);
+    }
+
+    [Fact]
     public async Task Pending_approval_queue_is_shared_with_checkers_but_excludes_the_maker()
     {
         await using var fixture = new Fixture();

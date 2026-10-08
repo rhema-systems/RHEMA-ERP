@@ -70,7 +70,6 @@ import {
   emptyBusinessPartnerPostingDefaults,
   PartnerAccountsFields,
   PartnerCatalogueNotice,
-  PartnerOptionsFields,
   PartnerTaxDefaultsFields,
   useBusinessPartnerPostingCatalogues,
 } from '@/components/procurement/BusinessPartnerPostingFields';
@@ -102,7 +101,6 @@ interface FormData {
   bankBranchCode: string;
   // Customer-specific fields
   customerType: string;
-  creditLimit: string;
   paymentTerms: string;
   paymentTermId: string;
   currency: string;
@@ -139,7 +137,6 @@ const initialFormData: FormData = {
   bankAccountNumber: '',
   bankBranchCode: '',
   customerType: '',
-  creditLimit: '',
   paymentTerms: '',
   paymentTermId: '',
   currency: '',
@@ -331,10 +328,6 @@ export default function NewBusinessPartnerPage() {
         currency: formData.currency || undefined,
         // Procurement/Finance boundary: submit the structured FK; the backend owns the legacy descriptor dual-write.
         paymentTermId: formData.paymentTermId || undefined,
-        creditLimit:
-          formData.creditLimit === ''
-            ? undefined
-            : Number(formData.creditLimit),
       };
 
       // Add customer-specific fields if partner type is Customer

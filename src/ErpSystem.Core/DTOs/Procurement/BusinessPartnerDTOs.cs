@@ -269,8 +269,6 @@ public class CreateBusinessPartnerDto
     [MaxLength(50)]
     public string? CustomerType { get; set; } // Retail, Wholesale, Corporate, Government
 
-    public decimal? CreditLimit { get; set; }
-
     [MaxLength(50)]
     public string? PaymentTerms { get; set; } // Net 30, Net 60, COD, etc.
 
@@ -384,8 +382,6 @@ public class UpdateBusinessPartnerDto
     // Customer-Specific Fields (for Debtors/Sales)
     [MaxLength(50)]
     public string? CustomerType { get; set; } // Retail, Wholesale, Corporate, Government
-
-    public decimal? CreditLimit { get; set; }
 
     [MaxLength(50)]
     public string? PaymentTerms { get; set; } // Net 30, Net 60, COD, etc.

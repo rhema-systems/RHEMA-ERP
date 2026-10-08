@@ -138,9 +138,6 @@ public class BusinessPartnerService : IBusinessPartnerService
             await EnsureAccountingConfigurationAccessAsync();
         if (dto.ReceivablesDefaults != null)
             await BusinessPartnerPostingDefaultValidation.ValidateReceivablesAsync(dto.ReceivablesDefaults, roleTypes.Contains(BusinessPartnerRoleType.Customer) ? "Customer" : legacyPartnerType, _unitOfWork, _currentUserProvider);
-        if (_currentUserProvider.IsExternalUser && dto.CreditLimit.HasValue)
-            throw new UnauthorizedAccessException("Credit limits are maintained by internal business-partner administrators.");
-        ValidateCreditLimit(dto.CreditLimit);
         if (dto.PostingDefaults != null)
             await ValidatePostingDefaultsAsync(dto.PostingDefaults, legacyPartnerType);
         var partnerCode = await _partnerRepository.GeneratePartnerCodeAsync(legacyPartnerType);
@@ -195,7 +192,6 @@ public class BusinessPartnerService : IBusinessPartnerService
         // parse or bulk-backfill historical free text without agreement from the procurement owner.
         partner.PaymentTermId = paymentTerm?.Id;
         partner.PaymentTerms = paymentTerm?.Name;
-        partner.CreditLimit = dto.CreditLimit;
         if (dto.PostingDefaults != null) BusinessPartnerPostingDefaults.Apply(partner, dto.PostingDefaults);
 
         if (dto.ReceivablesDefaults != null) BusinessPartnerReceivablesDefaults.Apply(partner, dto.ReceivablesDefaults);
@@ -239,9 +235,6 @@ public class BusinessPartnerService : IBusinessPartnerService
             throw new InvalidOperationException("Maintain Business Partner roles through the canonical Finance role workflow; changing the legacy PartnerType does not add a role.");
         if (dto.ReceivablesDefaults != null)
             await BusinessPartnerPostingDefaultValidation.ValidateReceivablesAsync(dto.ReceivablesDefaults, requestedType, _unitOfWork, _currentUserProvider);
-        if (_currentUserProvider.IsExternalUser && dto.CreditLimit.HasValue && dto.CreditLimit != partner.CreditLimit)
-            throw new UnauthorizedAccessException("Credit limits are maintained by internal business-partner administrators.");
-        ValidateCreditLimit(dto.CreditLimit);
         if (dto.PostingDefaults != null)
             await ValidatePostingDefaultsAsync(dto.PostingDefaults, requestedType, partner.DefaultTaxAccountId);
         partner.PartnerType = requestedType;
@@ -262,7 +255,6 @@ public class BusinessPartnerService : IBusinessPartnerService
         partner.UpdatedAt = DateTime.UtcNow;
         partner.ParentId = dto.ParentId;
         partner.Currency = dto.Currency;
-        if (dto.CreditLimit.HasValue || dto.PostingDefaults != null) partner.CreditLimit = dto.CreditLimit;
         if (dto.PostingDefaults != null) BusinessPartnerPostingDefaults.Apply(partner, dto.PostingDefaults);
 
         if (dto.PaymentTermId.HasValue)
@@ -1171,11 +1163,6 @@ public class BusinessPartnerService : IBusinessPartnerService
         }
 
         return term;
-    }
-
-private static void ValidateCreditLimit(decimal? creditLimit)
-    {
-        if (creditLimit < 0) throw new InvalidOperationException("Credit limit cannot be negative.");
     }
 
     private Task ValidatePostingDefaultsAsync(BusinessPartnerPostingDefaultsDto defaults, string partnerType,
