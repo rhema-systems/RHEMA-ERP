@@ -213,10 +213,24 @@ function Invoke-NativeChecked {
     # Build/dependency/browser tools do not need the account-bootstrap secret.
     # The dedicated deployment helper still inherits it for seed-only calls.
     $nativePriorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+    $nativePriorErrorActionPreference = $ErrorActionPreference
     try {
         [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $null, 'Process')
-        $nativeOutput = @(& $Command @Arguments 2>&1)
+        # Windows PowerShell 5.1 wraps every native stderr line in a
+        # NativeCommandError. Capture those diagnostics as ordinary text and
+        # decide success from the process exit code instead of treating npm and
+        # dotnet warnings as terminating PowerShell errors.
+        $ErrorActionPreference = 'Continue'
+        $nativeOutput = @(& $Command @Arguments 2>&1 | ForEach-Object {
+                if ($_ -is [Management.Automation.ErrorRecord]) {
+                    [string]$_.Exception.Message
+                }
+                else {
+                    [string]$_
+                }
+            })
         $nativeExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $nativePriorErrorActionPreference
         if ($nativeExitCode -ne 0) {
             # Invoke-Step captures successful output and only returns it after the
             # operation completes. Surface native diagnostics before throwing so a
@@ -228,6 +242,7 @@ function Invoke-NativeChecked {
         }
         return $nativeOutput
     } finally {
+        $ErrorActionPreference = $nativePriorErrorActionPreference
         [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $nativePriorOperationalPassword, 'Process')
         $nativePriorOperationalPassword = $null
     }

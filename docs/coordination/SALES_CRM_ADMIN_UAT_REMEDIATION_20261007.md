@@ -147,3 +147,12 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 - Application status: none of these retries changed the VPS. The last verified deployed application remains commit `c8d781c355eaa75767a186f26e3d4e5ffc337347`, whose activation and public health checks passed in run `37697511362`.
 - Authorization boundary: the mandatory immutable release upload remains blocking. It was not weakened or bypassed, and no manual VPS copy was performed.
 - Remaining work: after GitHub completes its documented 6-12 hour quota recalculation, rerun Windows VPS CI/CD with `build_release=true` and `deploy_to_test_vps=true`; require artifact upload, VPS activation, migrations/readiness, public smoke, browser smoke, and post-deployment `/api/health/live` verification before closing deployment.
+
+## Follow-up: Windows PowerShell native warning handling for direct VPS deployment
+
+- Direct server-side deployment of `master` commit `5f65284e85fb03cf0e22e7a342d8dbb768214068` passed remote preflight and completed the self-contained API publish, then stopped before packaging or activation during `npm ci`.
+- Root cause: Windows PowerShell 5.1 promoted npm's nonfatal `whatwg-encoding` deprecation text from native stderr to `NativeCommandError`. The deployment wrapper's `ErrorActionPreference = Stop` terminated the step before it could evaluate npm's successful native exit code.
+- Resolution: both `Deploy-RhemaVps.ps1` and `Build-RhemaRelease.ps1` temporarily collect native stderr as ordinary diagnostic text and restore the caller's error preference. A command succeeds only on exit code zero and still fails with its exact nonzero exit code.
+- Regression coverage: `Test-NativeWarningHandling.ps1` executes the real wrapper functions under Windows PowerShell with stderr plus exit code zero and with nonzero exit codes. The Windows VPS release-contract workflow now requires this test.
+- Verification: `Test-NativeWarningHandling.ps1` passed; `Test-RhemaReleaseArtifactFlow.ps1` passed; all changed PowerShell files parsed without errors; `git diff --check` passed.
+- Application status: the failed attempt did not package or activate a release and did not change the live VPS application. The completed API publish under `artifacts\vps-releases\5f65284e\api` may be reused only with `-ReuseApiOutputFromCommit 5f65284e85fb03cf0e22e7a342d8dbb768214068`, which revalidates source parity.
