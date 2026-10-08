@@ -2682,10 +2682,9 @@ export function ListingApplicationWorkspace() {
                           Customer agreement execution
                         </CardTitle>
                         <p className="text-sm text-muted-foreground">
-                          {rentalApplication ? 'Rent and lease' : 'Sale'}{' '}
-                          agreements follow the Legal release, customer
-                          signature, final Legal signature, and conveyance
-                          process.
+                          {customerAgreementSigningInLegal
+                            ? `${rentalApplication ? 'Rent and lease' : 'Sale'} agreements follow the Legal release, customer signature, final Legal signature, and conveyance process.`
+                            : `${rentalApplication ? 'Rent and lease' : 'Sale'} agreements follow the Legal release, customer signature, Estate approval, authorised digital signature, and conveyance process.`}
                         </p>
                       </CardHeader>
                       <CardContent className="space-y-4">
@@ -2741,13 +2740,19 @@ export function ListingApplicationWorkspace() {
                             )}
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-medium">
-                                Final Legal signature and internal execution
+                                {customerAgreementSigningInLegal
+                                  ? 'Final Legal signature and internal execution'
+                                  : 'Estate approval and digital signature'}
                               </p>
                               <p className="text-sm text-muted-foreground">
                                 {fullyExecuted
-                                  ? 'The final agreement is internally approved and digitally signed.'
+                                  ? customerAgreementSigningInLegal
+                                    ? 'The final agreement has been digitally signed by Head of Legal.'
+                                    : 'The final agreement has been approved and digitally signed by the authorised Estate signatory.'
                                   : hasActiveCustomerSignedAgreement
-                                    ? 'Complete the final Legal signature, then continue with DMS approval and the authorised digital signature.'
+                                    ? customerAgreementSigningInLegal
+                                      ? 'Complete the final Head of Legal signature.'
+                                      : 'Complete Estate approval and the authorised digital signature.'
                                     : 'This begins after the customer returns the signed agreement.'}
                               </p>
                             </div>
@@ -2762,7 +2767,9 @@ export function ListingApplicationWorkspace() {
                     </Card>
                   ) : null}
 
-                  {agreementRecord && hasActiveCustomerSignedAgreement ? (
+                  {agreementRecord &&
+                  hasActiveCustomerSignedAgreement &&
+                  !customerAgreementSigningInLegal ? (
                     <Card>
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2 text-base">
