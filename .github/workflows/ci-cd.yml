@@ -396,6 +396,9 @@ jobs:
 
       - name: Retain sanitized deployment evidence
         if: always() && steps.deploy-freshness.outputs.is_current == 'true'
+        # Deployment evidence is already persisted on the VPS. A temporary
+        # GitHub artifact quota issue must not turn a verified deployment red.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: vps-deployment-evidence-${{ github.run_id }}-${{ github.run_attempt }}

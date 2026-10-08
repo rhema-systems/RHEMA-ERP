@@ -111,3 +111,15 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 - Deployment: Windows VPS CI/CD run `37697511362` built and deployed merge commit `c8d781c355eaa75767a186f26e3d4e5ffc337347`. Release-contract validation, immutable build and package upload, application and SQL backups, migration guards and application, service readiness, public API/assets/CORS checks, and headless Chrome smoke all passed. The VPS `/api/health/live` endpoint returned HTTP 200 with `Healthy` after activation.
 - Workflow reporting constraint: the application deployment passed and its evidence was published to the VPS, but the GitHub workflow concluded `failure` because the final `actions/upload-artifact` evidence-retention step hit the repository artifact-storage quota. No application rollback or deployment failure was reported.
 - Remaining work: none for this property-enquiry follow-up. GitHub artifact quota cleanup or expansion remains a repository-administration task if the sanitized evidence must also be retained in GitHub Actions.
+
+## Follow-up: GitHub artifact quota must not mask a successful VPS deployment
+
+- Branch/worktree: `codex/soft-fail-deploy-evidence-upload` in the retained `sales-opportunities-roles` worktree.
+- Exact base: `c023a81a1c0571fbddc979faab7c5123f16e0883` (`origin/master`, merged documentation PR #374).
+- Implementation commit: `b1da676d0d0` (`Do not fail deployments on evidence quota`).
+- Publication: PR #375 contains the workflow, contract-test, runbook, and ledger changes.
+- Resolution: the final GitHub copy of sanitized deployment evidence uses `continue-on-error: true`. A storage-quota failure now produces a warning after deployment instead of changing a verified activation to a failed workflow. The immutable release artifact upload, VPS activation, backups, migrations, readiness checks, public smoke checks, and browser smoke remain mandatory and fail the job normally.
+- Evidence ownership: `Deploy-RhemaVps.ps1` continues publishing the authoritative sanitized deployment evidence under `C:\RhemaERP\logs` on the VPS before the optional GitHub upload runs.
+- Migration and application status: no migration and no application-runtime change. The already deployed application remains merge commit `c8d781c355eaa75767a186f26e3d4e5ffc337347`, verified HTTP 200/Healthy.
+- Verification: `scripts/vps/Test-RhemaReleaseArtifactFlow.ps1` passed with its new assertion for the nonblocking evidence-upload contract; `git diff --check` passed.
+- Remaining work: merge PR #375 after its required release-contract validation passes. No VPS redeployment is required for this workflow-only correction.
