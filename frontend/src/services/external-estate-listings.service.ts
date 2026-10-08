@@ -70,8 +70,16 @@ export interface EnquiryPartnerProfile {
 export interface CreatePropertyListingEnquiry {
   submissionId: string;
   message: string;
+  identificationTypeId: string;
+  identificationNumber: string;
   businessPartnerId?: string;
   captchaToken?: string;
+}
+
+export interface EstateIdentificationType {
+  id: string;
+  name: string;
+  code?: string | null;
 }
 
 /**
@@ -81,6 +89,8 @@ export interface CreatePropertyListingEnquiry {
  */
 export interface CreatePublicPropertyListingEnquiry {
   submissionId: string;
+  identificationTypeId: string;
+  identificationNumber: string;
   contactName: string;
   contactPhone?: string;
   contactEmail?: string;
@@ -305,6 +315,13 @@ class ExternalEstateListingsService {
       body: JSON.stringify(payload),
     });
     return response.data;
+  }
+
+  async getEstateIdentificationTypes(): Promise<EstateIdentificationType[]> {
+    const response = await rawApiService.publicRequest<
+      ApiResponse<EstateIdentificationType[]>
+    >('/estate/public/identification-types', { method: 'GET' });
+    return response.data || [];
   }
 
   async requestPublicEnquiryContactChallenge(payload: {

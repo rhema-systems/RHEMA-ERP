@@ -136,6 +136,7 @@ public static class Constants
         public const string Inventory = "Inventory";
         public const string Marketing = "Marketing";
         public const string WorkflowEngine = "WorkflowEngine";
+        public const string Estate = "Estate";
     }
 
     public static class Claims

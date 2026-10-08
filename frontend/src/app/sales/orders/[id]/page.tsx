@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog';
@@ -17,9 +19,15 @@ import {
   Lock, Truck, Clock, AlertTriangle, Building2, Home
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { salesOrderService, type SalesOrderDetailDto } from '@/services/salesOrderService';
+import {
+  salesOrderService,
+  type SalesOrderCustomerDepositDto,
+  type SalesOrderDetailDto,
+} from '@/services/salesOrderService';
 import { format } from 'date-fns';
 import { SalesOrderInvoicePanel } from '@/components/sales/SalesOrderInvoicePanel';
+import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import { PaymentMethodType, type BankAccount, type LiquidityAccount, type PaymentMethod } from '@/types/cash-management';
 
 const STATUS_CONFIG: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; className: string }> = {
   Draft: { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
@@ -50,10 +58,51 @@ export default function SalesOrderDetailPage() {
   const [holdDialogOpen, setHoldDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [holdReason, setHoldReason] = useState('');
+  const [deposits, setDeposits] = useState<SalesOrderCustomerDepositDto[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [liquidityAccounts, setLiquidityAccounts] = useState<LiquidityAccount[]>([]);
+  const [depositLoading, setDepositLoading] = useState(false);
+  const [depositDraft, setDepositDraft] = useState({
+    amount: '',
+    paymentMethodId: '',
+    bankAccountId: '',
+    liquidityAccountId: '',
+    bankName: '',
+    accountNumber: '',
+    chequeNumber: '',
+    depositReference: '',
+    idempotencyKey: '',
+  });
 
   useEffect(() => {
-    if (orderId) loadOrder();
+    if (orderId) {
+      void loadOrder();
+      void loadDepositData();
+    }
   }, [orderId]);
+
+  const loadDepositData = async () => {
+    try {
+      const [savedDeposits, methods, banks, liquidity] = await Promise.all([
+        salesOrderService.getCustomerDeposits(orderId),
+        cashManagementDataService.getActivePaymentMethods(),
+        cashManagementDataService.getActiveBankAccounts(),
+        cashManagementDataService.getLiquidityAccounts(true),
+      ]);
+      setDeposits(savedDeposits);
+      setPaymentMethods(methods.filter((method) => [
+        PaymentMethodType.Cash,
+        PaymentMethodType.Cheque,
+        PaymentMethodType.BankTransfer,
+        PaymentMethodType.EFT,
+      ].includes(method.type)));
+      setBankAccounts(banks);
+      setLiquidityAccounts(liquidity);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to load Sales Order deposit setup');
+    }
+  };
 
   const loadOrder = async () => {
     try {
@@ -105,6 +154,48 @@ export default function SalesOrderDetailPage() {
     () => salesOrderService.closeSalesOrder(orderId),
     'Order closed'
   );
+
+  const selectedPaymentMethod = paymentMethods.find((method) => method.id === depositDraft.paymentMethodId);
+  const isCash = selectedPaymentMethod?.type === PaymentMethodType.Cash;
+  const isCheque = selectedPaymentMethod?.type === PaymentMethodType.Cheque;
+  const isBankDeposit = selectedPaymentMethod?.type === PaymentMethodType.BankTransfer
+    || selectedPaymentMethod?.type === PaymentMethodType.EFT;
+  const usesBankDestination = isBankDeposit;
+
+  const recordDeposit = async () => {
+    const amount = Number(depositDraft.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || !selectedPaymentMethod) {
+      toast.error('Enter a positive amount and select a payment method.');
+      return;
+    }
+    const idempotencyKey = depositDraft.idempotencyKey
+      || (globalThis.crypto?.randomUUID?.() ?? `${orderId}-${Date.now()}`);
+    try {
+      setDepositLoading(true);
+      await salesOrderService.createCustomerDeposit(orderId, {
+        amount,
+        paymentMethodId: selectedPaymentMethod.id,
+        bankAccountId: usesBankDestination ? depositDraft.bankAccountId || undefined : undefined,
+        liquidityAccountId: !usesBankDestination ? depositDraft.liquidityAccountId || undefined : undefined,
+        idempotencyKey,
+        bankName: depositDraft.bankName || undefined,
+        accountNumber: depositDraft.accountNumber || undefined,
+        chequeNumber: depositDraft.chequeNumber || undefined,
+        depositReference: depositDraft.depositReference || undefined,
+      });
+      toast.success('Property deposit posted to Finance');
+      setDepositDraft({
+        amount: '', paymentMethodId: '', bankAccountId: '', liquidityAccountId: '',
+        bankName: '', accountNumber: '', chequeNumber: '', depositReference: '', idempotencyKey: '',
+      });
+      await loadDepositData();
+    } catch (error) {
+      setDepositDraft((current) => ({ ...current, idempotencyKey }));
+      toast.error(error instanceof Error ? error.message : 'The property deposit could not be posted.');
+    } finally {
+      setDepositLoading(false);
+    }
+  };
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return '-';
@@ -257,6 +348,122 @@ export default function SalesOrderDetailPage() {
       </div>
 
       <SalesOrderInvoicePanel order={order} onChanged={loadOrder} />
+
+      {order.propertyReference && (
+        <Card className="border-blue-200">
+          <CardHeader>
+            <CardTitle>Property Deposit</CardTitle>
+            <CardDescription>
+              Record the approved customer&apos;s advance against this Sales Order. Finance posts the receipt once; invoicing remains a separate step.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="deposit-amount">Amount</Label>
+                <Input
+                  id="deposit-amount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={depositDraft.amount}
+                  onChange={(event) => setDepositDraft((current) => ({ ...current, amount: event.target.value }))}
+                  placeholder={`${order.currency} 0.00`}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="deposit-method">Payment method</Label>
+                <select
+                  id="deposit-method"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={depositDraft.paymentMethodId}
+                  onChange={(event) => setDepositDraft((current) => ({
+                    ...current,
+                    paymentMethodId: event.target.value,
+                    bankAccountId: '',
+                    liquidityAccountId: '',
+                  }))}
+                >
+                  <option value="">Select payment method</option>
+                  {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="deposit-destination">Receiving account</Label>
+                <select
+                  id="deposit-destination"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={usesBankDestination ? depositDraft.bankAccountId : depositDraft.liquidityAccountId}
+                  onChange={(event) => setDepositDraft((current) => usesBankDestination
+                    ? { ...current, bankAccountId: event.target.value }
+                    : { ...current, liquidityAccountId: event.target.value })}
+                  disabled={!selectedPaymentMethod}
+                >
+                  <option value="">Select receiving account</option>
+                  {(usesBankDestination ? bankAccounts : liquidityAccounts).map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {'bankName' in account ? `${account.bankName} - ${account.accountName}` : `${account.code} - ${account.name}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {(isCheque || isBankDeposit) && (
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="payer-bank">Bank name</Label>
+                  <Input id="payer-bank" value={depositDraft.bankName} onChange={(event) => setDepositDraft((current) => ({ ...current, bankName: event.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="payer-account">Account number</Label>
+                  <Input id="payer-account" value={depositDraft.accountNumber} onChange={(event) => setDepositDraft((current) => ({ ...current, accountNumber: event.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tender-reference">{isCheque ? 'Cheque number' : 'Deposit reference'}</Label>
+                  <Input
+                    id="tender-reference"
+                    value={isCheque ? depositDraft.chequeNumber : depositDraft.depositReference}
+                    onChange={(event) => setDepositDraft((current) => isCheque
+                      ? { ...current, chequeNumber: event.target.value }
+                      : { ...current, depositReference: event.target.value })}
+                  />
+                </div>
+              </div>
+            )}
+
+            {isCash ? (
+              <p className="text-sm text-muted-foreground">
+                The protected Identification Number from the originating enquiry will be used as the Finance ledger reference.
+              </p>
+            ) : null}
+
+            <div className="flex justify-end">
+              <Button onClick={() => void recordDeposit()} disabled={depositLoading || !selectedPaymentMethod}>
+                {depositLoading ? 'Posting deposit…' : 'Record deposit'}
+              </Button>
+            </div>
+
+            {deposits.length > 0 ? (
+              <div className="space-y-2 border-t pt-4">
+                <h3 className="font-medium">Posted deposits</h3>
+                {deposits.map((deposit) => (
+                  <div key={deposit.id} className="flex flex-col gap-1 rounded-md border p-3 text-sm md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-medium">{deposit.paymentNumber} · {deposit.currency} {deposit.amount.toLocaleString()}</p>
+                      <p className="text-muted-foreground">{deposit.reference}</p>
+                      <p className="text-muted-foreground">{deposit.propertyDescription}</p>
+                    </div>
+                    <Badge variant={deposit.isReversed ? 'destructive' : 'secondary'}>
+                      {deposit.isReversed ? 'Reversed' : deposit.status}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      )}
 
       {order.projectUnitContext && (
         <Card className="border-emerald-200 bg-emerald-50/40">

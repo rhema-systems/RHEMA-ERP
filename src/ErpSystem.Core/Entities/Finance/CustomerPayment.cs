@@ -4,6 +4,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Sales;
 
 namespace ErpSystem.Core.Entities.Finance;
 
@@ -189,4 +190,5 @@ public class CustomerPayment : BusinessEntity
 
     // Navigation properties
     public virtual ICollection<PaymentAllocation> Allocations { get; set; } = new List<PaymentAllocation>();
+    public virtual SalesOrderCustomerDeposit? SalesOrderDeposit { get; set; }
 }

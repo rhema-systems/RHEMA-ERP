@@ -1463,6 +1463,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderCustomerDepositService, ErpSystem.Api.Services.Sales.SalesOrderCustomerDepositService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderInvoiceService, ErpSystem.Api.Services.Sales.SalesOrderInvoiceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.IDeliveryService, ErpSystem.Core.Services.Sales.DeliveryService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSetupService, ErpSystem.Core.Services.Sales.SalesSetupService>();

@@ -1,11 +1,13 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -222,5 +224,154 @@ public class IdentificationTypeService : IIdentificationTypeService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return true;
+    }
+
+    public async Task<IdentificationTypeModuleAvailabilityDto> GetModuleAvailabilityAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        await GetOwnedAsync(id, cancellationToken);
+
+        var modules = await _unitOfWork.Repository<TenantModule>().GetQueryable()
+            .AsNoTracking()
+            .Where(module => module.TenantId == tenantId)
+            .OrderBy(module => module.ModuleName)
+            .ToListAsync(cancellationToken);
+
+        var selectedIds = (await _unitOfWork.Repository<IdentificationTypeModule>().GetQueryable()
+            .AsNoTracking()
+            .Where(mapping => mapping.TenantId == tenantId && mapping.IdentificationTypeId == id)
+            .Select(mapping => mapping.TenantModuleId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+
+        return MapModuleAvailability(id, modules, selectedIds);
+    }
+
+    public async Task<IdentificationTypeModuleAvailabilityDto> UpdateModuleAvailabilityAsync(
+        Guid id,
+        UpdateIdentificationTypeModulesDto updateDto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(updateDto);
+        var tenantId = GetTenantId();
+        var requestedIds = updateDto.TenantModuleIds
+            .Where(moduleId => moduleId != Guid.Empty)
+            .Distinct()
+            .ToHashSet();
+
+        List<TenantModule> modules = new();
+
+        await _unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        {
+            await _unitOfWork.AcquireTransactionLockAsync(
+                $"identification-type-modules:{tenantId:D}:{id:D}",
+                transactionToken);
+
+            var identificationType = await GetOwnedAsync(id, transactionToken);
+            modules = await _unitOfWork.Repository<TenantModule>().GetQueryable()
+                .Where(module => module.TenantId == tenantId)
+                .OrderBy(module => module.ModuleName)
+                .ToListAsync(transactionToken);
+
+            var availableIds = modules.Select(module => module.Id).ToHashSet();
+            var unknownIds = requestedIds.Except(availableIds).ToArray();
+            if (unknownIds.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    "One or more selected modules do not belong to the current tenant.");
+            }
+
+            var mappingRepository = _unitOfWork.Repository<IdentificationTypeModule>();
+            var mappings = await mappingRepository
+                .GetQueryableIncludingDeleted(mapping =>
+                    mapping.TenantId == tenantId && mapping.IdentificationTypeId == id)
+                .ToListAsync(transactionToken);
+            var previouslySelectedIds = mappings
+                .Where(mapping => !mapping.IsDeleted)
+                .Select(mapping => mapping.TenantModuleId)
+                .ToHashSet();
+
+            var now = DateTime.UtcNow;
+            foreach (var mapping in mappings)
+            {
+                var shouldBeSelected = requestedIds.Contains(mapping.TenantModuleId);
+                if (shouldBeSelected && mapping.IsDeleted)
+                {
+                    mapping.IsDeleted = false;
+                    mapping.DeletedAt = null;
+                    mapping.DeletedBy = null;
+                    mapping.UpdatedAt = now;
+                    mapping.UpdatedBy = _currentUserProvider.Username;
+                    mapping.LastModifiedById = _currentUserProvider.UserId;
+                }
+                else if (!shouldBeSelected && !mapping.IsDeleted)
+                {
+                    mapping.IsDeleted = true;
+                    mapping.DeletedAt = now;
+                    mapping.DeletedBy = _currentUserProvider.Username;
+                    mapping.UpdatedAt = now;
+                    mapping.UpdatedBy = _currentUserProvider.Username;
+                    mapping.LastModifiedById = _currentUserProvider.UserId;
+                }
+            }
+
+            var knownIds = mappings.Select(mapping => mapping.TenantModuleId).ToHashSet();
+            foreach (var moduleId in requestedIds.Except(knownIds))
+            {
+                await mappingRepository.AddAsync(new IdentificationTypeModule
+                {
+                    TenantId = tenantId,
+                    IdentificationTypeId = id,
+                    TenantModuleId = moduleId,
+                    CreatedAt = now,
+                    CreatedBy = _currentUserProvider.Username,
+                    CreatedById = _currentUserProvider.UserId
+                });
+            }
+
+            var moduleNames = modules.ToDictionary(module => module.Id, module => module.ModuleName);
+            await _unitOfWork.Repository<AuditLog>().AddAsync(new AuditLog
+            {
+                TenantId = tenantId,
+                UserId = _currentUserProvider.UserId,
+                Username = string.IsNullOrWhiteSpace(_currentUserProvider.Username)
+                    ? "Unknown"
+                    : _currentUserProvider.Username,
+                Action = "UpdateModuleAvailability",
+                Resource = "IdentificationType",
+                ResourceId = identificationType.Id.ToString(),
+                OldValues = JsonSerializer.Serialize(previouslySelectedIds
+                    .Where(moduleNames.ContainsKey)
+                    .Select(moduleId => new { TenantModuleId = moduleId, ModuleName = moduleNames[moduleId] })
+                    .OrderBy(module => module.ModuleName)),
+                NewValues = JsonSerializer.Serialize(requestedIds
+                    .Select(moduleId => new { TenantModuleId = moduleId, ModuleName = moduleNames[moduleId] })
+                    .OrderBy(module => module.ModuleName)),
+                IpAddress = "Service",
+                UserAgent = "IdentificationTypeModuleAvailability",
+                Timestamp = now
+            });
+        }, cancellationToken);
+
+        return MapModuleAvailability(id, modules, requestedIds);
+    }
+
+    private static IdentificationTypeModuleAvailabilityDto MapModuleAvailability(
+        Guid identificationTypeId,
+        IEnumerable<TenantModule> modules,
+        IReadOnlySet<Guid> selectedIds)
+    {
+        return new IdentificationTypeModuleAvailabilityDto
+        {
+            IdentificationTypeId = identificationTypeId,
+            Modules = modules.Select(module => new IdentificationTypeModuleOptionDto
+            {
+                TenantModuleId = module.Id,
+                ModuleName = module.ModuleName,
+                Status = module.Status.ToString(),
+                IsSelected = selectedIds.Contains(module.Id)
+            }).ToArray()
+        };
     }
 }

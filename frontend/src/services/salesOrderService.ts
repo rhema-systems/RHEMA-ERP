@@ -196,6 +196,34 @@ export interface CancelSalesOrderDto {
   reason: string;
 }
 
+export interface SalesOrderCustomerDepositDto {
+  id: string;
+  salesOrderId: string;
+  customerPaymentId: string;
+  paymentNumber: string;
+  amount: number;
+  currency: string;
+  tenderType: 'Cash' | 'Cheque' | 'BankDeposit';
+  reference: string;
+  propertyDescription: string;
+  status: string;
+  paymentDate: string;
+  isReversed: boolean;
+}
+
+export interface CreateSalesOrderCustomerDepositDto {
+  amount: number;
+  paymentDate?: string;
+  paymentMethodId: string;
+  bankAccountId?: string;
+  liquidityAccountId?: string;
+  idempotencyKey: string;
+  bankName?: string;
+  accountNumber?: string;
+  chequeNumber?: string;
+  depositReference?: string;
+}
+
 // Delivery Note interfaces
 export interface DeliveryNoteSummaryDto {
   id: string;
@@ -429,6 +457,15 @@ function getAuthHeaders(): Record<string, string> {
   };
 }
 
+async function readApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json();
+    return body?.detail || body?.error || body?.message || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export const salesOrderService = {
   // ── Sales Orders ──────────────────────────────────────────────────
 
@@ -610,6 +647,27 @@ export const salesOrderService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error('Failed to validate credit');
+    return response.json();
+  },
+
+  async getCustomerDeposits(id: string): Promise<SalesOrderCustomerDepositDto[]> {
+    const response = await fetch(`${API_BASE_URL}/sales/orders/${id}/customer-deposits`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readApiError(response, 'Failed to load Sales Order deposits'));
+    return response.json();
+  },
+
+  async createCustomerDeposit(
+    id: string,
+    data: CreateSalesOrderCustomerDepositDto,
+  ): Promise<SalesOrderCustomerDepositDto> {
+    const response = await fetch(`${API_BASE_URL}/sales/orders/${id}/customer-deposits`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error(await readApiError(response, 'Failed to record Sales Order deposit'));
     return response.json();
   },
 

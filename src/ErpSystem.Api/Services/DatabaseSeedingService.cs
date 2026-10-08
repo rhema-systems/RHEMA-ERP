@@ -10746,7 +10746,8 @@ namespace ErpSystem.Web.Services
                 new { ModuleName = "Procurement", Description = "Purchasing and supplier reports" },
                 new { ModuleName = "Project Management", Description = "Projects, Quantity Survey, and Civil Engineering reports" },
                 new { ModuleName = "Marketing", Description = "Marketing campaigns and analytics" },
-                new { ModuleName = "WorkflowEngine", Description = "Workflow automation and BPM" }
+                new { ModuleName = "WorkflowEngine", Description = "Workflow automation and BPM" },
+                new { ModuleName = Constants.Modules.Estate, Description = "Estate listings, allocations, and property operations" }
             };
 
             var now = DateTime.UtcNow;

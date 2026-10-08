@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Shared;
 
 namespace ErpSystem.Core.Entities;
@@ -25,4 +26,5 @@ public class TenantModule : BaseEntity
     // Navigation properties
     public virtual Tenant Tenant { get; set; } = null!;
     public virtual ICollection<Report> Reports { get; set; } = new List<Report>();
+    public virtual ICollection<IdentificationTypeModule> IdentificationTypeAvailabilities { get; set; } = new List<IdentificationTypeModule>();
 }

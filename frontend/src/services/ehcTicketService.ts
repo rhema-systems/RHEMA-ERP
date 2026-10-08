@@ -120,10 +120,16 @@ export interface PropertyListingContext {
   parentAssetId: string; demarcationId?: string | null; businessPartnerId?: string | null;
   businessPartnerName: string; contactName?: string | null; contactEmail?: string | null; contactPhone?: string | null; contactReference?: string | null;
   alternativePhoneNumber?: string | null; preferredContactMethod?: string | null;
+  identificationTypeId?: string | null; identificationTypeName?: string | null;
+  maskedIdentificationNumber?: string | null;
 }
 
 export interface EhcTicketDetail {
   propertyListing?: PropertyListingContext | null;
+  identificationTypeId?: string | null;
+  identificationTypeName?: string | null;
+  identificationNumber?: string | null;
+  maskedIdentificationNumber?: string | null;
   id: string;
   ticketNumber: string;
   ticketType: EhcTicketType;

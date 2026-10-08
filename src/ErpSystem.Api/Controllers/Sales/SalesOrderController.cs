@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,16 +12,20 @@ namespace ErpSystem.Api.Controllers.Sales;
 /// Manages Sales Orders throughout the order-to-cash lifecycle.
 /// Supports creation, approval workflow, confirmation, delivery tracking, and invoicing.
 /// </summary>
-[Authorize]
+[Authorize(Policy = SalesPermissions.Read)]
 [ApiController]
 [Route("api/sales/orders")]
 public class SalesOrderController : ControllerBase
 {
     private readonly ISalesOrderService _salesOrderService;
+    private readonly ISalesOrderCustomerDepositService? _depositService;
 
-    public SalesOrderController(ISalesOrderService salesOrderService)
+    public SalesOrderController(
+        ISalesOrderService salesOrderService,
+        ISalesOrderCustomerDepositService? depositService = null)
     {
         _salesOrderService = salesOrderService;
+        _depositService = depositService;
     }
 
     // ── CRUD ────────────────────────────────────────────────────────────
@@ -62,6 +67,7 @@ public class SalesOrderController : ControllerBase
     /// Creates a new Sales Order in Draft status.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<SalesOrderDetailDto>> Create([FromBody] CreateSalesOrderDto dto)
     {
         try
@@ -76,6 +82,7 @@ public class SalesOrderController : ControllerBase
     /// Updates an existing Draft Sales Order.
     /// </summary>
     [HttpPut("{id}")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<SalesOrderDetailDto>> Update(Guid id, [FromBody] UpdateSalesOrderDto dto)
     {
         try { return Ok(await _salesOrderService.UpdateSalesOrderAsync(id, dto)); }
@@ -88,6 +95,7 @@ public class SalesOrderController : ControllerBase
     /// Submits a Draft Sales Order for approval.
     /// </summary>
     [HttpPost("{id}/submit")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<SalesOrderDetailDto>> Submit(Guid id)
     {
         try { return Ok(await _salesOrderService.SubmitForApprovalAsync(id)); }
@@ -98,6 +106,7 @@ public class SalesOrderController : ControllerBase
     /// Approves or rejects a pending Sales Order.
     /// </summary>
     [HttpPost("{id}/approve")]
+    [Authorize(Policy = SalesPermissions.Approve)]
     public async Task<ActionResult<SalesOrderDetailDto>> Approve(Guid id, [FromBody] SalesOrderApprovalDto dto)
     {
         try { return Ok(await _salesOrderService.ProcessApprovalAsync(id, dto)); }
@@ -108,6 +117,7 @@ public class SalesOrderController : ControllerBase
     /// Confirms an approved Sales Order — validates credit limit and reserves stock.
     /// </summary>
     [HttpPost("{id}/confirm")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<SalesOrderDetailDto>> Confirm(Guid id)
     {
         try { return Ok(await _salesOrderService.ConfirmSalesOrderAsync(id)); }
@@ -118,6 +128,7 @@ public class SalesOrderController : ControllerBase
     /// Cancels a Sales Order and releases reserved stock.
     /// </summary>
     [HttpPost("{id}/cancel")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<SalesOrderDetailDto>> Cancel(Guid id, [FromBody] CancelSalesOrderDto dto)
     {
         try { return Ok(await _salesOrderService.CancelSalesOrderAsync(id, dto)); }
@@ -128,6 +139,7 @@ public class SalesOrderController : ControllerBase
     /// Puts a Sales Order on hold.
     /// </summary>
     [HttpPost("{id}/hold")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<SalesOrderDetailDto>> Hold(Guid id, [FromBody] string? reason = null)
     {
         try { return Ok(await _salesOrderService.PutOnHoldAsync(id, reason)); }
@@ -138,6 +150,7 @@ public class SalesOrderController : ControllerBase
     /// Releases a Sales Order from hold.
     /// </summary>
     [HttpPost("{id}/release")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<SalesOrderDetailDto>> Release(Guid id)
     {
         try { return Ok(await _salesOrderService.ReleaseFromHoldAsync(id)); }
@@ -148,6 +161,7 @@ public class SalesOrderController : ControllerBase
     /// Closes a fully delivered and invoiced Sales Order.
     /// </summary>
     [HttpPost("{id}/close")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<SalesOrderDetailDto>> Close(Guid id)
     {
         try { return Ok(await _salesOrderService.CloseSalesOrderAsync(id)); }
@@ -160,6 +174,7 @@ public class SalesOrderController : ControllerBase
     /// Converts an accepted Quote into a Sales Order.
     /// </summary>
     [HttpPost("convert-from-quote/{quoteId}")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<SalesOrderDetailDto>> ConvertFromQuote(Guid quoteId)
     {
         try
@@ -174,6 +189,7 @@ public class SalesOrderController : ControllerBase
     /// Generates an Invoice from a confirmed Sales Order.
     /// </summary>
     [HttpPost("{id}/generate-invoice")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<ActionResult<Guid>> GenerateInvoice(Guid id, [FromBody] GenerateSalesOrderInvoiceRequest request)
     {
         try
@@ -182,6 +198,36 @@ public class SalesOrderController : ControllerBase
             return Ok(new { invoiceId });
         }
         catch (UnauthorizedAccessException ex) { return Problem(statusCode: 403, detail: ex.Message); }
+        catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    [HttpGet("{id:guid}/customer-deposits")]
+    public async Task<ActionResult<IReadOnlyList<SalesOrderCustomerDepositDto>>> GetCustomerDeposits(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        if (_depositService is null)
+            return Problem(statusCode: 503, detail: "Sales Order deposit processing is not configured.");
+        try { return Ok(await _depositService.GetAsync(id, cancellationToken)); }
+        catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+    }
+
+    [HttpPost("{id:guid}/customer-deposits")]
+    [Authorize(Policy = SalesPermissions.Manage)]
+    public async Task<ActionResult<SalesOrderCustomerDepositDto>> CreateCustomerDeposit(
+        Guid id,
+        [FromBody] CreateSalesOrderCustomerDepositDto request,
+        CancellationToken cancellationToken)
+    {
+        if (_depositService is null)
+            return Problem(statusCode: 503, detail: "Sales Order deposit processing is not configured.");
+        try
+        {
+            var deposit = await _depositService.CreateAsync(id, request, cancellationToken);
+            return Ok(deposit);
+        }
+        catch (UnauthorizedAccessException ex) { return Problem(statusCode: 403, detail: ex.Message); }
+        catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
         catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
     }
 

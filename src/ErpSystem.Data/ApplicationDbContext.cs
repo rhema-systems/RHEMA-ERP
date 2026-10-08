@@ -281,6 +281,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<SalesOrder> SalesOrders { get; set; }
     public DbSet<SalesOrderLine> SalesOrderLines { get; set; }
     public DbSet<SalesOrderStatusHistory> SalesOrderStatusHistories { get; set; }
+    public DbSet<SalesOrderCustomerDeposit> SalesOrderCustomerDeposits { get; set; }
     public DbSet<DeliveryNote> DeliveryNotes { get; set; }
     public DbSet<DeliveryNoteLine> DeliveryNoteLines { get; set; }
 
@@ -325,6 +326,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<PaymentPlanInstallment> PaymentPlanInstallments { get; set; }
 
     public DbSet<TenantModule> TenantModules { get; set; }
+    public DbSet<IdentificationTypeModule> IdentificationTypeModules { get; set; }
     public DbSet<UserTenant> UserTenants { get; set; }
 
     // Settings entities
@@ -1672,6 +1674,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<Quote>(entity =>
         {
             entity.ToTable("Quotes");
+            entity.HasIndex(e => new { e.TenantId, e.PropertyEnquiryTicketId })
+                .IsUnique()
+                .HasFilter("[PropertyEnquiryTicketId] IS NOT NULL")
+                .HasDatabaseName("UX_Quote_Tenant_PropertyEnquiryTicket");
+            entity.HasOne<EhcTicket>()
+                .WithMany()
+                .HasForeignKey(e => e.PropertyEnquiryTicketId)
+                .OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(e => e.Opportunity)
                 .WithMany(o => o.Quotes)
                 .HasForeignKey(e => e.OpportunityId)
@@ -2079,6 +2089,28 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SalesOrderCustomerDeposit>(entity =>
+        {
+            entity.ToTable("SalesOrderCustomerDeposits");
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey })
+                .IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.CustomerPaymentId })
+                .IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.SalesOrderId });
+            entity.HasOne(item => item.SalesOrder)
+                .WithMany(item => item.CustomerDeposits)
+                .HasForeignKey(item => item.SalesOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.CustomerPayment)
+                .WithOne(item => item.SalesOrderDeposit)
+                .HasForeignKey<SalesOrderCustomerDeposit>(item => item.CustomerPaymentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant)
+                .WithMany()
+                .HasForeignKey(item => item.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -10152,6 +10184,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(x => new { x.TenantId, x.CrmOpportunityId });
             entity.HasIndex(x => new { x.TenantId, x.EstateListingApplicationCaseId });
             entity.HasIndex(x => new { x.TenantId, x.PublicPropertyEnquiryContactId });
+            entity.HasIndex(x => new { x.TenantId, x.IdentificationTypeId });
 
             entity.HasOne(x => x.RequesterUser)
                 .WithMany()
@@ -10162,6 +10195,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany(x => x.Enquiries)
                 .HasForeignKey(x => x.PublicPropertyEnquiryContactId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.IdentificationType)
+                .WithMany()
+                .HasForeignKey(x => x.IdentificationTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.Category)
                 .WithMany()
@@ -10660,7 +10698,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             { Shared.Constants.Modules.Procurement, Guid.Parse("00000000-0000-0000-0000-000000010004") },
             { Shared.Constants.Modules.Inventory, Guid.Parse("00000000-0000-0000-0000-000000010005") },
             { Shared.Constants.Modules.Marketing, Guid.Parse("00000000-0000-0000-0000-000000010006") },
-            { Shared.Constants.Modules.WorkflowEngine, Guid.Parse("00000000-0000-0000-0000-000000010007") }
+            { Shared.Constants.Modules.WorkflowEngine, Guid.Parse("00000000-0000-0000-0000-000000010007") },
+            { Shared.Constants.Modules.Estate, Guid.Parse("00000000-0000-0000-0000-000000010008") }
         };
 
         var modules = new[]
@@ -10671,7 +10710,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             Shared.Constants.Modules.Procurement,
             Shared.Constants.Modules.Inventory,
             Shared.Constants.Modules.Marketing,
-            Shared.Constants.Modules.WorkflowEngine
+            Shared.Constants.Modules.WorkflowEngine,
+            Shared.Constants.Modules.Estate
         };
 
         for (int i = 0; i < modules.Length; i++)

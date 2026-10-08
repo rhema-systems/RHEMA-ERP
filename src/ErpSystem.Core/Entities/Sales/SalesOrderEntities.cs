@@ -142,9 +142,38 @@ public class SalesOrder : DocumentEntity
     public virtual ICollection<SalesOrderLine> Lines { get; set; } = new List<SalesOrderLine>();
     public virtual ICollection<SalesOrderStatusHistory> StatusHistory { get; set; } = new List<SalesOrderStatusHistory>();
     public virtual ICollection<DeliveryNote> DeliveryNotes { get; set; } = new List<DeliveryNote>();
+    public virtual ICollection<SalesOrderCustomerDeposit> CustomerDeposits { get; set; } = new List<SalesOrderCustomerDeposit>();
 }
 
 #endregion
+
+/// <summary>
+/// Durable lineage between a property Sales Order and the canonical posted AR customer advance.
+/// Tender evidence remains structured so Finance reports do not depend on browser-composed text.
+/// </summary>
+public sealed class SalesOrderCustomerDeposit : TenantEntity
+{
+    public Guid SalesOrderId { get; set; }
+    public SalesOrder SalesOrder { get; set; } = null!;
+
+    public Guid CustomerPaymentId { get; set; }
+    public CustomerPayment CustomerPayment { get; set; } = null!;
+
+    [Required, MaxLength(100)]
+    public string IdempotencyKey { get; set; } = string.Empty;
+
+    [Required, MaxLength(30)]
+    public string TenderType { get; set; } = string.Empty;
+
+    [MaxLength(150)] public string? ExternalBankName { get; set; }
+    [MaxLength(100)] public string? ExternalAccountNumber { get; set; }
+    [MaxLength(100)] public string? ChequeNumber { get; set; }
+    [MaxLength(100)] public string? DepositReference { get; set; }
+    [MaxLength(100)] public string? IdentificationReference { get; set; }
+
+    [Required, MaxLength(500)]
+    public string PropertyDescription { get; set; } = string.Empty;
+}
 
 #region Sales Order Line
 

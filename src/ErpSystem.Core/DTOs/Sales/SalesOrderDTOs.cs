@@ -84,6 +84,51 @@ public class SalesOrderDetailDto : SalesOrderSummaryDto
     public List<DeliveryNoteSummaryDto> DeliveryNotes { get; set; } = new();
 }
 
+public sealed class CreateSalesOrderCustomerDepositDto
+{
+    [Range(0.01, 999999999999.99)]
+    public decimal Amount { get; set; }
+    public DateTime? PaymentDate { get; set; }
+    [Required] public Guid PaymentMethodId { get; set; }
+    public Guid? BankAccountId { get; set; }
+    public Guid? LiquidityAccountId { get; set; }
+    [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [StringLength(150)] public string? BankName { get; set; }
+    [StringLength(100)] public string? AccountNumber { get; set; }
+    [StringLength(100)] public string? ChequeNumber { get; set; }
+    [StringLength(100)] public string? DepositReference { get; set; }
+}
+
+public sealed class SalesOrderCustomerDepositDto
+{
+    public Guid Id { get; set; }
+    public Guid SalesOrderId { get; set; }
+    public Guid CustomerPaymentId { get; set; }
+    public string PaymentNumber { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public string TenderType { get; set; } = string.Empty;
+    public string Reference { get; set; } = string.Empty;
+    public string PropertyDescription { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTime PaymentDate { get; set; }
+    public bool IsReversed { get; set; }
+}
+
+/// <summary>Trusted internal lineage input consumed inside the AR receipt transaction.</summary>
+public sealed class SalesOrderDepositLineageCreateDto
+{
+    public Guid SalesOrderId { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public string TenderType { get; set; } = string.Empty;
+    public string? ExternalBankName { get; set; }
+    public string? ExternalAccountNumber { get; set; }
+    public string? ChequeNumber { get; set; }
+    public string? DepositReference { get; set; }
+    public string? IdentificationReference { get; set; }
+    public string PropertyDescription { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// Sales Order line item DTO
 /// </summary>

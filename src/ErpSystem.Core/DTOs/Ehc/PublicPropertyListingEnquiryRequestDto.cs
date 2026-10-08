@@ -10,6 +10,12 @@ public sealed class PublicPropertyListingEnquiryRequestDto : IValidatableObject
 {
     public Guid SubmissionId { get; init; }
 
+    public Guid IdentificationTypeId { get; init; }
+
+    [Required(ErrorMessage = "Enter your identification number.")]
+    [StringLength(100, MinimumLength = 3, ErrorMessage = "The identification number must be between 3 and 100 characters.")]
+    public string IdentificationNumber { get; init; } = string.Empty;
+
     [Required(ErrorMessage = "Enter your enquiry message.")]
     [StringLength(4000, MinimumLength = 1, ErrorMessage = "The enquiry message must be between 1 and 4,000 characters.")]
     public string Message { get; init; } = string.Empty;
@@ -48,6 +54,20 @@ public sealed class PublicPropertyListingEnquiryRequestDto : IValidatableObject
             yield return new ValidationResult(
                 "A submission identifier is required.",
                 new[] { nameof(SubmissionId) });
+        }
+
+        if (IdentificationTypeId == Guid.Empty)
+        {
+            yield return new ValidationResult(
+                "Select an identification type.",
+                new[] { nameof(IdentificationTypeId) });
+        }
+
+        if (string.IsNullOrWhiteSpace(IdentificationNumber))
+        {
+            yield return new ValidationResult(
+                "Enter your identification number.",
+                new[] { nameof(IdentificationNumber) });
         }
 
         if (string.IsNullOrWhiteSpace(Message))

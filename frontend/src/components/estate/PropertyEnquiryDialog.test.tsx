@@ -23,6 +23,7 @@ vi.mock('@/hooks/use-toast', () => ({
 vi.mock('@/services/external-estate-listings.service', () => ({
   externalEstateListingsService: {
     getEnquiryProfiles: vi.fn(),
+    getEstateIdentificationTypes: vi.fn(),
     createEnquiry: vi.fn(),
     createPublicEnquiry: vi.fn(),
     requestPublicEnquiryContactChallenge: vi.fn(),
@@ -46,6 +47,11 @@ const listing = {
   location: 'Accra',
 } as ExternalEstateListing;
 beforeEach(() => {
+  vi.mocked(
+    externalEstateListingsService.getEstateIdentificationTypes
+  ).mockResolvedValue([
+    { id: 'ghana-card', name: 'Ghana Card', code: 'GHA' },
+  ]);
   vi.mocked(externalEstateListingsService.getEnquiryProfiles).mockResolvedValue(
     [
       {
@@ -66,6 +72,15 @@ beforeEach(() => {
   mocks.toast.mockReset();
 });
 afterEach(cleanup);
+const enterIdentification = async () => {
+  await screen.findByRole('option', { name: 'Ghana Card' });
+  fireEvent.change(screen.getByLabelText('Identification type'), {
+    target: { value: 'ghana-card' },
+  });
+  fireEvent.change(screen.getByLabelText('Identification number'), {
+    target: { value: 'GHA-123456789-0' },
+  });
+};
 const mount = () => {
   const onCreated = vi.fn();
   const onClose = vi.fn();
@@ -99,6 +114,7 @@ describe('Property enquiry dialog', () => {
     fireEvent.change(screen.getByLabelText('Your enquiry'), {
       target: { value: 'Is a site visit available?' },
     });
+    await enterIdentification();
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Send enquiry' })).toBeEnabled()
     );
@@ -108,6 +124,8 @@ describe('Property enquiry dialog', () => {
       'listing-2',
       expect.objectContaining({
         businessPartnerId: 'supplier-1',
+        identificationTypeId: 'ghana-card',
+        identificationNumber: 'GHA-123456789-0',
         message: 'Is a site visit available?',
         submissionId: expect.any(String),
       })
@@ -126,6 +144,7 @@ describe('Property enquiry dialog', () => {
     fireEvent.change(screen.getByLabelText('Your enquiry'), {
       target: { value: 'Please explain the payment terms.' },
     });
+    await enterIdentification();
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Send enquiry' })).toBeEnabled()
     );
@@ -226,6 +245,7 @@ describe('Property enquiry dialog', () => {
     fireEvent.change(screen.getByLabelText('Your enquiry'), {
       target: { value: 'I would like to arrange a viewing.' },
     });
+    await enterIdentification();
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Send enquiry' })).toBeEnabled()
     );
@@ -241,6 +261,8 @@ describe('Property enquiry dialog', () => {
       contactEmail: 'ama@example.com',
       preferredContactMethod: 'Email',
       contactVerificationToken: 'verified-contact-token',
+      identificationTypeId: 'ghana-card',
+      identificationNumber: 'GHA-123456789-0',
       message: 'I would like to arrange a viewing.',
     });
     expect(externalEstateListingsService.createEnquiry).not.toHaveBeenCalled();
@@ -315,6 +337,7 @@ describe('Property enquiry dialog', () => {
     fireEvent.change(screen.getByLabelText('Your enquiry'), {
       target: { value: 'Please send the viewing details.' },
     });
+    await enterIdentification();
     expect(screen.getByRole('button', { name: 'Send enquiry' })).toBeEnabled();
   });
 

@@ -100,6 +100,18 @@ export interface UpdateIdentificationTypeRequest extends CreateIdentificationTyp
   id: string;
 }
 
+export interface IdentificationTypeModuleOption {
+  tenantModuleId: string;
+  moduleName: string;
+  status: string;
+  isSelected: boolean;
+}
+
+export interface IdentificationTypeModuleAvailability {
+  identificationTypeId: string;
+  modules: IdentificationTypeModuleOption[];
+}
+
 // ── Reason codes — api/reason-codes ─────────────────────────────────────────────
 
 export type ReasonCodeCategory =

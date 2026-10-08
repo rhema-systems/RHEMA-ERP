@@ -1,12 +1,18 @@
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.DTOs.Sales;
+using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Interfaces.Inventory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Sales;
 
@@ -20,6 +26,7 @@ public class QuoteService : IQuoteService
     private readonly ILogger<QuoteService> _logger;
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly ICommercialQuantityPolicyValidator? _commercialQuantityValidator;
+    private readonly ISalesSetupService? _salesSetupService;
 
     public QuoteService(
         IGenericRepository<Quote> quoteRepo,
@@ -29,7 +36,8 @@ public class QuoteService : IQuoteService
         ICurrentUserProvider currentUserProvider,
         ILogger<QuoteService> logger,
         IDocumentNumberingService documentNumberingService,
-        ICommercialQuantityPolicyValidator? commercialQuantityValidator = null)
+        ICommercialQuantityPolicyValidator? commercialQuantityValidator = null,
+        ISalesSetupService? salesSetupService = null)
     {
         _quoteRepo = quoteRepo;
         _lineRepo = lineRepo;
@@ -39,11 +47,18 @@ public class QuoteService : IQuoteService
         _logger = logger;
         _documentNumberingService = documentNumberingService;
         _commercialQuantityValidator = commercialQuantityValidator;
+        _salesSetupService = salesSetupService;
     }
 
     #region CRUD
 
-    public async Task<QuoteDetailDto> CreateAsync(CreateQuoteDto dto)
+    public Task<QuoteDetailDto> CreateAsync(CreateQuoteDto dto)
+        => CreateCoreAsync(dto, propertyEnquiryTicketId: null);
+
+    private async Task<QuoteDetailDto> CreateCoreAsync(
+        CreateQuoteDto dto,
+        Guid? propertyEnquiryTicketId,
+        CancellationToken cancellationToken = default)
     {
         var quoteNumber = await GenerateQuoteNumberAsync();
         var tenantId = _currentUserProvider.TenantId;
@@ -53,12 +68,16 @@ public class QuoteService : IQuoteService
             DocumentNumber = quoteNumber,
             DocumentDate = DateTime.UtcNow,
             OpportunityId = dto.OpportunityId,
+            PropertyEnquiryTicketId = propertyEnquiryTicketId,
             CustomerId = dto.CustomerId,
             QuoteName = dto.QuoteName,
             ValidUntil = dto.ValidUntil,
             QuoteStatus = "Draft",
             ShippingAmount = dto.ShippingAmount ?? 0,
             Proposal = dto.Proposal,
+            Currency = string.IsNullOrWhiteSpace(dto.Currency) ? "GHS" : dto.Currency.Trim().ToUpperInvariant(),
+            ExchangeRate = dto.ExchangeRate <= 0 ? 1m : dto.ExchangeRate,
+            TaxGroupId = dto.TaxGroupId,
             TenantId = tenantId
         };
 
@@ -98,10 +117,117 @@ public class QuoteService : IQuoteService
         quote.TotalAmount = subTotal + totalTax + quote.ShippingAmount;
 
         await _quoteRepo.UpdateAsync(quote);
-        await _unitOfWork.SaveChangesAsync();
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Created Quote {QuoteNumber} for {Amount}", quoteNumber, quote.TotalAmount);
         return await GetByIdAsync(quote.Id) ?? throw new InvalidOperationException("Failed to retrieve created Quote");
+    }
+
+    public async Task<QuoteDetailDto> CreatePropertyOpportunityQuoteAsync(
+        Guid opportunityId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant context is required.");
+        }
+
+        QuoteDetailDto? result = null;
+        await _unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        {
+            await _unitOfWork.AcquireTransactionLockAsync(
+                $"property-opportunity-quote:{tenantId:D}:{opportunityId:D}",
+                transactionToken);
+
+            var opportunity = await _unitOfWork.Repository<Opportunity>().GetQueryable()
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == opportunityId
+                    && item.TenantId == tenantId
+                    && !item.IsDeleted,
+                    transactionToken)
+                ?? throw new KeyNotFoundException("Opportunity was not found.");
+
+            var ticket = await _unitOfWork.Repository<EhcTicket>().GetQueryable()
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == tenantId
+                    && item.CrmOpportunityId == opportunityId
+                    && item.PropertyListingContextJson != null
+                    && !item.IsDeleted,
+                    transactionToken)
+                ?? throw new InvalidOperationException("This opportunity is not linked to a property enquiry.");
+
+            var existingQuoteId = await _quoteRepo.GetQueryable()
+                .Where(item => item.TenantId == tenantId
+                    && item.PropertyEnquiryTicketId == ticket.Id
+                    && !item.IsDeleted)
+                .Select(item => (Guid?)item.Id)
+                .SingleOrDefaultAsync(transactionToken);
+            if (existingQuoteId.HasValue)
+            {
+                result = await GetByIdAsync(existingQuoteId.Value)
+                    ?? throw new InvalidOperationException("The existing property quote could not be loaded.");
+                return;
+            }
+
+            EhcPropertyListingContextDto property;
+            try
+            {
+                property = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(ticket.PropertyListingContextJson!)
+                    ?? throw new InvalidOperationException("The property enquiry snapshot is missing.");
+            }
+            catch (JsonException)
+            {
+                throw new InvalidOperationException("The property enquiry snapshot is invalid.");
+            }
+
+            var saleableItem = await ResolvePropertySaleableItemAsync(property, tenantId, transactionToken);
+            var eachUnit = await _unitOfWork.Repository<UnitOfMeasure>().GetQueryable()
+                .AsNoTracking()
+                .Where(unit => unit.TenantId == tenantId
+                    && unit.IsActive
+                    && (unit.Code == "EA" || unit.Code == "EACH"))
+                .OrderBy(unit => unit.Code == "EA" ? 0 : 1)
+                .FirstOrDefaultAsync(transactionToken)
+                ?? throw new InvalidOperationException("The active Each (EA) unit of measure is not configured.");
+
+            var price = saleableItem.EstimatedValue.GetValueOrDefault() > 0
+                ? saleableItem.EstimatedValue!.Value
+                : opportunity.Amount;
+            if (price <= 0)
+            {
+                throw new InvalidOperationException("The property does not have an authoritative sale price.");
+            }
+
+            var currency = FirstNonBlank(saleableItem.Currency, opportunity.Currency, property.Currency, "GHS")!;
+            var quoteName = Truncate($"{property.ListingName} - Sales Quote", 200);
+            result = await CreateCoreAsync(new CreateQuoteDto
+            {
+                OpportunityId = opportunity.Id,
+                CustomerId = opportunity.CustomerId,
+                QuoteName = quoteName,
+                ValidUntil = DateTime.UtcNow.AddDays(30),
+                Currency = currency,
+                ExchangeRate = 1m,
+                Proposal = Truncate(
+                    $"Property quote for {property.ListingReference}. Originating enquiry {ticket.TicketNumber}.",
+                    2000),
+                LineItems =
+                [
+                    new CreateQuoteLineItemDto
+                    {
+                        Description = Truncate(saleableItem.ItemName, 200),
+                        Quantity = 1m,
+                        UnitPrice = price,
+                        ProductCode = Truncate(FirstNonBlank(saleableItem.ItemCode, property.ListingReference), 50),
+                        Unit = eachUnit.Name,
+                        UnitOfMeasureId = eachUnit.Id
+                    }
+                ]
+            }, ticket.Id, transactionToken);
+        }, cancellationToken);
+
+        return result ?? throw new InvalidOperationException("The property quote could not be created.");
     }
 
     public async Task<QuoteDetailDto> UpdateAsync(Guid id, UpdateQuoteDto dto)
@@ -165,9 +291,11 @@ public class QuoteService : IQuoteService
 
     public async Task<QuoteDetailDto?> GetByIdAsync(Guid id)
     {
-        var quote = await _quoteRepo.GetByIdAsync(id,
-            q => q.Opportunity,
-            q => q.LineItems);
+        var tenantId = _currentUserProvider.TenantId;
+        var quote = await _quoteRepo.GetQueryable()
+            .Include(q => q.Opportunity)
+            .Include(q => q.LineItems)
+            .SingleOrDefaultAsync(q => q.Id == id && q.TenantId == tenantId && !q.IsDeleted);
 
         if (quote == null) return null;
         var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, new[] { quote.CustomerId });
@@ -321,6 +449,69 @@ public class QuoteService : IQuoteService
 
     #region Helpers
 
+    private async Task<SalesSaleableItemDto> ResolvePropertySaleableItemAsync(
+        EhcPropertyListingContextDto property,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var salesSetup = _salesSetupService
+            ?? throw new InvalidOperationException("Sales setup is not available for property quote generation.");
+        var asset = await _unitOfWork.Repository<EstateManagedAsset>().GetQueryable()
+            .AsNoTracking()
+            .Where(item => item.Id == property.ParentAssetId
+                && item.TenantId == tenantId
+                && !item.IsDeleted)
+            .Select(item => new { item.Id, item.AssetCode, item.AssetType, item.ProjectUnitId })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("The property enquiry no longer resolves to an Estate asset.");
+
+        string adapterKey;
+        Guid sourceItemId;
+        if (asset.AssetType == EstateManagedAssetType.Land)
+        {
+            adapterKey = "land-management";
+            sourceItemId = property.DemarcationId
+                ?? throw new InvalidOperationException("The land enquiry does not identify a demarcated land record.");
+        }
+        else if (asset.AssetType is EstateManagedAssetType.Property or EstateManagedAssetType.Facility)
+        {
+            adapterKey = "property-register";
+            sourceItemId = asset.ProjectUnitId ?? asset.Id;
+        }
+        else
+        {
+            throw new InvalidOperationException($"Estate asset type '{asset.AssetType}' cannot be quoted by Sales.");
+        }
+
+        var sources = (await salesSetup.GetSaleableSourcesAsync())
+            .Where(source => source.TenantId == tenantId
+                && source.IsActive
+                && source.AllowSalesOrders
+                && source.AdapterKey.Equals(adapterKey, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(source => source.SortOrder);
+        foreach (var source in sources)
+        {
+            var items = await salesSetup.SearchSaleableItemsAsync(source.Id, asset.AssetCode, 100);
+            var item = items.FirstOrDefault(candidate =>
+                candidate.SourceItemId.Equals(sourceItemId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+            if (item is not null)
+            {
+                return item;
+            }
+        }
+
+        throw new InvalidOperationException("The property is not available in an active Sales source.");
+    }
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
+    }
+
     private async Task<string> GenerateQuoteNumberAsync()
     {
         return await _documentNumberingService.GenerateAsync(
@@ -352,10 +543,13 @@ public class QuoteService : IQuoteService
         QuoteName = q.QuoteName,
         QuoteStatus = q.QuoteStatus,
         OpportunityId = q.OpportunityId,
+        PropertyEnquiryTicketId = q.PropertyEnquiryTicketId,
         OpportunityName = q.Opportunity?.Name,
         CustomerName = customerNames.GetValueOrDefault(q.CustomerId ?? Guid.Empty),
         TotalAmount = q.TotalAmount,
         TaxAmount = q.TaxAmount,
+        Currency = q.Currency,
+        ExchangeRate = q.ExchangeRate,
         ValidUntil = q.ValidUntil,
         SentDate = q.SentDate,
         AcceptedDate = q.AcceptedDate,
@@ -370,11 +564,14 @@ public class QuoteService : IQuoteService
         QuoteName = q.QuoteName,
         QuoteStatus = q.QuoteStatus,
         OpportunityId = q.OpportunityId,
+        PropertyEnquiryTicketId = q.PropertyEnquiryTicketId,
         OpportunityName = q.Opportunity?.Name,
         CustomerId = q.CustomerId,
         CustomerName = customerNames.GetValueOrDefault(q.CustomerId ?? Guid.Empty),
         TotalAmount = q.TotalAmount,
         TaxAmount = q.TaxAmount,
+        Currency = q.Currency,
+        ExchangeRate = q.ExchangeRate,
         SubTotal = q.SubTotal,
         DiscountAmount = q.DiscountAmount,
         ShippingAmount = q.ShippingAmount,

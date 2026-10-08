@@ -620,6 +620,7 @@ export interface CrmOpportunityListItemDto extends CrmOpportunityOverviewDto {
 }
 
 export interface CrmOpportunityDetailDto extends CrmOpportunityListItemDto {
+  propertyEnquiryTicketId?: string;
   description?: string;
   assignedToId?: string;
   competitors?: string;
@@ -2187,6 +2188,35 @@ class CrmService {
     return parseResponse<QuoteDetailDto>(response, 'Failed to create quote');
   }
 
+  async createPropertyOpportunityQuote(opportunityId: string): Promise<QuoteDetailDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/sales/quotes/from-property-opportunity/${opportunityId}`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
+    return parseResponse<QuoteDetailDto>(response, 'Failed to create the property sales quote');
+  }
+
+  async downloadQuotePdf(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/sales/quotes/${id}/pdf?download=true`, {
+      headers: getAuthHeaders(false),
+    });
+    if (!response.ok) {
+      throw new Error(await getErrorMessage(response, 'Failed to prepare the quote PDF'));
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `sales-quote-${id}.pdf`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async updateQuote(id: string, dto: UpdateQuoteDto): Promise<QuoteDetailDto> {
     const response = await fetch(`${API_BASE_URL}/sales/quotes/${id}`, {
       method: 'PUT',
@@ -2328,6 +2358,7 @@ export interface QuoteSummaryDto {
   quoteName: string;
   quoteStatus: string;
   opportunityId: string;
+  propertyEnquiryTicketId?: string;
   opportunityName?: string;
   customerName?: string;
   totalAmount: number;

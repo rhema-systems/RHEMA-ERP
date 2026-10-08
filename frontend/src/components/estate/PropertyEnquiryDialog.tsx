@@ -67,6 +67,8 @@ export function PropertyEnquiryDialog({
   const [showPortalRedirect, setShowPortalRedirect] = useState(false);
   const [profiles, setProfiles] = useState<EnquiryPartnerProfile[]>([]);
   const [partnerId, setPartnerId] = useState('');
+  const [identificationTypeId, setIdentificationTypeId] = useState('');
+  const [identificationNumber, setIdentificationNumber] = useState('');
   const [profilesLoading, setProfilesLoading] = useState(!publicMode);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,6 +83,15 @@ export function PropertyEnquiryDialog({
     queryKey: ['security', 'public'],
     queryFn: () => settingsService.getPublicSecuritySettings(),
   });
+  const identificationTypesQuery = useQuery({
+    queryKey: ['estate', 'public', 'identification-types'],
+    queryFn: () => externalEstateListingsService.getEstateIdentificationTypes(),
+  });
+  useEffect(() => {
+    if (!identificationTypeId && identificationTypesQuery.data?.length) {
+      setIdentificationTypeId(identificationTypesQuery.data[0].id);
+    }
+  }, [identificationTypeId, identificationTypesQuery.data]);
   useEffect(() => {
     if (publicMode) {
       setProfilesLoading(false);
@@ -227,6 +238,14 @@ export function PropertyEnquiryDialog({
   };
   const submit = async () => {
     if (busy || !message.trim()) return;
+    if (!identificationTypeId || identificationNumber.trim().length < 3) {
+      toast({
+        title: 'Identification is required',
+        description: 'Select an identification type and enter your identification number.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (publicMode && !contactVerification) {
       toast({
         title: 'Verify your contact first',
@@ -246,6 +265,8 @@ export function PropertyEnquiryDialog({
       const ticket = publicMode
         ? await externalEstateListingsService.createPublicEnquiry(listing.id, {
             submissionId,
+            identificationTypeId,
+            identificationNumber: identificationNumber.trim(),
             contactName: contactName.trim(),
             contactPhone:
               preferredContactMethod === 'Phone' ? selectedContact : undefined,
@@ -259,6 +280,8 @@ export function PropertyEnquiryDialog({
         : await externalEstateListingsService.createEnquiry(listing.id, {
             submissionId,
             message: message.trim(),
+            identificationTypeId,
+            identificationNumber: identificationNumber.trim(),
             businessPartnerId: partnerId || undefined,
             captchaToken: captchaToken || undefined,
           });
@@ -540,6 +563,49 @@ export function PropertyEnquiryDialog({
               Your signed-in portal contact details will be included.
             </p>
           ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="property-enquiry-identification-type">Identification type</Label>
+              <select
+                id="property-enquiry-identification-type"
+                className="min-h-10 w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground"
+                value={identificationTypeId}
+                onChange={(event) => setIdentificationTypeId(event.target.value)}
+                disabled={busy || identificationTypesQuery.isLoading}
+              >
+                <option value="">Select identification type</option>
+                {(identificationTypesQuery.data ?? []).map((identificationType) => (
+                  <option key={identificationType.id} value={identificationType.id}>
+                    {identificationType.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="property-enquiry-identification-number">Identification number</Label>
+              <Input
+                id="property-enquiry-identification-number"
+                value={identificationNumber}
+                onChange={(event) => setIdentificationNumber(event.target.value)}
+                maxLength={100}
+                autoComplete="off"
+                disabled={busy}
+                placeholder="Enter identification number"
+              />
+            </div>
+            {identificationTypesQuery.isError && (
+              <p className="text-sm text-destructive sm:col-span-2">
+                Identification types could not be loaded. Close the dialog and try again.
+              </p>
+            )}
+            {!identificationTypesQuery.isLoading &&
+              !identificationTypesQuery.isError &&
+              identificationTypesQuery.data?.length === 0 && (
+                <p className="text-sm text-amber-700 sm:col-span-2">
+                  No identification type is currently available for Estate enquiries. Contact an administrator.
+                </p>
+              )}
+          </div>
           <div className="space-y-2">
             <Label htmlFor="property-enquiry-message">Your enquiry</Label>
             <Textarea
@@ -583,9 +649,13 @@ export function PropertyEnquiryDialog({
               disabled={
                 busy ||
                 profilesLoading ||
+                identificationTypesQuery.isLoading ||
+                identificationTypesQuery.isError ||
                 securityLoading ||
                 securityError ||
                 !message.trim() ||
+                !identificationTypeId ||
+                identificationNumber.trim().length < 3 ||
                 Boolean(
                   publicMode &&
                     (!contactName.trim() ||

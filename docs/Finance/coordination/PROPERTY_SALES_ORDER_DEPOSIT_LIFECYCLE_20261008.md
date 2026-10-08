@@ -26,9 +26,9 @@ Audit and incrementally align the existing Property Listing -> Enquiry -> Opport
 
 ## Current phase
 
-`Audit in progress`
+`Implementation complete; upstream integration and visible acceptance pending`
 
-No runtime implementation has started. The repository model, APIs, UI, workflows, Finance posting, ledger projection, migrations, permissions, tenant boundaries, and existing tests are being mapped first.
+The audited design has been implemented in the isolated worktree. The implementation preserves the historical prospect-deposit path as read/clear/reverse only, moves all new deposits to approved-customer Sales Orders, posts those receipts as customer advances through the existing AR posting engine, and exposes their exact payment/property lineage in the Customer Detailed Ledger. No migration has been applied and no local or VPS database has been changed by this workstream.
 
 ## Required 29-point audit deliverable
 
@@ -72,11 +72,18 @@ No runtime implementation has started. The repository model, APIs, UI, workflows
 
 - `216a3bcaef1` - start this audit ledger.
 - `c37d59c7187` - merge the latest `origin/master` after teammate PR #384.
+- `a98518808b5` - record the integrated upstream base.
+- `567eeb0b8d4` - complete the audit and implementation decision record.
+- Implementation checkpoint: pending commit after the verification recorded below.
 
 ## Migrations and application status
 
-- Migration required: under audit; no migration created or applied.
-- Local application: not changed or started for this workstream.
+- Forward migration created: `20261008192833_AddPropertySalesOrderDepositLifecycle`.
+- The migration adds only the audited identification-module mapping, protected enquiry identity fields, property quote lineage, and Sales Order customer-deposit lineage. It does not alter historical prospect-deposit rows or unrelated Security schema.
+- `dotnet ef migrations list` includes the new migration.
+- `dotnet ef migrations has-pending-model-changes` reports no pending model changes after a full API build.
+- Migration application: not performed. A specifically identified non-production database is still required for apply/rollback evidence.
+- Local application: not started for this workstream; no visible browser acceptance has been claimed.
 - VPS/test application: unchanged by this workstream.
 - Database: no writes performed.
 
@@ -86,19 +93,30 @@ No runtime implementation has started. The repository model, APIs, UI, workflows
 - Re-fetched and verified both GitHub and `git ls-remote` on 2026-10-08: PR #384 at `2f5ccdda0ae` is the current remote `master` head and is already integrated in this worktree.
 - Inspected existing Sales/CRM tracker `docs/tdc-sales-marketing-crm-gap-implementation-tracker.md` to avoid duplicating prior requirements analysis.
 - Confirmed the older property-enquiry worktree is divergent and unsuitable as the implementation base.
+- Full API source build passed with zero errors. The remaining output was the repository's existing warning set, including ImageSharp package-advisory warnings.
+- The migration model compiler preserved 88 full models, 347,374 ordered statements and 8,989 distinct statements across two lookup contexts.
+- Focused backend tests passed: 23/23 across `PropertyEnquiryProspectLifecycleTests` and `SalesOrderCustomerDepositServiceTests`.
+- Additional focused public listing enquiry tests passed for Estate-filtered identity submission and protected identity persistence.
+- Focused frontend tests passed: 17/17 across the property-enquiry dialog, opportunity lead context and Sales Order service.
+- Frontend TypeScript validation passed after excluding generated Next production output.
+- A full Next.js production build passed, including route generation.
+- Deposit service coverage verifies exact Cash, Cheque and Bank Deposit references; unallocated customer-advance posting with property lineage; and rejection of unapproved customers before Finance posting.
+- Manual code review confirmed the full identification number is retained only on the protected EHC ticket, is not copied to Business Partner TaxNumber, and the customer dialog presents it read-only to authorized internal users.
+- Manual migration review removed an unsafe rollback delete that could have removed a preexisting shared Estate module row.
 
 ## Known failures and risks
 
-- The attachment spans HR configuration, a public Estate form, CRM, Sales, Business Partner approval, Finance posting, and reporting. Each existing ownership boundary must be verified before schema or service changes.
 - Existing prospect deposits may already be posted in production. Any prospective Sales Order deposit path must coexist with them without rewriting history.
-- The canonical stable identity available on `TenantModule` is still under audit; frontend display-name matching is prohibited.
+- The broad `PropertyListingEnquiryTests` fixture still has unrelated legacy failures outside this slice, including a null reference in `EstateManagedAssetsController` and a SQLite fixture missing `OpportunityStageDefinitions`. The focused identity/enquiry tests pass.
+- The installed local machine currently exposes .NET SDK/runtime 10 while the repository pins SDK 9 and the test application targets .NET 8. Verification used a guarded temporary SDK/compiler target override and `DOTNET_ROLL_FORWARD=Major`; both repository files were restored afterward.
+- A real visible browser lifecycle and database verification remain required before describing the 46-step business flow as accepted end to end.
+- Upstream `master` must be fetched and integrated again because the user reported another teammate PR after this worktree's last integration.
 
 ## Remaining work
 
-1. Complete and record the 29-point audit requested by the user.
-2. Identify any genuine business-rule blockers.
-3. Add protection tests for existing behavior and agreed prospective boundaries.
-4. Implement only the required controlled slices.
-5. Apply and verify any forward migration against an explicit non-production database.
-6. Run focused backend/frontend tests, migration checks, tenant/authorization tests, and visible browser acceptance.
-7. Update this ledger before every handoff or stop while work remains incomplete.
+1. Commit the verified implementation checkpoint.
+2. Fetch and integrate the latest teammate changes from `origin/master`, then rerun impacted checks.
+3. Apply and roll back the forward migration against an explicitly identified non-production database.
+4. Start the local application against that non-production database and complete visible browser acceptance for the configured Identification Type, public enquiry, opportunity, quote PDF, approved customer, Sales Order deposit and Customer Detailed Ledger sequence.
+5. Record database rows, posting-event/journal evidence and screenshots for the same record chain.
+6. Update this ledger with the integration commit, application/database evidence and any remaining acceptance failures before handoff.

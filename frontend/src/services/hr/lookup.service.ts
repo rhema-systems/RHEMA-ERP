@@ -5,6 +5,7 @@ import type {
   IdentificationType,
   CreateIdentificationTypeRequest,
   UpdateIdentificationTypeRequest,
+  IdentificationTypeModuleAvailability,
   ReasonCode,
   ReasonCodeRequest,
   Department,
@@ -90,6 +91,19 @@ class IdentificationTypeService {
 
   deactivate(id: string): Promise<IdentificationType> {
     return apiService.put<IdentificationType>(`${this.baseUrl}/${id}/deactivate`);
+  }
+
+  getModuleAvailability(id: string): Promise<IdentificationTypeModuleAvailability> {
+    return apiService.get<IdentificationTypeModuleAvailability>(`${this.baseUrl}/${id}/modules`);
+  }
+
+  updateModuleAvailability(
+    id: string,
+    tenantModuleIds: string[],
+  ): Promise<IdentificationTypeModuleAvailability> {
+    return apiService.put<IdentificationTypeModuleAvailability>(`${this.baseUrl}/${id}/modules`, {
+      tenantModuleIds,
+    });
   }
 }
 

@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
@@ -2431,6 +2432,40 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         return Ok(new { success = true, data = profiles });
     }
 
+    [AllowAnonymous]
+    [HttpGet("/api/estate/public/identification-types")]
+    [EnableRateLimiting("SensitivePolicy")]
+    public async Task<IActionResult> GetPublicIdentificationTypes(CancellationToken cancellationToken)
+    {
+        var tenantId = await ResolvePublicTenantIdAsync(cancellationToken);
+        if (tenantId == Guid.Empty)
+        {
+            return Ok(new { success = true, data = Array.Empty<object>() });
+        }
+
+        var types = await (
+            from identificationType in _db.IdentificationTypes.AsNoTracking()
+            join mapping in _db.IdentificationTypeModules.AsNoTracking()
+                on identificationType.Id equals mapping.IdentificationTypeId
+            join module in _db.TenantModules.AsNoTracking()
+                on mapping.TenantModuleId equals module.Id
+            where identificationType.TenantId == tenantId
+                && mapping.TenantId == tenantId
+                && module.TenantId == tenantId
+                && identificationType.IsActive
+                && !identificationType.IsDeleted
+                && !mapping.IsDeleted
+                && !module.IsDeleted
+                && module.Status == ModuleStatus.Enabled
+                && module.ModuleName == Constants.Modules.Estate
+            orderby identificationType.Name
+            select new { identificationType.Id, identificationType.Name, identificationType.Code })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return Ok(new { success = true, data = types });
+    }
+
     [HttpPost("/api/estate/external/listings/{listingId:guid}/enquiries")]
     [EnableRateLimiting("SensitivePolicy")]
     public async Task<IActionResult> CreateListingEnquiry(Guid listingId,
@@ -2478,6 +2513,21 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             if (asset == null)
             {
                 return NotFound(new { success = false, message = "Listing was not found or is not available." });
+            }
+
+            var identificationNumber = request.IdentificationNumber?.Trim();
+            if (!request.IdentificationTypeId.HasValue || request.IdentificationTypeId == Guid.Empty
+                || string.IsNullOrWhiteSpace(identificationNumber) || identificationNumber.Length is < 3 or > 100)
+            {
+                return BadRequest(new { success = false, message = "Select an identification type and enter a valid identification number." });
+            }
+            var identificationType = await ResolveEstateIdentificationTypeAsync(
+                tenantId,
+                request.IdentificationTypeId.Value,
+                cancellationToken);
+            if (identificationType is null)
+            {
+                return BadRequest(new { success = false, message = "The selected identification type is not available for Estate enquiries." });
             }
 
             var userId = GetUserId();
@@ -2535,7 +2585,13 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             var property = new EhcPropertyListingContextDto("estate-public-listing", listingId, reference, name, type,
                 string.IsNullOrWhiteSpace(currency) ? "GHS" : currency, asset.Location, price, asset.Id, demarcationListing?.Id,
                 partner?.Id, partner?.PartnerName ?? _currentUserService.FullName,
-                _currentUserService.FullName, _currentUserService.Email ?? partner?.PrimaryEmail, partner?.PrimaryPhone);
+                _currentUserService.FullName, _currentUserService.Email ?? partner?.PrimaryEmail, partner?.PrimaryPhone)
+            {
+                IdentificationTypeId = identificationType.Id,
+                IdentificationTypeName = identificationType.Name,
+                IdentificationNumber = identificationNumber,
+                MaskedIdentificationNumber = MaskIdentificationNumber(identificationNumber)
+            };
             var ticket = await _ticketService.CreateExternalPropertyEnquiryAsync(new CreateEhcTicketRequestDto
             {
                 TicketType = EhcTicketType.Enquiry, Source = EhcTicketSource.Web, CategoryId = category.Id,
@@ -2886,6 +2942,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 return NotFound(new { success = false, message = "Listing was not found or is not available." });
             }
 
+            var identificationNumber = request.IdentificationNumber.Trim();
+            var identificationType = await ResolveEstateIdentificationTypeAsync(
+                tenantId,
+                request.IdentificationTypeId,
+                cancellationToken);
+            if (identificationType is null)
+            {
+                return BadRequest(new { success = false, message = "The selected identification type is not available for Estate enquiries." });
+            }
+
             var selectedContact = string.Equals(request.PreferredContactMethod, "Email", StringComparison.OrdinalIgnoreCase)
                 ? request.ContactEmail
                 : request.ContactPhone;
@@ -3060,7 +3126,13 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             var property = new EhcPropertyListingContextDto("estate-public-listing", listingId, reference, name, type,
                 string.IsNullOrWhiteSpace(currency) ? "GHS" : currency, asset.Location, price, asset.Id, demarcationListing?.Id,
                 null, contactName, contactName, contactEmail, contactPhone, contactReference,
-                alternativePhoneNumber, preferredContactMethod, publicContact.Id);
+                alternativePhoneNumber, preferredContactMethod, publicContact.Id)
+            {
+                IdentificationTypeId = identificationType.Id,
+                IdentificationTypeName = identificationType.Name,
+                IdentificationNumber = identificationNumber,
+                MaskedIdentificationNumber = MaskIdentificationNumber(identificationNumber)
+            };
             var ticket = await _ticketService.CreatePublicPropertyEnquiryAsync(new CreateEhcTicketRequestDto
             {
                 TicketType = EhcTicketType.Enquiry,
@@ -4690,6 +4762,47 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         return Guid.Empty;
     }
 
+    private async Task<IdentificationType?> ResolveEstateIdentificationTypeAsync(
+        Guid tenantId,
+        Guid identificationTypeId,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty || identificationTypeId == Guid.Empty)
+        {
+            return null;
+        }
+
+        return await (
+            from identificationType in _db.IdentificationTypes.AsNoTracking()
+            join mapping in _db.IdentificationTypeModules.AsNoTracking()
+                on identificationType.Id equals mapping.IdentificationTypeId
+            join module in _db.TenantModules.AsNoTracking()
+                on mapping.TenantModuleId equals module.Id
+            where identificationType.Id == identificationTypeId
+                && identificationType.TenantId == tenantId
+                && mapping.TenantId == tenantId
+                && module.TenantId == tenantId
+                && identificationType.IsActive
+                && !identificationType.IsDeleted
+                && !mapping.IsDeleted
+                && !module.IsDeleted
+                && module.Status == ModuleStatus.Enabled
+                && module.ModuleName == Constants.Modules.Estate
+            select identificationType)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private static string MaskIdentificationNumber(string identificationNumber)
+    {
+        var normalized = identificationNumber.Trim();
+        if (normalized.Length <= 4)
+        {
+            return new string('*', normalized.Length);
+        }
+
+        return $"{new string('*', Math.Min(8, normalized.Length - 4))}{normalized[^4..]}";
+    }
+
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
@@ -4851,4 +4964,6 @@ public sealed record CreatePropertyListingEnquiryRequest(
     string? ContactName = null,
     string? ContactEmail = null,
     string? ContactPhone = null,
-    string? ContactReference = null);
+    string? ContactReference = null,
+    Guid? IdentificationTypeId = null,
+    string? IdentificationNumber = null);

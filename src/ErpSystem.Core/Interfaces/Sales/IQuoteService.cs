@@ -12,6 +12,7 @@ public interface IQuoteService
     // ── CRUD ─────────────────────────────────────────────────────────────
 
     Task<QuoteDetailDto> CreateAsync(CreateQuoteDto dto);
+    Task<QuoteDetailDto> CreatePropertyOpportunityQuoteAsync(Guid opportunityId, CancellationToken cancellationToken = default);
     Task<QuoteDetailDto> UpdateAsync(Guid id, UpdateQuoteDto dto);
     Task<QuoteDetailDto?> GetByIdAsync(Guid id);
     Task<PagedResult<QuoteSummaryDto>> GetAllAsync(

@@ -37,10 +37,12 @@ import { SalesHandoffActions } from '../components/SalesHandoffActions';
 import {
   BriefcaseBusiness,
   CalendarClock,
+  FileText,
   Pencil,
   Plus,
   RefreshCw,
   Search,
+  ShoppingCart,
   Target,
   Trash2,
   TrendingUp,
@@ -540,6 +542,7 @@ export default function CrmOpportunitiesPage() {
   const [form, setForm] = useState<CreateCrmOpportunityDto>(createEmptyOpportunityForm(scopedBusinessPartnerId, scopedLeadId));
   const [saving, setSaving] = useState(false);
   const [newRequestHandled, setNewRequestHandled] = useState(false);
+  const [quoteActionBusy, setQuoteActionBusy] = useState(false);
 
   useEffect(() => {
     if (formMode !== 'create' || !scopedLeadId) return;
@@ -792,6 +795,68 @@ export default function CrmOpportunitiesPage() {
       setFormOpen(true);
     } catch (error: unknown) {
       toast.error(getMessage(error, 'Failed to load CRM opportunity for editing'));
+    }
+  };
+
+  const createPropertyQuote = async () => {
+    if (!selectedOpportunity?.propertyEnquiryTicketId || quoteActionBusy) return;
+    try {
+      setQuoteActionBusy(true);
+      const quote = await crmService.createPropertyOpportunityQuote(
+        selectedOpportunity.opportunityId
+      );
+      toast.success(`Sales Quote ${quote.documentNumber} is ready`);
+      await loadOpportunityDetail(selectedOpportunity.opportunityId);
+    } catch (error: unknown) {
+      toast.error(getMessage(error, 'Failed to create the property Sales Quote'));
+    } finally {
+      setQuoteActionBusy(false);
+    }
+  };
+
+  const printQuote = async (quoteId: string) => {
+    try {
+      setQuoteActionBusy(true);
+      await crmService.downloadQuotePdf(quoteId);
+    } catch (error: unknown) {
+      toast.error(getMessage(error, 'Failed to prepare the Sales Quote PDF'));
+    } finally {
+      setQuoteActionBusy(false);
+    }
+  };
+
+  const convertPropertyOpportunity = async () => {
+    if (!selectedOpportunity?.propertyEnquiryTicketId || quoteActionBusy) return;
+    const existingOrder = selectedOpportunity.conversionChain?.nodes.find(
+      (node) => node.entityType === 'SalesOrder'
+    );
+    if (existingOrder) {
+      window.location.assign(`/sales/orders/${existingOrder.entityId}`);
+      return;
+    }
+    if (!selectedOpportunity.businessPartnerId) {
+      window.location.assign(
+        `/sales/property-enquiries?id=${encodeURIComponent(selectedOpportunity.propertyEnquiryTicketId)}&action=create-customer`
+      );
+      return;
+    }
+    const quote = selectedOpportunity.quotes[0];
+    if (!quote) {
+      toast.error('Create the Sales Quote before converting this property opportunity.');
+      return;
+    }
+    if (!quote.isAccepted && quote.quoteStatus !== 'Accepted') {
+      toast.error('Accept the Sales Quote before converting it to a Sales Order.');
+      return;
+    }
+    try {
+      setQuoteActionBusy(true);
+      const result = await crmService.convertToSalesOrder(quote.quoteId);
+      window.location.assign(`/sales/orders/${result.salesOrderId}`);
+    } catch (error: unknown) {
+      toast.error(getMessage(error, 'The Sales Order could not be created.'));
+    } finally {
+      setQuoteActionBusy(false);
     }
   };
 
@@ -1181,6 +1246,41 @@ export default function CrmOpportunitiesPage() {
                       View Quotes
                     </Link>
                   </Button>
+                  {selectedOpportunity.propertyEnquiryTicketId && selectedOpportunity.quotes.length === 0 ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => void createPropertyQuote()}
+                      disabled={quoteActionBusy}
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      {quoteActionBusy ? 'Preparing Quote…' : 'Sales Quote'}
+                    </Button>
+                  ) : null}
+                  {selectedOpportunity.propertyEnquiryTicketId && selectedOpportunity.quotes[0] ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => void printQuote(selectedOpportunity.quotes[0].quoteId)}
+                      disabled={quoteActionBusy}
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      Print Quote
+                    </Button>
+                  ) : null}
+                  {selectedOpportunity.propertyEnquiryTicketId ? (
+                    <Button
+                      onClick={() => void convertPropertyOpportunity()}
+                      disabled={quoteActionBusy}
+                    >
+                      <ShoppingCart className="mr-2 h-4 w-4" />
+                      {selectedOpportunity.conversionChain?.nodes.some(
+                        (node) => node.entityType === 'SalesOrder'
+                      )
+                        ? 'View Sales Order'
+                        : selectedOpportunity.businessPartnerId
+                          ? 'Convert to Sales Order'
+                          : 'Create Customer to Convert'}
+                    </Button>
+                  ) : null}
                   <SalesHandoffActions
                     context={{
                       businessPartnerId: selectedOpportunity.businessPartnerId,

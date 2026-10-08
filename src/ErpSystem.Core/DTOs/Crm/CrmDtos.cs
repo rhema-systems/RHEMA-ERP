@@ -668,6 +668,7 @@ public class CrmOpportunityListItemDto : CrmOpportunityOverviewDto
 
 public class CrmOpportunityDetailDto : CrmOpportunityListItemDto
 {
+    public Guid? PropertyEnquiryTicketId { get; set; }
     public string? Description { get; set; }
     public Guid? AssignedToId { get; set; }
     public string? Competitors { get; set; }

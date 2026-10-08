@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using ErpSystem.Core.Enums;
 
+using System.Text.Json.Serialization;
+using ErpSystem.Core.DTOs.Sales;
+
 namespace ErpSystem.Core.DTOs.AR;
 
 // ============= Payment CRUD DTOs =============
@@ -34,6 +37,8 @@ public class PaymentCreateDto
     public bool IsCreditNote { get; set; }
     public List<InvoiceAllocationDto>? Allocations { get; set; }
     public ErpSystem.Core.DTOs.Finance.FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
+    [JsonIgnore]
+    public SalesOrderDepositLineageCreateDto? SalesOrderDepositLineage { get; set; }
 }
 
 public class PaymentUpdateDto
