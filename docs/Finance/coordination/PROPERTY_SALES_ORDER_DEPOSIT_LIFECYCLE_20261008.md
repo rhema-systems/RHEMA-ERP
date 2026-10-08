@@ -20,8 +20,8 @@ Audit and incrementally align the existing Property Listing -> Enquiry -> Opport
 - Worktree: `D:\DEVELOPMENTS\ASP.NET\TDC\DEV\erp-system\erp-system - Aug2\.worktrees\property-sales-order-deposit`
 - Exact base: `dd6fb224a1eaa7512087ed3bf0dd767d490c0f12`
 - Base description: merge of PR #383 on `origin/master`.
-- Latest integrated upstream: `c1c3728343b46dc670c5f97a9bcda88999605829`, merge of PR #385 (`Fix customer agreement preview and legal signing`).
-- Latest upstream integration commit: `d3cc40053c4`, merged `origin/master` into this workstream after the implementation checkpoint.
+- Latest integrated upstream: `578a41dec66aa570c7e587091c959e47c2e90185`, merge of the teammate estate uploaded-document viewer cleanup.
+- Latest upstream integration commit: `4146f66678f`, merged `origin/master` into this workstream after the final verification ledger checkpoint.
 - Existing older worktree `codex/public-property-enquiry-sales-crm` was preserved because it is 289 commits behind current master and contains 12 divergent commits.
 
 ## Current phase
@@ -76,6 +76,8 @@ The audited design has been implemented in the isolated worktree. The implementa
 - `567eeb0b8d4` - complete the audit and implementation decision record.
 - `3428aab56b6` - implement and verify the property Sales Order deposit lifecycle.
 - `d3cc40053c4` - integrate PR #385 from the latest `origin/master`.
+- `028695d5880` - record disposable migration, startup and cleanup evidence.
+- `4146f66678f` - integrate the latest teammate estate uploaded-document viewer cleanup.
 
 ## Migrations and application status
 
@@ -95,6 +97,7 @@ The audited design has been implemented in the isolated worktree. The implementa
 - Confirmed the isolated worktree starts clean from `origin/master` at the exact base above.
 - Earlier integration checkpoint: PR #384 at `2f5ccdda0ae` was fetched and integrated before implementation verification.
 - Latest integration checkpoint: PR #385 at `c1c3728343b` was fetched and integrated; post-merge worktree commit is `d3cc40053c4`.
+- Final upstream checkpoint: `578a41dec66` was fetched and integrated at `4146f66678f`. Its only source change is in `ProcedureCaseWorkspace.tsx`, outside this property Sales/Finance slice.
 - Inspected existing Sales/CRM tracker `docs/tdc-sales-marketing-crm-gap-implementation-tracker.md` to avoid duplicating prior requirements analysis.
 - Confirmed the older property-enquiry worktree is divergent and unsuitable as the implementation base.
 - Full API source build passed with zero errors. The remaining output was the repository's existing warning set, including ImageSharp package-advisory warnings.
