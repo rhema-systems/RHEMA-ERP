@@ -117,9 +117,9 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 - Branch/worktree: `codex/soft-fail-deploy-evidence-upload` in the retained `sales-opportunities-roles` worktree.
 - Exact base: `c023a81a1c0571fbddc979faab7c5123f16e0883` (`origin/master`, merged documentation PR #374).
 - Implementation commit: `b1da676d0d0` (`Do not fail deployments on evidence quota`).
-- Publication: PR #375 contains the workflow, contract-test, runbook, and ledger changes.
+- Publication: PR #375 merged the workflow, contract-test, runbook, and ledger changes to `master` as `f7a9c60c6969c186e54a40ee706704b8a638472e`.
 - Resolution: the final GitHub copy of sanitized deployment evidence uses `continue-on-error: true`. A storage-quota failure now produces a warning after deployment instead of changing a verified activation to a failed workflow. The immutable release artifact upload, VPS activation, backups, migrations, readiness checks, public smoke checks, and browser smoke remain mandatory and fail the job normally.
 - Evidence ownership: `Deploy-RhemaVps.ps1` continues publishing the authoritative sanitized deployment evidence under `C:\RhemaERP\logs` on the VPS before the optional GitHub upload runs.
 - Migration and application status: no migration and no application-runtime change. The already deployed application remains merge commit `c8d781c355eaa75767a186f26e3d4e5ffc337347`, verified HTTP 200/Healthy.
 - Verification: `scripts/vps/Test-RhemaReleaseArtifactFlow.ps1` passed with its new assertion for the nonblocking evidence-upload contract; `git diff --check` passed.
-- Remaining work: merge PR #375 after its required release-contract validation passes. No VPS redeployment is required for this workflow-only correction.
+- Remaining work: none. The PR and merged-master release-contract validations passed. No VPS redeployment is required for this workflow-only correction.
