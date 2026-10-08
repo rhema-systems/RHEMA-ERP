@@ -136,3 +136,13 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 - Migration and application status: no migration and no application-runtime change. No VPS deployment is required for this workflow-only retention correction.
 - Verification: `scripts/vps/Test-RhemaReleaseArtifactFlow.ps1` passed with a new assertion for the three-day release artifact contract; `git diff --check` passed.
 - Remaining work: none. The PR and merged-master release-contract validations passed. GitHub may take 6-12 hours to recalculate the account-level quota after deletion.
+
+## Follow-up: deployment retry blocked by delayed GitHub quota recalculation
+
+- Deployment candidate: current `master` commit `cec3306f49ae02d2ce6842936d456106e90c2e46` (merged documentation PR #378).
+- First dispatch: Windows VPS CI/CD run `37707932832`. Release-contract validation and the complete immutable release build passed, but the mandatory release-artifact upload failed with `Artifact storage quota has been hit`; VPS activation was skipped.
+- Additional cleanup: after the authorized cleanup, the final three retained `rhema-vps-*` packages were deleted. This removed another 1,978,945,799 bytes and left 95 small artifacts totaling 3,328,808 bytes in the repository API inventory.
+- Second dispatch: Windows VPS CI/CD run `37711731850` rebuilt the same exact commit. Release-contract validation and release generation passed again, but the mandatory upload returned the same quota error because GitHub had not recalculated account storage yet; VPS activation was skipped.
+- Application status: neither retry changed the VPS. The last verified deployed application remains commit `c8d781c355eaa75767a186f26e3d4e5ffc337347`, whose activation and public health checks passed in run `37697511362`.
+- Authorization boundary: the mandatory immutable release upload remains blocking. It was not weakened or bypassed, and no manual VPS copy was performed.
+- Remaining work: after GitHub completes its documented 6-12 hour quota recalculation, rerun Windows VPS CI/CD with `build_release=true` and `deploy_to_test_vps=true`; require artifact upload, VPS activation, migrations/readiness, public smoke, browser smoke, and post-deployment `/api/health/live` verification before closing deployment.
