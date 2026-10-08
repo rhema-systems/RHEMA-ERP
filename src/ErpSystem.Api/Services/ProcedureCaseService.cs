@@ -3963,6 +3963,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 }
                 break;
 
+            case "Management decision":
+                if (!IsApprovedDecision(FieldValue(procedureCase, "decisionStatus")))
+                {
+                    break;
+                }
+
+                if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "generatedAgreementReference")))
+                {
+                    throw new InvalidOperationException("Generate the approved agreement before leaving Management decision.");
+                }
+
+                EnsurePropertyAgreementLegalReviewComplete(procedureCase);
+                break;
+
             case "Estate decision and agreement":
                 if (premiumRequired && !premiumPaid)
                 {
@@ -3982,17 +3996,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                     throw new InvalidOperationException("Generate the agreement before submitting Legal agreement review.");
                 }
 
-                if (CustomerAgreementSigningOccursInLegal(procedureCase))
-                {
-                    if (!IsHeadOfLegalSignatureRecorded(FieldValue(procedureCase, "legalAgreementReviewStatus")))
-                    {
-                        throw new InvalidOperationException("Legal must receive the customer-signed agreement and complete the Head of Legal signature before Estate can continue.");
-                    }
-                }
-                else if (!IsLegalAgreementReviewApproved(FieldValue(procedureCase, "legalAgreementReviewStatus")))
-                {
-                    throw new InvalidOperationException("Legal must approve and release the agreement before Estate can handle customer execution.");
-                }
+                EnsurePropertyAgreementLegalReviewComplete(procedureCase);
                 break;
 
             case "Customer agreement execution":
@@ -4092,6 +4096,24 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private static bool IsLegalAgreementReviewApproved(string? value)
         => IsLegalAgreementReadyForCustomerSignature(value)
             || IsHeadOfLegalSignatureRecorded(value);
+
+    private static void EnsurePropertyAgreementLegalReviewComplete(ProcedureCase procedureCase)
+    {
+        if (CustomerAgreementSigningOccursInLegal(procedureCase))
+        {
+            if (!IsHeadOfLegalSignatureRecorded(FieldValue(procedureCase, "legalAgreementReviewStatus")))
+            {
+                throw new InvalidOperationException("Legal must receive the customer-signed agreement and complete the Head of Legal signature before Estate can continue.");
+            }
+
+            return;
+        }
+
+        if (!IsLegalAgreementReviewApproved(FieldValue(procedureCase, "legalAgreementReviewStatus")))
+        {
+            throw new InvalidOperationException("Legal must approve and release the agreement before Estate can handle customer execution.");
+        }
+    }
 
     private static bool CustomerAgreementSigningOccursInLegal(ProcedureCase procedureCase)
         => CustomerAgreementSigningOccursInLegal(procedureCase.Fields

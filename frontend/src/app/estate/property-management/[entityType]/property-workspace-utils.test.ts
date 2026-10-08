@@ -5,6 +5,7 @@ import {
   assetMatchesWorkspacePrefill,
   buildPropertyWorkspaceHref,
   isFullTermLease,
+  isLegalAgreementReviewCompleteForSigningLocation,
   isLegalAgreementReviewSigned,
   leaseExpiryAlert,
   leaseExpiryDate,
@@ -110,10 +111,56 @@ describe('property listing completion gates', () => {
     });
   });
 
+  it('keeps Management decision open for agreement and Legal completion', () => {
+    expect(propertyListingCompletionRequirements('Management decision')).toEqual(
+      {
+        requiresApprovedRentTerms: true,
+        requiresGeneratedAgreement: true,
+        requiresLegalAgreementReview: true,
+      }
+    );
+  });
+
   it('recognizes Legal release statuses used by the server', () => {
     expect(isLegalAgreementReviewSigned('Head of Legal signed')).toBe(true);
     expect(isLegalAgreementReviewSigned('Approved by Legal - ready for customer signature')).toBe(true);
     expect(isLegalAgreementReviewSigned('Fully signed agreement')).toBe(true);
     expect(isLegalAgreementReviewSigned('Under Legal review')).toBe(false);
+  });
+
+  it('requires the final Legal signature when the customer signs through Legal', () => {
+    expect(
+      isLegalAgreementReviewCompleteForSigningLocation(
+        'Approved by Legal - ready for customer signature',
+        'Legal'
+      )
+    ).toBe(false);
+    expect(
+      isLegalAgreementReviewCompleteForSigningLocation(
+        'Head of Legal signed',
+        'Legal'
+      )
+    ).toBe(true);
+    expect(
+      isLegalAgreementReviewCompleteForSigningLocation(
+        'Approved by Legal - ready for customer signature',
+        null
+      )
+    ).toBe(false);
+  });
+
+  it('allows Estate execution after Legal approval and release', () => {
+    expect(
+      isLegalAgreementReviewCompleteForSigningLocation(
+        'Approved by Legal - ready for customer signature',
+        'Estate'
+      )
+    ).toBe(true);
+    expect(
+      isLegalAgreementReviewCompleteForSigningLocation(
+        'Under Legal review',
+        'Estate'
+      )
+    ).toBe(false);
   });
 });

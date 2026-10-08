@@ -79,8 +79,11 @@ export function propertyListingCompletionRequirements(stageName?: string | null)
   return {
     requiresApprovedRentTerms: isDecisionStage,
     requiresGeneratedAgreement:
-      normalized === 'estate decision and agreement' || isAgreementHandoffStage,
-    requiresLegalAgreementReview: isAgreementHandoffStage,
+      normalized === 'management decision' ||
+      normalized === 'estate decision and agreement' ||
+      isAgreementHandoffStage,
+    requiresLegalAgreementReview:
+      normalized === 'management decision' || isAgreementHandoffStage,
   };
 }
 
@@ -92,6 +95,23 @@ export function isLegalAgreementReviewSigned(status?: string | null) {
       normalized.includes('customer signature')) ||
     normalized.includes('fully signed')
   );
+}
+
+export function isLegalAgreementReviewCompleteForSigningLocation(
+  status?: string | null,
+  signingLocation?: string | null
+) {
+  const normalizedStatus = status?.trim().toLowerCase() || '';
+  const signedByHeadOfLegal =
+    (normalizedStatus.includes('head of legal') &&
+      normalizedStatus.includes('signed')) ||
+    normalizedStatus.includes('fully signed');
+
+  if (!signingLocation?.toLowerCase().includes('estate')) {
+    return signedByHeadOfLegal;
+  }
+
+  return isLegalAgreementReviewSigned(status);
 }
 
 export function propertyReference(asset: EstateManagedAsset) {
