@@ -10,6 +10,7 @@ Resolve the UAT `PROFILE_EFFECTIVE_PERIOD_OVERLAP` failure when approving a late
 - Worktree: `.w/ar-profile-replacement-credit-authority`
 - Exact base: `dd6fb224a1eaa7512087ed3bf0dd767d490c0f12` (`origin/master`)
 - Implementation commit: `3077f18d0` — Fix AR profile replacement and credit authority
+- Pull request: [#384](https://github.com/rhema-systems/RHEMA-ERP/pull/384) — open against `master`
 
 ## Authorized scope
 
@@ -49,10 +50,10 @@ Resolve the UAT `PROFILE_EFFECTIVE_PERIOD_OVERLAP` failure when approving a late
 
 ## Remaining work
 
-- Review and commit the local change set.
-- Push/create a pull request only after explicit authorization.
+- Complete review and merge pull request #384.
 - Deploy only after merge through the normal deployment process, then retry approval of the submitted version-2 AR profile.
 
 ## Authorization boundaries
 
-- No push, pull request, deployment, production/UAT database mutation, or remote-server change is authorized in this workstream yet.
+- Push and pull-request creation were authorized and completed on 08 Oct 2026.
+- Merge, deployment, production/UAT database mutation, and remote-server changes remain unauthorized.
