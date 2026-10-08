@@ -206,6 +206,7 @@ const LINKED_LEGAL_STAGE_EDITABLE_FIELDS: Record<string, string[]> = {
     'legalVettingStatus',
     'closeoutNotes',
   ],
+  'Customer Signature Return': ['closeoutNotes'],
   'Head of Legal Release': [
     'signatureStatus',
     'sealStatus',
@@ -262,6 +263,7 @@ const LEGAL_GENERIC_DOCUMENT_NAMES = new Set([
 ]);
 
 const LEGAL_SPECIFIC_DOCUMENT_ENTITY_TYPES = new Set([
+  'LegalPropertyAgreementReview',
   'LegalCourtProcess',
   'LegalOtherCourtProcess',
   'LegalLeaseVariationRenewalSublease',
@@ -973,7 +975,8 @@ export function ProcedureCaseWorkspace({
     if (
       !selectedCase ||
       entityType !== 'LegalPropertyAgreementReview' ||
-      selectedCase.currentStageName !== 'Head of Legal Signature'
+      (selectedCase.currentStageName !== 'Customer Signature Return' &&
+        selectedCase.currentStageName !== 'Head of Legal Signature')
     ) {
       return null;
     }
@@ -985,7 +988,13 @@ export function ProcedureCaseWorkspace({
         Boolean(document.fileUrl)
     );
     if (!hasCustomerSignedAgreement) {
-      return 'Routing is disabled until the customer returns the signed agreement.';
+      return selectedCase.currentStageName === 'Customer Signature Return'
+        ? 'Agreement is released to the customer portal. Ask the customer to open External Portal > My Property Requests, accept the agreement, and upload the signed copy.'
+        : 'Customer signed agreement is missing. The customer must upload it from My Property Requests before Head of Legal can apply the final signature.';
+    }
+
+    if (selectedCase.currentStageName === 'Customer Signature Return') {
+      return null;
     }
 
     const hasHeadOfLegalSignedAgreement = selectedCase.documents.some(
