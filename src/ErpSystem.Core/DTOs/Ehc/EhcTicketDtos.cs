@@ -68,6 +68,10 @@ public sealed class EhcTicketListItemDto
 public sealed class EhcTicketDetailDto
 {
     public EhcPropertyListingContextDto? PropertyListing { get; set; }
+    public Guid? IdentificationTypeId { get; set; }
+    public string? IdentificationTypeName { get; set; }
+    public string? IdentificationNumber { get; set; }
+    public string? MaskedIdentificationNumber { get; set; }
     public Guid Id { get; set; }
     public string TicketNumber { get; set; } = string.Empty;
     public EhcTicketType TicketType { get; set; }

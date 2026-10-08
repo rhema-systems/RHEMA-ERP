@@ -20,7 +20,7 @@ namespace ErpSystem.Api.Controllers.Ehc;
 [ApiController]
 [Route("api/ehc/internal/property-enquiries")]
 [Authorize(Policy = "InternalOnly")]
-[Authorize(Roles = "Sales User,Sales Officer,Sales Manager,Marketing User,HelpdeskAgent,HelpdeskSupervisor,HelpdeskManager,Finance Officer,Finance Manager,Accounts Officer,Senior Accountant,Financial Controller,TenantAdmin,SuperAdmin")]
+[Authorize(Policy = SalesPermissions.Read)]
 public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICurrentUserService currentUser,
     IEhcTicketService tickets, IEstateSalesListingApplicationHandoffService estateHandoffs,
     IPropertyEnquiryProspectService prospects) : ControllerBase
@@ -473,7 +473,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     }
 
     [HttpPost("{id:guid}/estate-handoff")]
-    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> CreateEstateHandoff(
         Guid id,
         [FromBody] CreatePropertyEnquiryEstateHandoff request,
@@ -658,6 +658,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     }
 
     [HttpPost("{id:guid}/reply")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> Reply(Guid id, [FromBody] AddEhcTicketMessageRequestDto request, CancellationToken cancellationToken)
     {
         if (!await Query().AnyAsync(t => t.Id == id, cancellationToken)) return NotFound();
@@ -682,22 +683,22 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     }
 
     [HttpPost("{id:guid}/prospect/qualify")]
-    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> Qualify(Guid id, [FromBody] QualifyPropertyEnquiryRequest request, CancellationToken cancellationToken)
         => await ExecuteProspectActionAsync(id, () => ProspectService.QualifyAsync(id, request, cancellationToken), cancellationToken);
 
     [HttpPost("{id:guid}/prospect/contacted")]
-    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> RecordContact(Guid id, [FromBody] RecordPropertyEnquiryContactRequest request, CancellationToken cancellationToken)
         => await ExecuteProspectActionAsync(id, () => ProspectService.RecordContactAsync(id, request, cancellationToken), cancellationToken);
 
     [HttpPost("{id:guid}/prospect/disqualify")]
-    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> Disqualify(Guid id, [FromBody] DisqualifyPropertyEnquiryRequest request, CancellationToken cancellationToken)
         => await ExecuteProspectActionAsync(id, () => ProspectService.DisqualifyAsync(id, request, cancellationToken), cancellationToken);
 
     [HttpPost("{id:guid}/prospect/opportunity")]
-    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> CreateOpportunity(Guid id, [FromBody] CreatePropertyEnquiryOpportunityRequest request, CancellationToken cancellationToken)
         => await ExecuteProspectActionAsync(id, () => ProspectService.CreateOpportunityAsync(id, request, cancellationToken), cancellationToken);
 
@@ -706,27 +707,29 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
         => await ExecuteProspectActionAsync(id, () => ProspectService.FindBusinessPartnerMatchesAsync(id, cancellationToken), cancellationToken);
 
     [HttpPost("{id:guid}/prospect/link-business-partner")]
-    [Authorize(Roles = "Sales Manager,TenantAdmin,SuperAdmin")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> LinkBusinessPartner(Guid id, [FromBody] LinkPropertyEnquiryBusinessPartnerRequest request, CancellationToken cancellationToken)
         => await ExecuteProspectActionAsync(id, () => ProspectService.LinkBusinessPartnerAsync(id, request.BusinessPartnerId, cancellationToken), cancellationToken);
 
     [HttpPost("{id:guid}/prospect/create-business-partner")]
-    [Authorize(Roles = "Sales Manager,TenantAdmin,SuperAdmin")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> CreateBusinessPartner(Guid id, [FromBody] CreatePropertyEnquiryBusinessPartnerRequest request, CancellationToken cancellationToken)
         => await ExecuteProspectActionAsync(id, () => ProspectService.CreateBusinessPartnerAsync(id, request, cancellationToken), cancellationToken);
 
     [HttpPost("{id:guid}/prospect/finalize-business-partner")]
-    [Authorize(Roles = "Sales Manager,TenantAdmin,SuperAdmin")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> FinalizeBusinessPartner(Guid id, CancellationToken cancellationToken)
         => await ExecuteProspectActionAsync(id, () => ProspectService.FinalizeBusinessPartnerAsync(id, cancellationToken), cancellationToken);
 
     [HttpPost("{id:guid}/prospect/deposits")]
-    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
-    public async Task<IActionResult> RecordDeposit(Guid id, [FromBody] RecordProspectDepositRequest request, CancellationToken cancellationToken)
-        => await ExecuteProspectActionAsync(id, () => ProspectService.RecordDepositAsync(id, request, cancellationToken), cancellationToken);
+    [Authorize(Policy = SalesPermissions.Manage)]
+    public IActionResult RecordDeposit(Guid id, [FromBody] RecordProspectDepositRequest request)
+        => Problem(
+            statusCode: StatusCodes.Status410Gone,
+            title: "Prospect deposits have moved",
+            detail: "Create and approve the Customer, create the Sales Order, then record the property deposit on the Sales Order. Historical prospect deposits remain available below for audit and reversal.");
 
     [HttpGet("{id:guid}/prospect/deposits")]
-    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,Finance Officer,Finance Manager,Accounts Officer,Senior Accountant,Financial Controller,TenantAdmin,SuperAdmin")]
     public async Task<IActionResult> GetDeposits(Guid id, CancellationToken cancellationToken)
         => await ExecuteProspectActionAsync(id, () => ProspectService.GetDepositsAsync(id, cancellationToken), cancellationToken);
 
@@ -771,6 +774,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     }
 
     [HttpPost("{id:guid}/internal-note")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> AddInternalNote(Guid id, [FromBody] AddEhcTicketMessageRequestDto request, CancellationToken cancellationToken)
     {
         if (!await Query().AnyAsync(t => t.Id == id, cancellationToken)) return NotFound();
@@ -804,6 +808,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     }
 
     [HttpPost("{id:guid}/transition")]
+    [Authorize(Policy = SalesPermissions.Manage)]
     public async Task<IActionResult> Transition(Guid id, [FromBody] PropertyEnquiryTransition request, CancellationToken cancellationToken)
     {
         if (!await Query().AnyAsync(t => t.Id == id, cancellationToken)) return NotFound();

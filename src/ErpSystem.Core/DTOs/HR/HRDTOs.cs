@@ -1601,6 +1601,31 @@ public class UpdateIdentificationTypeDto
 }
 
 /// <summary>
+/// One tenant module that can be selected for an identification type.
+/// </summary>
+public sealed class IdentificationTypeModuleOptionDto
+{
+    public Guid TenantModuleId { get; set; }
+    public string ModuleName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsSelected { get; set; }
+}
+
+/// <summary>
+/// Independently saved module availability for an identification type.
+/// </summary>
+public sealed class IdentificationTypeModuleAvailabilityDto
+{
+    public Guid IdentificationTypeId { get; set; }
+    public IReadOnlyList<IdentificationTypeModuleOptionDto> Modules { get; set; } = Array.Empty<IdentificationTypeModuleOptionDto>();
+}
+
+public sealed class UpdateIdentificationTypeModulesDto
+{
+    public IReadOnlyCollection<Guid> TenantModuleIds { get; set; } = Array.Empty<Guid>();
+}
+
+/// <summary>
 /// Employee identification card list projection.
 /// </summary>
 public class EmployeeIdentificationCardListDto

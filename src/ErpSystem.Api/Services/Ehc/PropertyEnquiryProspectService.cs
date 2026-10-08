@@ -382,7 +382,7 @@ public sealed class PropertyEnquiryProspectService(
         prospect.UpdatedBy = currentUser.UserName;
         prospect.LastModifiedById = ActorId;
         await AddAuditAsync(ticket, "ExistingBusinessPartnerLinked", "Existing Customer Business Partner linked to prospect",
-            $"Approved Business Partner {partner.PartnerCode} was linked for identity reuse. The prospect remains qualified until an opportunity exists and its payment threshold is met.", cancellationToken);
+            $"Approved Business Partner {partner.PartnerCode} was linked for identity reuse. The prospect remains qualified until the opportunity and customer linkage are finalized.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return await ToDtoAsync(prospect, cancellationToken);
     }
@@ -414,7 +414,9 @@ public sealed class PropertyEnquiryProspectService(
             Currency = prospect.Currency,
             CustomerType = "Property Customer",
             CustomerSince = DateTime.UtcNow,
-            Notes = $"Created from qualified public property enquiry {ticket.TicketNumber} after its payment threshold was met."
+            Notes = $"Created from qualified public property enquiry {ticket.TicketNumber}. "
+                + $"Identification: {property.IdentificationTypeName ?? "Not provided"} "
+                + $"{property.MaskedIdentificationNumber ?? "not provided"}. The full identification remains protected on the originating enquiry."
         });
 
         prospect.BusinessPartnerId = result.Id;
@@ -829,10 +831,6 @@ public sealed class PropertyEnquiryProspectService(
             throw new InvalidOperationException("Create the opportunity before converting the prospect.");
         if (prospect.Status is not (EhcPropertyProspectStatuses.Opportunity or EhcPropertyProspectStatuses.CustomerPendingApproval))
             throw new InvalidOperationException("The prospect is not in a customer-conversion stage.");
-        var required = RequiredDeposit(prospect);
-        var cleared = await ClearedDepositAsync(prospect.Id, cancellationToken);
-        if (cleared < required)
-            throw new InvalidOperationException($"The cleared prospect deposit is {cleared:0.00} {prospect.Currency}; {required:0.00} is required before customer registration.");
         return prospect;
     }
 
@@ -872,6 +870,17 @@ public sealed class PropertyEnquiryProspectService(
             lead.ConvertedDate = DateTime.UtcNow;
         }
         opportunity.CustomerId = businessPartnerId;
+        var propertyQuotes = await db.Quotes
+            .Where(quote => quote.TenantId == TenantId
+                && quote.OpportunityId == opportunity.Id
+                && !quote.IsDeleted)
+            .ToListAsync(cancellationToken);
+        foreach (var quote in propertyQuotes)
+        {
+            if (quote.CustomerId.HasValue && quote.CustomerId != businessPartnerId)
+                throw new InvalidOperationException("A linked Sales Quote belongs to another customer.");
+            quote.CustomerId = businessPartnerId;
+        }
         if (opportunity.StageDefinition?.IsWon != true)
         {
             var wonStages = await db.OpportunityStageDefinitions
@@ -916,7 +925,7 @@ public sealed class PropertyEnquiryProspectService(
                 Notes = $"Converted public prospect from enquiry {ticket.TicketNumber}."
             });
         await AddAuditAsync(ticket, "BusinessPartnerLinked", "Qualified prospect linked to Customer Business Partner",
-            $"Business Partner {businessPartnerId} was linked after the cleared deposit threshold was met. CRM opportunity {opportunity.Id} was closed as Won. Cash was not posted a second time; cleared receipts were transferred to customer advances.", cancellationToken);
+            $"Business Partner {businessPartnerId} was linked after approval. CRM opportunity {opportunity.Id} and its Sales Quotes now use the approved customer. Historical cleared prospect receipts, if any, were transferred without posting cash twice.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
     }
 

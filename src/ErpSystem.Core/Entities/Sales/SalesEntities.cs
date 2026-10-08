@@ -234,6 +234,12 @@ public class Quote : DocumentEntity
     public Guid OpportunityId { get; set; }
     public virtual Opportunity Opportunity { get; set; } = null!;
 
+    /// <summary>
+    /// Property enquiry that originated this quote. A filtered unique index makes the initial
+    /// property quote idempotent while legacy and non-property quotes remain unaffected.
+    /// </summary>
+    public Guid? PropertyEnquiryTicketId { get; set; }
+
     public Guid? CustomerId { get; set; }
     public virtual Customer? Customer { get; set; }
 

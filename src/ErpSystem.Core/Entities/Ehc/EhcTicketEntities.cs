@@ -170,6 +170,18 @@ public class EhcWorkflowRoutingRule : TenantEntity
 [Table("EhcTickets")]
 public class EhcTicket : TenantEntity
 {
+    /// <summary>The configured identification type supplied with a property enquiry.</summary>
+    public Guid? IdentificationTypeId { get; set; }
+
+    [ForeignKey(nameof(IdentificationTypeId))]
+    public virtual IdentificationType? IdentificationType { get; set; }
+
+    /// <summary>
+    /// Sensitive identification value. APIs must mask this outside authorized internal detail views.
+    /// </summary>
+    [StringLength(100)]
+    public string? IdentificationNumber { get; set; }
+
     public Guid? PublicPropertyEnquiryContactId { get; set; }
 
     [ForeignKey(nameof(PublicPropertyEnquiryContactId))]

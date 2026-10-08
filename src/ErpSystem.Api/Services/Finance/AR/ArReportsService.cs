@@ -1348,13 +1348,19 @@ namespace ErpSystem.Api.Services.Finance.AR
                     p.Status != "Cancelled" &&
                     p.Status != "Bounced")
                 .Include(p => p.Allocations)
+                .Include(p => p.SalesOrderDeposit)
                 .ToListAsync(cancellationToken);
 
             foreach (var payment in payments)
             {
                 var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, baseCurrencyCode);
                 var paymentExchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
-                var reference = payment.TransactionReference ?? payment.CheckNumber;
+                var reference = payment.SalesOrderDeposit is null
+                    ? payment.TransactionReference ?? payment.CheckNumber
+                    : FormatSalesOrderDepositReference(payment.SalesOrderDeposit, payment);
+                var description = payment.SalesOrderDeposit?.PropertyDescription
+                    ?? payment.Notes
+                    ?? $"Customer payment - {payment.PaymentMethod}";
 
                 var paymentAmount = AmountForLedgerCurrency(
                     payment.TotalAmount,
@@ -1372,7 +1378,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     payment.IsCreditNote ? "Credit Note" : "Payment",
                     payment.PaymentNumber,
                     reference,
-                    payment.Notes ?? $"Customer payment - {payment.PaymentMethod}",
+                    description,
                     paymentCurrency,
                     paymentExchangeRate,
                     0m,
@@ -1514,6 +1520,34 @@ namespace ErpSystem.Api.Services.Finance.AR
                     PostedAt = postedAtBySourceDocument.GetValueOrDefault(transaction.SourceDocumentId)
                 })
                 .ToList();
+        }
+
+        private static string? FormatSalesOrderDepositReference(
+            SalesOrderCustomerDeposit deposit,
+            CustomerPayment payment)
+        {
+            return deposit.TenderType switch
+            {
+                "Cash" => deposit.IdentificationReference,
+                "Cheque" => JoinReference(
+                    deposit.ExternalBankName,
+                    deposit.ExternalAccountNumber,
+                    deposit.ChequeNumber),
+                "BankDeposit" => JoinReference(
+                    deposit.ExternalBankName,
+                    deposit.ExternalAccountNumber,
+                    deposit.DepositReference),
+                _ => payment.TransactionReference ?? payment.CheckNumber
+            };
+        }
+
+        private static string? JoinReference(params string?[] values)
+        {
+            var parts = values
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!.Trim())
+                .ToArray();
+            return parts.Length == 0 ? null : string.Join(" / ", parts);
         }
 
         private static decimal AmountForLedgerCurrency(

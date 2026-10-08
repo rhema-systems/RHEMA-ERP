@@ -87,6 +87,34 @@ public sealed class PropertyListingEnquiryTests
         await db.SaveChangesAsync(); return (asset, portion, partner);
     }
 
+    private async Task<Guid> SeedEstateIdentificationTypeAsync(ApplicationDbContext db)
+    {
+        var module = new TenantModule
+        {
+            TenantId = tenantId,
+            ModuleName = Constants.Modules.Estate,
+            Status = ModuleStatus.Enabled,
+            EnabledDate = DateTime.UtcNow
+        };
+        var identificationType = new IdentificationType
+        {
+            TenantId = tenantId,
+            Name = "Ghana Card",
+            Code = "GH_CARD",
+            IssuingAuthorityName = "National Identification Authority",
+            HasExpiryDate = true,
+            IsActive = true
+        };
+        db.AddRange(module, identificationType, new IdentificationTypeModule
+        {
+            TenantId = tenantId,
+            IdentificationTypeId = identificationType.Id,
+            TenantModuleId = module.Id
+        });
+        await db.SaveChangesAsync();
+        return identificationType.Id;
+    }
+
     private async Task<string> SeedVerifiedPublicContactAsync(
         ApplicationDbContext db,
         Guid listingId,
@@ -285,6 +313,8 @@ public sealed class PropertyListingEnquiryTests
         var invalidSubmission = new PublicPropertyListingEnquiryRequestDto
         {
             SubmissionId = Guid.Empty,
+            IdentificationTypeId = Guid.NewGuid(),
+            IdentificationNumber = "GHA-123456789-0",
             Message = "Please contact me about this property.",
             ContactName = "Ama Mensah",
             ContactEmail = "ama@example.com",
@@ -411,6 +441,7 @@ public sealed class PropertyListingEnquiryTests
     {
         await using var db = Database();
         var seeded = await Seed(db);
+        var identificationTypeId = await SeedEstateIdentificationTypeAsync(db);
         var externalUserId = Guid.NewGuid();
         db.Users.Add(new ApplicationUser
         {
@@ -455,6 +486,8 @@ public sealed class PropertyListingEnquiryTests
             new PublicPropertyListingEnquiryRequestDto
             {
                 SubmissionId = submissionId,
+                IdentificationTypeId = identificationTypeId,
+                IdentificationNumber = "GHA-123456789-0",
                 Message = "  Please send the deposit and viewing details.  ",
                 ContactName = "  Ama Mensah  ",
                 ContactEmail = "ama@example.test",
@@ -480,6 +513,9 @@ public sealed class PropertyListingEnquiryTests
         Assert.Null(capturedProperty.AlternativePhoneNumber);
         Assert.Equal("Email", capturedProperty.PreferredContactMethod);
         Assert.Equal("GH-REF-100", capturedProperty.ContactReference);
+        Assert.Equal(identificationTypeId, capturedProperty.IdentificationTypeId);
+        Assert.Equal("Ghana Card", capturedProperty.IdentificationTypeName);
+        Assert.Equal("********89-0", capturedProperty.MaskedIdentificationNumber);
         Assert.Equal(tenantId, capturedTenantId);
         Assert.Equal(externalUserId, capturedRequesterId);
     }
@@ -489,6 +525,7 @@ public sealed class PropertyListingEnquiryTests
     {
         await using var db = Database();
         var seeded = await Seed(db);
+        var identificationTypeId = await SeedEstateIdentificationTypeAsync(db);
         db.Users.Add(new ApplicationUser
         {
             Id = Guid.NewGuid(),
@@ -510,6 +547,8 @@ public sealed class PropertyListingEnquiryTests
             new PublicPropertyListingEnquiryRequestDto
             {
                 SubmissionId = submissionId,
+                IdentificationTypeId = identificationTypeId,
+                IdentificationNumber = "GHA-123456789-0",
                 Message = "Please contact me about this listing.",
                 ContactName = "Ama Mensah",
                 ContactEmail = "ama@example.test",
@@ -533,13 +572,19 @@ public sealed class PropertyListingEnquiryTests
     public async Task SupplierOnlyAccountCreatesEnquiryWithServerVerifiedPortionSnapshot()
     {
         await using var db = Database(); var seeded = await Seed(db);
+        var identificationTypeId = await SeedEstateIdentificationTypeAsync(db);
         EhcPropertyListingContextDto? captured = null;
         var tickets = new Mock<IEhcTicketService>();
         tickets.Setup(t => t.CreateExternalPropertyEnquiryAsync(It.IsAny<CreateEhcTicketRequestDto>(), It.IsAny<EhcPropertyListingContextDto>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Callback<CreateEhcTicketRequestDto, EhcPropertyListingContextDto, Guid, CancellationToken>((_, p, _, _) => captured = p)
             .ReturnsAsync(new EhcTicketDetailDto { TicketNumber = "EHC-26-000001" });
         var result = await Controller(db, tickets).CreateListingEnquiry(seeded.Portion.Id,
-            new(Guid.NewGuid(), "Can we arrange a visit?", seeded.Partner.Id), default);
+            new(
+                SubmissionId: Guid.NewGuid(),
+                Message: "Can we arrange a visit?",
+                BusinessPartnerId: seeded.Partner.Id,
+                IdentificationTypeId: identificationTypeId,
+                IdentificationNumber: "GHA-123456789-0"), default);
         Assert.IsType<OkObjectResult>(result); Assert.NotNull(captured);
         Assert.Equal("estate-public-listing", captured.Source); Assert.Equal(seeded.Portion.Id, captured.ListingId);
         Assert.Equal("LAND-002-D002", captured.ListingReference); Assert.Equal("LAND-002-D002", captured.ListingName);

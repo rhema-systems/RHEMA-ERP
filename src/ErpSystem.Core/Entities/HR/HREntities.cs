@@ -2912,6 +2912,31 @@ public class IdentificationType : TenantEntity
     public virtual Country? IssuingCountry { get; set; }
 
     public virtual ICollection<EmployeeIdentificationCard> EmployeeIdentificationCards { get; set; } = new List<EmployeeIdentificationCard>();
+
+    /// <summary>
+    /// Modules in which this identification type may be offered. HR use remains available
+    /// independently so adding module availability does not change employee-card behaviour.
+    /// </summary>
+    public virtual ICollection<IdentificationTypeModule> ModuleAvailabilities { get; set; } = new List<IdentificationTypeModule>();
+}
+
+/// <summary>
+/// Tenant-owned availability of an identification type in an enabled ERP module.
+/// The relationship stores durable identifiers; module names are display and seed data only.
+/// </summary>
+public class IdentificationTypeModule : TenantEntity
+{
+    [Required]
+    public Guid IdentificationTypeId { get; set; }
+
+    [Required]
+    public Guid TenantModuleId { get; set; }
+
+    [ForeignKey(nameof(IdentificationTypeId))]
+    public virtual IdentificationType IdentificationType { get; set; } = null!;
+
+    [ForeignKey(nameof(TenantModuleId))]
+    public virtual TenantModule TenantModule { get; set; } = null!;
 }
 
 #endregion

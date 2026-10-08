@@ -290,6 +290,7 @@ public class QuoteSummaryDto
     public string QuoteName { get; set; } = string.Empty;
     public string QuoteStatus { get; set; } = "Draft";
     public Guid OpportunityId { get; set; }
+    public Guid? PropertyEnquiryTicketId { get; set; }
     public string? OpportunityName { get; set; }
     public string? CustomerName { get; set; }
     public decimal TotalAmount { get; set; }

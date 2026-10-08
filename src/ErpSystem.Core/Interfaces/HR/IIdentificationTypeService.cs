@@ -16,4 +16,9 @@ public interface IIdentificationTypeService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> ActivateAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> DeactivateAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IdentificationTypeModuleAvailabilityDto> GetModuleAvailabilityAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IdentificationTypeModuleAvailabilityDto> UpdateModuleAvailabilityAsync(
+        Guid id,
+        UpdateIdentificationTypeModulesDto updateDto,
+        CancellationToken cancellationToken = default);
 }

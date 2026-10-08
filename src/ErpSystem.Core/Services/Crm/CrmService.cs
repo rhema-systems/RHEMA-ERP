@@ -9,6 +9,7 @@ using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Crm;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Crm;
 
@@ -252,6 +253,7 @@ public class CrmService : ICrmService
         var tenderBidRepository = _unitOfWork.Repository<TenderBid>();
         var tenderAwardRepository = _unitOfWork.Repository<TenderAward>();
         var salesOrderRepository = _unitOfWork.Repository<SalesOrder>();
+        var ticketRepository = _unitOfWork.Repository<EhcTicket>();
         var salesAgreementRepository = _unitOfWork.Repository<SalesAgreement>();
         var salesAllocationRepository = _unitOfWork.Repository<SalesAllocation>();
         var returnOrderRepository = _unitOfWork.Repository<ReturnOrder>();
@@ -3031,6 +3033,7 @@ public class CrmService : ICrmService
 
     public async Task<CrmOpportunityDetailDto?> GetOpportunityByIdAsync(Guid opportunityId)
     {
+        var ticketRepository = _unitOfWork.Repository<EhcTicket>();
         var tenantId = _currentUserProvider.TenantId;
         var opportunityRepository = _unitOfWork.Repository<Opportunity>();
         var leadRepository = _unitOfWork.Repository<Lead>();
@@ -3093,9 +3096,16 @@ public class CrmService : ICrmService
                 .ToList()
             : new List<Project>();
         var opportunityLookup = new Dictionary<Guid, Opportunity> { [opportunity.Id] = opportunity };
+        var propertyEnquiryTicketId = await ticketRepository.GetQueryable()
+            .Where(ticket => ticket.TenantId == tenantId
+                && ticket.CrmOpportunityId == opportunityId
+                && ticket.PropertyListingContextJson != null)
+            .Select(ticket => (Guid?)ticket.Id)
+            .SingleOrDefaultAsync();
 
         return new CrmOpportunityDetailDto
         {
+            PropertyEnquiryTicketId = propertyEnquiryTicketId,
             OpportunityId = listItem.OpportunityId,
             Name = listItem.Name,
             StageDefinitionId = listItem.StageDefinitionId,

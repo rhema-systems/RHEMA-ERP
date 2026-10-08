@@ -1,0 +1,145 @@
+# Property Sales Order Deposit Lifecycle Ledger
+
+## Objective
+
+Audit and incrementally align the existing Property Listing -> Enquiry -> Opportunity -> Quote -> approved Customer -> Sales Order -> Deposit -> Finance -> Customer Detailed Ledger lifecycle. Reuse the existing HR Identification Type master, CRM, Sales, Business Partner, approval, Finance posting, and reporting infrastructure. Preserve historical prospect deposits and all tenant, authorization, audit, and accounting controls.
+
+## Scope and authorization boundaries
+
+- Authorized source: user attachment reviewed on 2026-10-08.
+- Audit-first delivery is mandatory. Do not create parallel customer, quote, sales-order, approval, identification-type, or accounting implementations.
+- New property-sale deposits must move to an actual Sales Order only after the approved-customer gate is satisfied.
+- Historical prospect deposits must remain readable, auditable, reversible where already supported, and financially unchanged.
+- Identification numbers are sensitive. Do not place full values in URLs, application logs, analytics, or descriptive audit text.
+- Unrelated worktrees, branches, generated artifacts, and UAT observations are excluded.
+- No production/VPS database change or deployment is authorized by this ledger entry alone.
+
+## Git state
+
+- Branch: `codex/property-sales-order-deposit`
+- Worktree: `D:\DEVELOPMENTS\ASP.NET\TDC\DEV\erp-system\erp-system - Aug2\.worktrees\property-sales-order-deposit`
+- Exact base: `dd6fb224a1eaa7512087ed3bf0dd767d490c0f12`
+- Base description: merge of PR #383 on `origin/master`.
+- Latest integrated upstream: `cd5b529f0e1d26e9f9e1a868dcdfdde32f7ee1df`, merge of teammate PR #386 (`Correct Estate tax-inclusive balance invoices`).
+- Latest upstream integration commit: `5391cbdc21f`, merged `origin/master` into this workstream before publication.
+- Existing older worktree `codex/public-property-enquiry-sales-crm` was preserved because it is 289 commits behind current master and contains 12 divergent commits.
+
+## Current phase
+
+`Implementation complete; automated and disposable-database verification complete; visible browser acceptance pending`
+
+The audited design has been implemented in the isolated worktree. The implementation preserves the historical prospect-deposit path as read/clear/reverse only, moves all new deposits to approved-customer Sales Orders, posts those receipts as customer advances through the existing AR posting engine, and exposes their exact payment/property lineage in the Customer Detailed Ledger. The migration was rehearsed against disposable clones only. The source local database and VPS database were not changed by this workstream.
+
+## Required 29-point audit deliverable
+
+1. **Current Identification Type data model.** `IdentificationType` is a tenant-scoped HR entity with Name, Code, Description, IssuingAuthorityName, optional IssuingCountryId, HasExpiryDate, ExpiryNotificationLeadDays and IsActive. It has a restricted issuing-country relationship and an employee-card collection. There is no module availability relationship and no regex/length validation metadata for identification numbers.
+2. **Current Identification Type edit/save behavior.** The edit page loads the record and countries, and its single form calls the normal update endpoint. The service updates only core type fields and enforces tenant-scoped Code uniqueness. There is no autosave or secondary configuration action today.
+3. **Current HR consumers.** Employee identification cards, employee import, hiring, expiry reminders and Fleet driver projections consume `IdentificationTypeId`. The additive module mapping must not change those queries or require HR mappings for existing HR use.
+4. **Current TenantModule data model.** `TenantModule` uses `BaseEntity`, TenantId, ModuleName, Description, Status, enabled/disabled dates and JSON Configuration. The database uniquely indexes `(TenantId, ModuleName)`.
+5. **Current stable module identifier.** The durable relational identifier is `TenantModule.Id`. `ModuleName` is the current seed/reconciliation key because TenantModule has no Code field. New mappings will store `TenantModuleId`; only the server will resolve the Estate row using a shared Estate module constant. The browser will neither persist names nor filter by display text.
+6. **Existing many-to-many mapping patterns.** Tenant-scoped mapping entities use two foreign keys, TenantId, audit/base fields and a composite tenant-aware unique index. `IdentificationTypeModule` will follow that explicit entity pattern so changes can be audited and soft deleted consistently.
+7. **Existing permissions for Identification Type admin.** The controller is `InternalOnly`; create/update/activate/deactivate use `HR.Employee.Write`, while delete uses `HR.Employee.Admin`. Module exposure is configuration with cross-module impact, so mapping read/write will remain internal and mapping writes will use the existing Employee Admin policy. Core saves remain on Employee Write.
+8. **Current Property Listing -> Enquiry flow.** Public listings use OTP-verified email/phone, CAPTCHA/rate limits, server-side listing/tenant resolution, duplicate-submission controls, and an immutable `EhcPropertyListingContextDto` JSON snapshot. Authenticated portal enquiries resolve linked Business Partners server-side. Both routes create the canonical EHC ticket/workflow.
+9. **Current enquiry identification fields.** Neither public/authenticated request contract, ticket entity nor property context currently has IdentificationTypeId/IdentificationNumber. The new fields must be structured and server validated; the snapshot may retain type display data for historical display, but the relationship must be a foreign key rather than name-only data.
+10. **Current Enquiry -> Opportunity flow.** `PropertyEnquiryProspectService` qualifies the ticket, creates or reconciles one tenant-owned opportunity, carries listing price/currency, optionally reserves the property and writes ticket/prospect audit lineage. Existing-customer enquiries skip creating a redundant lead.
+11. **Current Opportunity -> Quote capability.** Generic Quote CRUD exists and CustomerId is nullable, so a quote can represent a prospect. Opportunities currently expose only View Quotes plus generic Sales handoff; there is no property-aware create-quote action or authoritative property-line prefill. Generic conversion requires an accepted quote.
+12. **Current Quote printing capability.** No Sales Quote PDF/print document builder or controller action exists. The CRM page shows quote detail only. A printable quote must be added through the existing document-output/download conventions.
+13. **Current Opportunity/customer linkage.** Opportunity.CustomerId is the canonical BusinessPartner.Id compatibility column. The property prospect and ticket also retain opportunity/customer lineage. Linking an existing customer already requires an active approved Customer role and tenant match.
+14. **Current customer creation + approval workflow.** Property enquiry customer creation calls the existing Business Partner service, applies duplicate matching by contact, marks the prospect `CustomerPendingApproval`, and finalization checks active `ApprovalStatus == Approved`. The current UI incorrectly gates customer creation/finalization on the prospect-deposit threshold and must be reordered.
+15. **Current Opportunity/Quote -> Sales Order flow.** Quote conversion already rejects non-accepted quotes, maps quote lines, and returns an existing order when the same QuoteId was converted earlier. It currently fails when Quote.CustomerId is null and does not independently require an approved customer. Direct Sales Order creation also lacks the active/approved Customer-role gate.
+16. **Current property Sales Order prefill/locking.** The property enquiry UI resolves the canonical saleable source, passes an active reservation, locks the source item, uses Each/EA, and preserves OpportunityId/property reference. The server enforces allocation status, customer and opportunity consistency. Existing order discovery prefers OpportunityId and falls back to property reference for legacy records.
+17. **Current enquiry deposit process.** New receipts are currently captured before customer conversion against `ProspectDepositReceipt`; clearing and reversal are separate permissioned operations. The property enquiry page actively exposes the form and uses the cleared threshold to unlock customer creation.
+18. **Current prospect deposit accounting.** Clearing posts Dr bank/liquidity and Cr prospect-deposit liability exactly once through the Finance posting engine. Customer conversion creates a deterministic CustomerPayment advance and reclassifies the liability without debiting cash again. Historical reversal, journal and transfer lineage is durable and must remain unchanged.
+19. **Current payment method model.** Tenant-scoped `PaymentMethod` has a stable Id, Type, active flag, RequiresBankAccount, RequiresReference and default GL account. AR `PaymentService` resolves and validates the configured method and posting destination server-side.
+20. **Current Cheque/Bank Deposit metadata model.** CustomerPayment already stores PaymentMethodId, BankAccountId/LiquidityAccountId, CheckNumber, ChequeDrawerBank and TransactionReference. BankAccount supplies the configured bank/account identity. A small Sales Order payment lineage entity is still required to retain SalesOrderId and the structured external bank/account values requested for cheque/bank-deposit reference formatting.
+21. **Current Customer Detailed Ledger Reference source.** AR report projection currently uses `CustomerPayment.TransactionReference ?? CheckNumber`; its older statement projection uses PaymentNumber. It does not format Cash/Cheque/Bank Deposit references according to the requirement.
+22. **Current Customer Detailed Ledger Description source.** The detailed ledger uses `payment.Notes ?? "Customer payment - {PaymentMethod}"`. It does not resolve property/unit lineage.
+23. **Current property/document lineage available to ledger.** Listing -> EHC ticket/context -> prospect -> opportunity -> allocation -> Sales Order exists; Sales Order -> invoice and PaymentAllocation -> CustomerPayment exist. An unallocated Sales Order deposit has no direct SalesOrderId today, so the report cannot obtain property lineage without a new indexed relation.
+24. **Historical compatibility concerns.** Existing prospect deposits and journals must stay readable/reversible and must never be rewritten. Optional context additions must deserialize old JSON. Existing HR identification types stay usable by HR even with no mappings. Existing non-property CustomerPayments and ledger text retain their fallbacks.
+25. **Exact gaps versus requirement.** Missing: module mapping/schema/API/UI/audit; Estate module seed; public filtered lookup; enquiry identification persistence/validation/masking; property-aware quote create/idempotency/print; approved-customer server gate; reordered customer flow; new Sales Order deposit command/UI; structured deposit lineage; exact ledger reference/description; and negative/concurrency coverage.
+26. **Files expected to change.** HR entity/DTO/interface/service/controller/form/edit page/lookup service; TenantModule constants/seeding; EHC request/context/ticket configuration/controller/dialog/service types; Quote/Sales Order APIs/services/UI/document output; CustomerPayment-related Sales Order deposit lineage, AR reporting and property-enquiry UI; DbContext/configuration/migration; focused backend/frontend tests.
+27. **Migration decision.** A forward EF migration is required for `IdentificationTypeModule`, enquiry IdentificationTypeId/IdentificationNumber, and Sales Order deposit/payment lineage. Historical migrations will not be edited. The default Estate TenantModule will use a deterministic seed Id; Estate mappings themselves will not be guessed or bulk seeded.
+28. **Test plan.** Add mapping isolation/authorization/separate-save/concurrency tests; public Estate lookup and enquiry validation tests; quote pre-customer/idempotency/print tests; Business Partner approval and API-bypass Sales Order tests; new versus legacy deposit tests; Finance exactly-once/no-revenue/reversal tests; exact ledger reference/property description/query-shape tests; frontend interaction tests; build/typecheck/migration verification and visible browser acceptance.
+29. **Implementation slices.** (1) protection tests and audit; (2) module mapping; (3) Estate lookup and identification persistence; (4) property quote/print; (5) approved-customer conversion; (6) Sales Order deposit and legacy read-only behavior; (7) structured tender metadata; (8) Finance advance posting; (9) ledger reference; (10) property description; (11) migration/legacy verification; (12) concurrency/security; (13) end-to-end acceptance.
+
+### Accounting decision
+
+- **Historical path:** retain the existing prospect receipt posting: debit bank/liquidity, credit prospect-deposit liability; later reclassify to a CustomerPayment advance without a second cash debit.
+- **New path:** create a tenant-owned, approved-customer `CustomerPayment` advance linked to the actual Sales Order. Finance posts debit bank/liquidity and credit the configured customer-advance liability exactly once. No invoice, receivable settlement or revenue is created merely because the deposit was received. Allocation happens only after the normal Sales Order -> Invoice lifecycle produces and posts an invoice.
+- The existing Finance posting engine, source-book authority, bank/liquidity access, configured payment method and idempotent posting keys remain authoritative.
+
+## Commits
+
+- `216a3bcaef1` - start this audit ledger.
+- `c37d59c7187` - merge the latest `origin/master` after teammate PR #384.
+- `a98518808b5` - record the integrated upstream base.
+- `567eeb0b8d4` - complete the audit and implementation decision record.
+- `3428aab56b6` - implement and verify the property Sales Order deposit lifecycle.
+- `d3cc40053c4` - integrate PR #385 from the latest `origin/master`.
+- `028695d5880` - record disposable migration, startup and cleanup evidence.
+- `4146f66678f` - integrate the latest teammate estate uploaded-document viewer cleanup.
+- `f984077b3e7` - record the user-led local UAT server session.
+- `5391cbdc21f` - integrate teammate PR #386 before publication.
+- `f2f15200e1d` - record PR #386 integration and local UAT cleanup.
+
+## Migrations and application status
+
+- Forward migration created: `20261008192833_AddPropertySalesOrderDepositLifecycle`.
+- The migration adds only the audited identification-module mapping, protected enquiry identity fields, property quote lineage, and Sales Order customer-deposit lineage. It does not alter historical prospect-deposit rows or unrelated Security schema.
+- `dotnet ef migrations list` includes the new migration.
+- `dotnet ef migrations has-pending-model-changes` reports no pending model changes after a full API build.
+- Migration application and rollback were rehearsed against an isolated SQL Server clone. The forward migration applied successfully, a second application was idempotent, the migration history row and all expected tables/columns/indexes were present, and the rollback removed only the new schema/history row while preserving the pre-existing Estate module row.
+- A second isolated clone was migrated for browser startup validation and removed afterward. The API live probe returned HTTP 200 on port 5001 and the frontend login route returned HTTP 200 on port 3001. Full readiness remained degraded because ClamAV is unavailable in the local development environment.
+- The application processes, disposable databases, backups, temporary dependency junction and copied local configuration files were removed after verification.
+- Visible browser acceptance was attempted, but the Computer Use inventory exposed no browser and the in-app browser provider was unavailable. No visible browser acceptance or screenshots are claimed.
+- VPS/test application: unchanged by this workstream.
+- Source local database: unchanged; the migration was never applied to it.
+
+## Verification evidence
+
+- Confirmed the isolated worktree starts clean from `origin/master` at the exact base above.
+- Earlier integration checkpoint: PR #384 at `2f5ccdda0ae` was fetched and integrated before implementation verification.
+- Latest integration checkpoint: PR #385 at `c1c3728343b` was fetched and integrated; post-merge worktree commit is `d3cc40053c4`.
+- Final upstream checkpoint: `578a41dec66` was fetched and integrated at `4146f66678f`. Its only source change is in `ProcedureCaseWorkspace.tsx`, outside this property Sales/Finance slice.
+- Publication checkpoint: teammate PR #386 at `cd5b529f0e1` was fetched and integrated at `5391cbdc21f`. Its four changed paths concern Estate balance-invoice billing/workspace behavior and tests and do not overlap this property deposit slice.
+- Inspected existing Sales/CRM tracker `docs/tdc-sales-marketing-crm-gap-implementation-tracker.md` to avoid duplicating prior requirements analysis.
+- Confirmed the older property-enquiry worktree is divergent and unsuitable as the implementation base.
+- Full API source build passed with zero errors. The remaining output was the repository's existing warning set, including ImageSharp package-advisory warnings.
+- The migration model compiler preserved 88 full models, 347,374 ordered statements and 8,989 distinct statements across two lookup contexts.
+- Focused backend tests passed: 23/23 across `PropertyEnquiryProspectLifecycleTests` and `SalesOrderCustomerDepositServiceTests`.
+- Additional focused public listing enquiry tests passed for Estate-filtered identity submission and protected identity persistence.
+- Focused frontend tests passed: 17/17 across the property-enquiry dialog, opportunity lead context and Sales Order service.
+- Frontend TypeScript validation passed after excluding generated Next production output.
+- A full Next.js production build passed, including route generation.
+- After integrating PR #385, the full API build passed again with zero errors, the 23 focused backend tests passed, all 17 focused frontend tests passed, and TypeScript validation passed.
+- Disposable migration evidence: the model compiler preserved 88 full models, 347,374 ordered statements and 8,989 distinct statements; forward apply and idempotent re-apply passed; expected lifecycle tables, ticket/quote fields, six target indexes and the Estate module row were present; rollback removed the new lifecycle schema while retaining the Estate module row.
+- Isolated application startup evidence: API `/api/health/live` returned HTTP 200 and the Next.js `/login` route returned HTTP 200 before all temporary resources were cleaned up.
+- Pre-publication verification after PR #386: the Release API build passed with zero errors; the property lifecycle backend tests passed 23/23; the focused frontend tests passed 17/17; TypeScript validation passed; and the full Next.js production build completed successfully.
+- Deposit service coverage verifies exact Cash, Cheque and Bank Deposit references; unallocated customer-advance posting with property lineage; and rejection of unapproved customers before Finance posting.
+- Manual code review confirmed the full identification number is retained only on the protected EHC ticket, is not copied to Business Partner TaxNumber, and the customer dialog presents it read-only to authorized internal users.
+- Manual migration review removed an unsafe rollback delete that could have removed a preexisting shared Estate module row.
+
+## Known failures and risks
+
+- Existing prospect deposits may already be posted in production. Any prospective Sales Order deposit path must coexist with them without rewriting history.
+- The broad `PropertyListingEnquiryTests` fixture still has unrelated legacy failures outside this slice, including a null reference in `EstateManagedAssetsController` and a SQLite fixture missing `OpportunityStageDefinitions`. The focused identity/enquiry tests pass.
+- The installed local machine currently exposes .NET SDK/runtime 10 while the repository pins SDK 9 and the test application targets .NET 8. Verification used a guarded temporary SDK/compiler target override and `DOTNET_ROLL_FORWARD=Major`; both repository files were restored afterward.
+- A real visible browser lifecycle remains required before describing the 46-step business flow as accepted end to end. This session had no controllable browser surface, so the UI was not represented as visually accepted.
+- The local readiness endpoint is expectedly unhealthy without ClamAV even though the API live probe is healthy. This development-environment limitation did not affect the focused sales/deposit tests.
+- The Estate regression suite on the integrated PR #386 baseline has four source-inspection failures: `ListingApproval_OwnsRentalMoveInDateBeforeCustomerAcceptance`, `PortalPropertyBilling_ShowsIssuedFinanceInvoicesAndAllocatedReceipts`, `DisabledSaleListingAction_DoesNotRenderANavigableLink`, and `DemarcationDialogAndReadinessAction_PreserveFrontendGuards`. The first, third and fourth inspect files identical to `origin/master`; the second is triggered by a brittle single-line method-signature marker while this branch's functional change in that controller is the additive Estate identification-type/enquiry flow. These failures are outside the property-deposit acceptance suite and were not hidden or converted into passing results.
+
+## Remaining work
+
+1. In a session with an available controllable browser, complete visible acceptance for Identification Type module configuration, public enquiry identity capture, opportunity, quote/PDF, approved customer, Sales Order deposit and Customer Detailed Ledger.
+2. Record screenshots and the matching posting-event/journal rows for one accepted end-to-end record chain.
+3. Re-fetch `origin/master` immediately before publication and integrate any newer teammate commits.
+4. Push/open/merge a PR and deploy only when the user explicitly authorizes publication of this workstream.
+
+## Completed local UAT startup session
+
+- Started on 2026-10-08 for user-led browser acceptance.
+- Frontend: `http://localhost:3000`; API: `http://localhost:5001/api`.
+- Disposable database: `RhemaERP_PropertyDepositBrowser_20261008215346`.
+- The complete pending EF migration chain was applied to the disposable clone after the first startup exposed missing unrelated HR probation columns in the source snapshot.
+- Independent post-launch probes passed after the launching command exited: frontend `/login` HTTP 200, API `/api/health/live` HTTP 200, and unauthenticated `/api/auth/me` HTTP 401 as expected.
+- The frontend and API processes were stopped after the user requested publication. The disposable database, SQL backup, copied local configuration and frontend dependency junction were removed and the Git worktree was confirmed clean.

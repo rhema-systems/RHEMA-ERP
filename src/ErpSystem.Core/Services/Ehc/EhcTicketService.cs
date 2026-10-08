@@ -725,7 +725,10 @@ public sealed class EhcTicketService : IEhcTicketService
                 if (existing != null)
                 {
                     var saved = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(existing.PropertyListingContextJson!);
-                    if (saved?.ListingId != property.ListingId || saved.BusinessPartnerId != property.BusinessPartnerId || existing.Description != request.Description.Trim())
+                    if (saved?.ListingId != property.ListingId || saved.BusinessPartnerId != property.BusinessPartnerId
+                        || existing.Description != request.Description.Trim()
+                        || existing.IdentificationTypeId != property.IdentificationTypeId
+                        || !string.Equals(existing.IdentificationNumber, property.IdentificationNumber, StringComparison.Ordinal))
                         throw new ArgumentException("This submission identifier has already been used for a different enquiry.");
                     result = returnRequesterView
                         ? await GetMyTicketByIdAsync(existing.Id, cancellationToken)
@@ -847,6 +850,8 @@ public sealed class EhcTicketService : IEhcTicketService
 
         var ticket = new EhcTicket
         {
+            IdentificationTypeId = property?.IdentificationTypeId,
+            IdentificationNumber = property?.IdentificationNumber?.Trim(),
             PublicPropertyEnquiryContactId = property?.PublicContactId,
             PropertyListingContextJson = property == null ? null : JsonSerializer.Serialize(property),
             ExternalSubmissionId = submissionId,
@@ -3288,6 +3293,10 @@ public sealed class EhcTicketService : IEhcTicketService
         return new EhcTicketDetailDto
         {
             PropertyListing = publicContact,
+            IdentificationTypeId = ticket.IdentificationTypeId,
+            IdentificationTypeName = publicContact?.IdentificationTypeName,
+            IdentificationNumber = includeInternal ? ticket.IdentificationNumber : null,
+            MaskedIdentificationNumber = publicContact?.MaskedIdentificationNumber,
             Id = ticket.Id,
             TicketNumber = ticket.TicketNumber,
             TicketType = ticket.TicketType,

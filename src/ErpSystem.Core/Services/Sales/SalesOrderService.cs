@@ -5,6 +5,8 @@ using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -15,6 +17,7 @@ using ErpSystem.Core.Services.Finance;
 using ErpSystem.Core.Services.Projects;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Sales;
 
@@ -79,8 +82,7 @@ public class SalesOrderService : ISalesOrderService
     {
         try
         {
-            var bp = await _bpRepo.GetByIdAsync(dto.BusinessPartnerId)
-                ?? throw new InvalidOperationException($"Business Partner {dto.BusinessPartnerId} not found");
+            var bp = await RequireApprovedCustomerAsync(dto.BusinessPartnerId);
             var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? bp.PaymentTermId, bp.TenantId);
             SalesAllocation? reservedAllocation = null;
             if (dto.SalesAllocationId.HasValue)
@@ -763,6 +765,9 @@ public class SalesOrderService : ISalesOrderService
             var quote = await _quoteRepo.GetByIdAsync(quoteId, q => q.LineItems)
                 ?? throw new InvalidOperationException($"Quote {quoteId} not found");
 
+            if (quote.TenantId != _currentUserProvider.TenantId)
+                throw new UnauthorizedAccessException("The Quote does not belong to the current tenant.");
+
             if (quote.QuoteStatus != "Accepted")
                 throw new InvalidOperationException("Only accepted quotes can be converted to Sales Orders");
 
@@ -777,11 +782,37 @@ public class SalesOrderService : ISalesOrderService
                     ?? throw new InvalidOperationException($"Sales Order {existingOrder.Id} could not be loaded");
             }
 
+            Guid? salesAllocationId = null;
+            string? propertyReference = null;
+            if (quote.PropertyEnquiryTicketId.HasValue)
+            {
+                var prospect = await _unitOfWork.Repository<EhcPropertyEnquiryProspect>()
+                    .GetQueryable(item => item.TenantId == quote.TenantId
+                        && item.TicketId == quote.PropertyEnquiryTicketId.Value
+                        && !item.IsDeleted)
+                    .Include(item => item.Ticket)
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync()
+                    ?? throw new InvalidOperationException("The property enquiry linked to this Quote could not be resolved.");
+                salesAllocationId = prospect.SalesAllocationId;
+                try
+                {
+                    propertyReference = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(
+                        prospect.Ticket.PropertyListingContextJson ?? string.Empty)?.ListingReference;
+                }
+                catch (JsonException)
+                {
+                    throw new InvalidOperationException("The property enquiry context is invalid and must be corrected before conversion.");
+                }
+            }
+
             var createDto = new CreateSalesOrderDto
             {
                 BusinessPartnerId = quote.CustomerId ?? throw new InvalidOperationException("Quote has no customer"),
                 QuoteId = quoteId,
                 OpportunityId = quote.OpportunityId,
+                SalesAllocationId = salesAllocationId,
+                PropertyReference = propertyReference,
                 Currency = quote.Currency,
                 DiscountAmount = quote.DiscountAmount,
                 ShippingAmount = quote.ShippingAmount,
@@ -802,6 +833,39 @@ public class SalesOrderService : ISalesOrderService
             _logger.LogError(ex, "Error converting Quote {QuoteId} to Sales Order", quoteId);
             throw;
         }
+    }
+
+    private async Task<BusinessPartner> RequireApprovedCustomerAsync(Guid businessPartnerId)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new UnauthorizedAccessException("A tenant context is required to create a Sales Order.");
+
+        var partner = await _unitOfWork.Repository<BusinessPartner>()
+            .GetQueryable(item =>
+                item.Id == businessPartnerId &&
+                item.TenantId == tenantId &&
+                !item.IsDeleted)
+            .Include(item => item.Roles)
+            .SingleOrDefaultAsync()
+            ?? throw new InvalidOperationException("The selected Customer Business Partner was not found in the current tenant.");
+
+        var hasActiveCustomerRole = partner.Roles.Any(role =>
+            !role.IsDeleted &&
+            role.RoleType == BusinessPartnerRoleType.Customer &&
+            role.Status == BusinessPartnerRoleStatus.Active &&
+            role.ActiveFromUtc <= DateTime.UtcNow &&
+            (!role.InactiveFromUtc.HasValue || role.InactiveFromUtc.Value > DateTime.UtcNow));
+
+        if (!partner.IsActive ||
+            !string.Equals(partner.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase) ||
+            !hasActiveCustomerRole)
+        {
+            throw new InvalidOperationException(
+                "Sales Orders require an active, approved Business Partner with an active Customer role.");
+        }
+
+        return partner;
     }
 
     public async Task<Guid> GenerateInvoiceAsync(Guid salesOrderId, GenerateSalesOrderInvoiceRequest request)

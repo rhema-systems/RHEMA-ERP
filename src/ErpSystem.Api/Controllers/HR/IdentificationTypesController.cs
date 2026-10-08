@@ -105,6 +105,49 @@ public class IdentificationTypesController : ControllerBase
     }
 
     /// <summary>
+    /// Get module availability without changing the identification type's core fields.
+    /// </summary>
+    [HttpGet("{id:guid}/modules")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+    [ProducesResponseType(typeof(IdentificationTypeModuleAvailabilityDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetModules(Guid id)
+    {
+        try
+        {
+            return Ok(await _identificationTypeService.GetModuleAvailabilityAsync(id));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Save module availability independently from the identification type's core fields.
+    /// </summary>
+    [HttpPut("{id:guid}/modules")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+    [ProducesResponseType(typeof(IdentificationTypeModuleAvailabilityDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateModules(Guid id, [FromBody] UpdateIdentificationTypeModulesDto updateDto)
+    {
+        try
+        {
+            return Ok(await _identificationTypeService.UpdateModuleAvailabilityAsync(id, updateDto));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Create a new identification type
     /// </summary>
     [HttpPost]

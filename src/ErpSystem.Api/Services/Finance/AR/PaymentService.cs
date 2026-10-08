@@ -432,6 +432,32 @@ namespace ErpSystem.Api.Services.Finance.AR
                 await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
                 transactionStarted = true;
 
+                if (dto.SalesOrderDepositLineage is { } retryLineage)
+                {
+                    var idempotencyKey = retryLineage.IdempotencyKey.Trim();
+                    if (string.IsNullOrWhiteSpace(idempotencyKey))
+                        throw new InvalidOperationException("A Sales Order deposit idempotency key is required.");
+
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"sales-order-deposit:{TenantId:N}:{idempotencyKey}", cancellationToken);
+                    var existingDeposit = await _unitOfWork.Repository<SalesOrderCustomerDeposit>()
+                        .GetQueryable(item => item.TenantId == TenantId
+                            && item.IdempotencyKey == idempotencyKey
+                            && !item.IsDeleted)
+                        .AsNoTracking()
+                        .SingleOrDefaultAsync(cancellationToken);
+                    if (existingDeposit is not null)
+                    {
+                        if (existingDeposit.SalesOrderId != retryLineage.SalesOrderId)
+                            throw new InvalidOperationException("This deposit request key is already assigned to another Sales Order.");
+
+                        transactionStarted = false;
+                        await _unitOfWork.CommitAsync(cancellationToken);
+                        return await GetByIdAsync(existingDeposit.CustomerPaymentId, producer, cancellationToken)
+                            ?? throw new InvalidOperationException("The existing Sales Order deposit payment could not be loaded.");
+                    }
+                }
+
                 var counterparty = await ResolveCustomerCounterpartyAsync(
                     dto.BusinessPartnerId,
                     dto.BusinessPartnerRoleId,
@@ -575,6 +601,50 @@ namespace ErpSystem.Api.Services.Finance.AR
                 await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(customer);
 
                 await _unitOfWork.Repository<CustomerPayment>().AddAsync(payment);
+
+                if (dto.SalesOrderDepositLineage is { } depositLineage)
+                {
+                    var salesOrder = await _unitOfWork.Repository<SalesOrder>()
+                        .GetQueryable(item => item.TenantId == TenantId
+                            && item.Id == depositLineage.SalesOrderId
+                            && !item.IsDeleted)
+                        .AsNoTracking()
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw new InvalidOperationException("The Sales Order was not found in the current tenant.");
+                    if (salesOrder.BusinessPartnerId != payment.BusinessPartnerId)
+                        throw new InvalidOperationException("The deposit customer must match the Sales Order customer.");
+                    if (salesOrder.OrderStatus is SalesOrderStatus.Cancelled or SalesOrderStatus.Closed)
+                        throw new InvalidOperationException("Deposits cannot be recorded against a cancelled or closed Sales Order.");
+
+                    var activeDepositTotal = await _unitOfWork.Repository<SalesOrderCustomerDeposit>()
+                        .GetQueryable(item => item.TenantId == TenantId
+                            && item.SalesOrderId == salesOrder.Id
+                            && !item.IsDeleted
+                            && item.CustomerPayment.ReversedAt == null
+                            && item.CustomerPayment.Status != "Cancelled"
+                            && item.CustomerPayment.Status != "Bounced")
+                        .SumAsync(item => (decimal?)item.CustomerPayment.TotalAmount, cancellationToken) ?? 0m;
+                    if (activeDepositTotal + payment.TotalAmount > salesOrder.TotalAmount)
+                        throw new InvalidOperationException("The deposit would exceed the remaining Sales Order value.");
+
+                    await _unitOfWork.Repository<SalesOrderCustomerDeposit>().AddAsync(new SalesOrderCustomerDeposit
+                    {
+                        TenantId = TenantId,
+                        SalesOrderId = salesOrder.Id,
+                        CustomerPaymentId = payment.Id,
+                        IdempotencyKey = depositLineage.IdempotencyKey.Trim(),
+                        TenderType = depositLineage.TenderType.Trim(),
+                        ExternalBankName = depositLineage.ExternalBankName,
+                        ExternalAccountNumber = depositLineage.ExternalAccountNumber,
+                        ChequeNumber = depositLineage.ChequeNumber,
+                        DepositReference = depositLineage.DepositReference,
+                        IdentificationReference = depositLineage.IdentificationReference,
+                        PropertyDescription = depositLineage.PropertyDescription.Trim(),
+                        CreatedAt = now,
+                        CreatedBy = UserName,
+                        CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId
+                    });
+                }
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                 if (dto.Allocations?.Any() == true && !dto.IsCreditNote)
@@ -621,10 +691,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     await FinalizeArReceiptPostingAsync(postingOutcome, producer, cancellationToken);
                 }
 
-                // UnitOfWork.CommitAsync owns rollback/disposal if the commit itself fails.
-                // Clear this guard first so the outer catch does not mask that error with a second rollback.
-                transactionStarted = false;
                 await _unitOfWork.CommitAsync(cancellationToken);
+                transactionStarted = false;
 
                 _logger.LogInformation("Created payment {PaymentNumber} for Business Partner {BusinessPartnerId}, Amount: {Amount}",
                     payment.PaymentNumber, customer.Id, dto.TotalAmount);

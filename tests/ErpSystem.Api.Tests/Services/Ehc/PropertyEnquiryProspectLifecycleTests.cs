@@ -56,9 +56,9 @@ public sealed class PropertyEnquiryProspectLifecycleTests
 
         Assert.NotNull(method);
         Assert.Equal("{id:guid}/prospect/opportunity", method!.GetCustomAttribute<HttpPostAttribute>()?.Template);
-        var roles = method.GetCustomAttribute<AuthorizeAttribute>()?.Roles ?? string.Empty;
-        Assert.Contains("Sales User", roles);
-        Assert.DoesNotContain("Anonymous", roles);
+        var authorization = method.GetCustomAttribute<AuthorizeAttribute>();
+        Assert.Equal(SalesPermissions.Manage, authorization?.Policy);
+        Assert.True(string.IsNullOrWhiteSpace(authorization?.Roles));
     }
 
     [Fact]
@@ -497,11 +497,14 @@ public sealed class PropertyEnquiryProspectLifecycleTests
         var configure = typeof(EhcPropertyEnquiriesController).GetMethod(nameof(EhcPropertyEnquiriesController.UpsertDepositPolicy));
         var list = typeof(EhcPropertyEnquiriesController).GetMethod(nameof(EhcPropertyEnquiriesController.GetDeposits));
 
-        var depositReadRoles = list?.GetCustomAttribute<AuthorizeAttribute>()?.Roles ?? string.Empty;
-        Assert.Contains("Sales User", depositReadRoles);
-        Assert.Contains("Sales Officer", depositReadRoles);
-        Assert.Contains("Sales Manager", depositReadRoles);
-        Assert.Null(list?.GetCustomAttribute<AuthorizeAttribute>()?.Policy);
+        Assert.Null(list?.GetCustomAttribute<AuthorizeAttribute>());
+        var controllerPolicies = typeof(EhcPropertyEnquiriesController)
+            .GetCustomAttributes<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .ToArray();
+        Assert.Contains(SalesPermissions.Read, controllerPolicies);
+        Assert.DoesNotContain(typeof(EhcPropertyEnquiriesController)
+            .GetCustomAttributes<AuthorizeAttribute>(), attribute => !string.IsNullOrWhiteSpace(attribute.Roles));
         Assert.Equal(FinancePermissions.ReceiveCustomerPayments,
             clear?.GetCustomAttribute<AuthorizeAttribute>()?.Policy);
         Assert.Equal(FinancePermissions.ReverseArPayments,

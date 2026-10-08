@@ -37,6 +37,7 @@
     <Compile Include="Services\Ehc\PropertyEnquiryProspectLifecycleTests.cs" />
     <Compile Include="Services\Ehc\PropertyEnquiryContactLinkageTests.cs" />
     <Compile Include="Services\Ehc\PropertyEnquiryDepositApplicationTests.cs" />
+    <Compile Include="Services\Sales\SalesOrderCustomerDepositServiceTests.cs" />
     <Compile Include="Services\Ehc\ProspectDepositFinancePostingServiceTests.cs" />
     <Compile Include="Services\Otp\OtpServiceSecurityTests.cs" />
     <Compile Include="Services\Sms\MNotifySmsGatewayTests.cs" />

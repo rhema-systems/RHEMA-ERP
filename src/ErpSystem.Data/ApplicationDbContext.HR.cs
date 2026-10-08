@@ -1852,6 +1852,30 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<IdentificationTypeModule>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.IdentificationTypeId, e.TenantModuleId })
+                .IsUnique()
+                .HasDatabaseName("UX_IdentificationTypeModule_Tenant_Type_Module");
+            entity.HasIndex(e => new { e.TenantId, e.TenantModuleId })
+                .HasDatabaseName("IX_IdentificationTypeModule_Tenant_Module");
+
+            entity.HasOne(e => e.IdentificationType)
+                .WithMany(e => e.ModuleAvailabilities)
+                .HasForeignKey(e => e.IdentificationTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.TenantModule)
+                .WithMany(e => e.IdentificationTypeAvailabilities)
+                .HasForeignKey(e => e.TenantModuleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<EmployeeIdentificationCard>(entity =>
         {
             entity.HasIndex(e => e.EmployeeId);

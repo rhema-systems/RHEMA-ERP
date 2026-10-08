@@ -156,12 +156,6 @@ function PropertyEnquiries() {
       ),
     [activeCurrencies.data, opportunityDraft.currency]
   );
-  const [depositDraft, setDepositDraft] = useState({
-    amount: '',
-    paymentMethod: 'BankTransfer',
-    transactionReference: '',
-    receivedAt: '',
-  });
   const [depositAction, setDepositAction] = useState<{
     kind: 'clear' | 'reverse';
     receiptId: string;
@@ -195,6 +189,7 @@ function PropertyEnquiries() {
     notes: '',
   });
   const salesAmountPaidEditedRef = useRef(false);
+  const customerConversionHandledRef = useRef(false);
   const [confirmHandoff, setConfirmHandoff] = useState(false);
   const lastQueryErrorAtRef = useRef(0);
   const client = useQueryClient();
@@ -388,13 +383,6 @@ function PropertyEnquiries() {
       variant: 'destructive',
     });
   }, [latestQueryFailure.error, latestQueryFailure.updatedAt, toast]);
-  const depositCurrency = resolveOpportunityCurrency(
-    detail.data?.prospect?.currency ||
-      handoff.data?.opportunity?.currency ||
-      detail.data?.propertyListing?.currency,
-    activeCurrencies.data ?? []
-  );
-
   const qualify = useMutation({
     mutationFn: () =>
       propertyEnquiryService.qualify(selectedId, {
@@ -582,48 +570,6 @@ function PropertyEnquiries() {
       });
     },
   });
-  const recordDeposit = useMutation({
-    mutationFn: () =>
-      propertyEnquiryService.recordDeposit(selectedId, {
-        amount: Number(depositDraft.amount),
-        currency: depositCurrency,
-        paymentMethod: depositDraft.paymentMethod,
-        transactionReference: depositDraft.transactionReference.trim() || null,
-        receivedAt: depositDraft.receivedAt
-          ? new Date(depositDraft.receivedAt).toISOString()
-          : null,
-      }),
-    onSuccess: async () => {
-      setDepositDraft((value) => ({
-        ...value,
-        amount: '',
-        transactionReference: '',
-        receivedAt: '',
-      }));
-      await Promise.all([
-        refreshSelected(),
-        client.invalidateQueries({
-          queryKey: ['property-enquiry-deposits', selectedId],
-        }),
-      ]);
-      toast({
-        title: 'Deposit recorded',
-        description:
-          'The receipt is pending clearance and does not count toward the threshold yet.',
-        variant: 'success',
-      });
-    },
-    onError: (mutationError) => {
-      toast({
-        title: 'Deposit could not be recorded',
-        description:
-          mutationError instanceof Error && mutationError.message.trim()
-            ? mutationError.message
-            : 'The deposit could not be recorded. Please try again.',
-        variant: 'destructive',
-      });
-    },
-  });
   const decideDeposit = useMutation({
     mutationFn: async () => {
       if (!depositAction) throw new Error('Select a deposit receipt.');
@@ -680,7 +626,7 @@ function PropertyEnquiries() {
       toast({
         title: 'Customer conversion finalized',
         description:
-          'The approved customer and cleared deposit were linked to the Sales records.',
+          'The approved customer was linked to the enquiry, opportunity, and Sales records.',
         variant: 'success',
       });
     },
@@ -698,10 +644,9 @@ function PropertyEnquiries() {
   const ticket = detail.data;
   const leadStatus = ticket?.prospect?.status || 'New';
   const prospect = ticket?.prospect;
-  const depositThresholdMet = Boolean(prospect?.depositThresholdMet);
   const canMatchExistingCustomer = canSearchOrLinkExistingCustomer(prospect);
   const openCreatePartnerAfterMatchCheck = async () => {
-    if (!selectedId || !depositThresholdMet || !canMatchExistingCustomer) {
+    if (!selectedId || !canMatchExistingCustomer) {
       return;
     }
 
@@ -720,6 +665,19 @@ function PropertyEnquiries() {
 
     setCreatePartnerOpen(true);
   };
+  useEffect(() => {
+    if (
+      params.get('action') !== 'create-customer' ||
+      customerConversionHandledRef.current ||
+      !ticket?.prospect ||
+      !canMatchExistingCustomer
+    ) {
+      return;
+    }
+
+    customerConversionHandledRef.current = true;
+    void openCreatePartnerAfterMatchCheck();
+  }, [canMatchExistingCustomer, params, ticket?.prospect]);
   const handoffState = handoff.data;
   const opportunity = handoffState?.opportunity;
   const salesOrder = handoffState?.salesOrder;
@@ -996,12 +954,6 @@ function PropertyEnquiries() {
                             reservationDays: '14',
                             notes: '',
                           });
-                          setDepositDraft({
-                            amount: '',
-                            paymentMethod: 'BankTransfer',
-                            transactionReference: '',
-                            receivedAt: '',
-                          });
                           setDepositAction(null);
                           setReversalReason('');
                           setDepositActionDate('');
@@ -1220,16 +1172,17 @@ function PropertyEnquiries() {
 
               <section
                 className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4"
-                aria-label="Opportunity, reservation and deposit"
+                aria-label="Opportunity, reservation and legacy deposit history"
               >
                 <div>
                   <h3 className="font-semibold">
-                    Opportunity, reservation and deposit
+                    Opportunity, reservation and legacy deposit history
                   </h3>
                   <p className="text-sm text-slate-600">
-                    Create the opportunity only after qualification. Customer
-                    registration becomes available when the configured deposit
-                    threshold is met.
+                    Create the opportunity after qualification. Create or link
+                    the approved customer before the Sales Order. New deposits
+                    are recorded on the Sales Order; older records remain here
+                    for audit and reversal.
                   </p>
                 </div>
                 {opportunity ? (
@@ -1430,7 +1383,7 @@ function PropertyEnquiries() {
                 {prospect && prospect.opportunityId ? (
                   <div className="grid gap-2 rounded border border-emerald-200 bg-white p-3 text-sm md:grid-cols-2">
                     <p>
-                      <span className="font-medium">Deposit rule:</span>{' '}
+                      <span className="font-medium">Legacy deposit rule:</span>{' '}
                       {prospect.depositRequirementType}
                     </p>
                     <p>
@@ -1463,88 +1416,12 @@ function PropertyEnquiries() {
                 ) : null}
                 {prospect?.opportunityId ? (
                   <div className="space-y-3 rounded border border-emerald-200 bg-white p-3">
-                    <div className="grid gap-2 md:grid-cols-6">
-                      <Input
-                        aria-label="Deposit amount"
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        placeholder="Amount"
-                        value={depositDraft.amount}
-                        onChange={(event) =>
-                          setDepositDraft((value) => ({
-                            ...value,
-                            amount: event.target.value,
-                          }))
-                        }
-                      />
-                      <Input
-                        aria-label="Deposit currency"
-                        maxLength={3}
-                        placeholder="Currency"
-                        value={depositCurrency}
-                        disabled
-                      />
-                      <select
-                        aria-label="Payment method"
-                        className="rounded-md border bg-white p-2 text-sm"
-                        value={depositDraft.paymentMethod}
-                        onChange={(event) =>
-                          setDepositDraft((value) => ({
-                            ...value,
-                            paymentMethod: event.target.value,
-                          }))
-                        }
-                      >
-                        <option value="BankTransfer">Bank transfer</option>
-                        <option value="Cash">Cash</option>
-                        <option value="Cheque">Cheque</option>
-                        <option value="Card">Card</option>
-                        <option value="MobileMoney">Mobile money</option>
-                      </select>
-                      <Input
-                        aria-label="Transaction reference"
-                        maxLength={100}
-                        placeholder="Reference"
-                        value={depositDraft.transactionReference}
-                        onChange={(event) =>
-                          setDepositDraft((value) => ({
-                            ...value,
-                            transactionReference: event.target.value,
-                          }))
-                        }
-                      />
-                      <Input
-                        aria-label="Receipt date and time"
-                        type="datetime-local"
-                        value={depositDraft.receivedAt}
-                        onChange={(event) =>
-                          setDepositDraft((value) => ({
-                            ...value,
-                            receivedAt: event.target.value,
-                          }))
-                        }
-                      />
-                      <Button
-                        onClick={() => recordDeposit.mutate()}
-                        disabled={
-                          recordDeposit.isPending ||
-                          !Number.isFinite(Number(depositDraft.amount)) ||
-                          Number(depositDraft.amount) <= 0 ||
-                          !/^[A-Z]{3}$/.test(depositCurrency)
-                        }
-                      >
-                        {recordDeposit.isPending
-                          ? 'Recording…'
-                          : 'Record deposit'}
-                      </Button>
-                    </div>
-                    <p className="text-xs text-slate-600">
-                      Recorded receipts remain pending until an authorized user
-                      clears them. Only cleared, unreversed deposits count
-                      toward customer registration.
-                    </p>
-                    {depositReceipts.isLoading ? (
+                    <p className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                      New property deposits are recorded from the linked Sales
+                      Order after customer approval. Historical enquiry deposits
+                      remain visible here so authorized Finance users can finish
+                      clearance or reversal without changing prior postings.
+                    </p>                    {depositReceipts.isLoading ? (
                       <p className="text-sm">Loading deposit receipts…</p>
                     ) : null}
                     {depositReceipts.data?.map((receipt) => (
@@ -1621,8 +1498,7 @@ function PropertyEnquiries() {
                   <p className="text-sm text-slate-600">
                     The system checks qualified prospects against approved
                     existing customers before creating a new record. Customer
-                    creation remains locked until the cleared deposit threshold
-                    is met.
+                    approval is completed before a Sales Order is created.
                   </p>
                 </div>
                 {prospect?.businessPartnerId ? (
@@ -1644,9 +1520,7 @@ function PropertyEnquiries() {
                         className="mt-2"
                         variant="outline"
                         onClick={() => finalizePartner.mutate()}
-                        disabled={
-                          !depositThresholdMet || finalizePartner.isPending
-                        }
+                        disabled={finalizePartner.isPending}
                       >
                         Finalize after approval
                       </Button>
@@ -1655,15 +1529,12 @@ function PropertyEnquiries() {
                       <div className="mt-3 space-y-2">
                         <p className="text-xs text-slate-600">
                           This approved existing customer is linked. Finalize
-                          the conversion after the cleared deposit reaches the
-                          configured threshold.
+                          the conversion to update the Opportunity and Quote.
                         </p>
                         <Button
                           variant="outline"
                           onClick={() => finalizePartner.mutate()}
-                          disabled={
-                            !depositThresholdMet || finalizePartner.isPending
-                          }
+                          disabled={finalizePartner.isPending}
                         >
                           Finalize customer conversion
                         </Button>
@@ -1674,10 +1545,9 @@ function PropertyEnquiries() {
                     !salesOrder ? (
                       <div className="mt-3 border-t pt-3">
                         <p className="mb-2 text-xs text-slate-600">
-                          The customer account is approved and the prospect
-                          deposit is now a customer advance. Create the Sales
-                          Order for this opportunity before applying it to an
-                          invoice.
+                          The customer account is approved. Create the Sales
+                          Order for this opportunity, then record the property
+                          deposit from the Sales Order page.
                         </p>
                         {salesOrderSource.isLoading ? (
                           <p className="text-xs text-slate-600">
@@ -1732,18 +1602,6 @@ function PropertyEnquiries() {
                   </div>
                 ) : (
                   <>
-                    {!depositThresholdMet && prospect?.businessPartnerId ? (
-                      <p className="text-sm text-amber-800">
-                        The configured deposit threshold must still be met
-                        before finalizing this existing customer enquiry.
-                      </p>
-                    ) : !depositThresholdMet ? (
-                      <p className="text-sm text-amber-800">
-                        New customer registration is locked until a cleared
-                        deposit meets the configured threshold. An already
-                        approved customer can still be matched and linked.
-                      </p>
-                    ) : null}
                     {!canMatchExistingCustomer &&
                     (leadStatus === 'New' || leadStatus === 'Contacted') ? (
                       <p className="text-sm text-slate-600">
@@ -1764,7 +1622,6 @@ function PropertyEnquiries() {
                       <Button
                         onClick={openCreatePartnerAfterMatchCheck}
                         disabled={
-                          !depositThresholdMet ||
                           !canMatchExistingCustomer ||
                           partnerMatches.isFetching ||
                           Boolean(partnerMatches.data?.length)
@@ -2273,7 +2130,7 @@ function PropertyEnquiries() {
             </DialogTitle>
             <DialogDescription>
               {depositAction?.kind === 'clear'
-                ? `Confirming ${depositAction?.receiptNumber || 'this receipt'} makes it count toward the customer-registration threshold and posts through the configured prospect-deposit accounts.`
+                ? `Confirming ${depositAction?.receiptNumber || 'this receipt'} posts this historical receipt through the configured prospect-deposit accounts and preserves its legacy threshold evidence.`
                 : `Reversing ${depositAction?.receiptNumber || 'this receipt'} removes it from the cleared threshold. The audit trail and original receipt remain.`}
             </DialogDescription>
           </DialogHeader>
@@ -2351,6 +2208,31 @@ function PropertyEnquiries() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
+            {(ticket?.identificationTypeName || ticket?.identificationNumber) && (
+              <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:col-span-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="prospect-identification-type">Identification type</Label>
+                  <Input
+                    id="prospect-identification-type"
+                    value={ticket?.identificationTypeName || 'Not provided'}
+                    readOnly
+                    aria-readonly="true"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="prospect-identification-number">Identification number</Label>
+                  <Input
+                    id="prospect-identification-number"
+                    value={ticket?.identificationNumber || ticket?.maskedIdentificationNumber || ''}
+                    readOnly
+                    aria-readonly="true"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground sm:col-span-2">
+                  This verified identification is retained on the originating enquiry and cannot be changed during customer registration.
+                </p>
+              </div>
+            )}
             <div className="space-y-1 sm:col-span-2">
               <Label htmlFor="prospect-partner-name">Customer name</Label>
               <Input
