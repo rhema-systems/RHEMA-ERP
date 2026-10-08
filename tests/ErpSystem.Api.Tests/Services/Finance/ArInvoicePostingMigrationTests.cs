@@ -829,14 +829,56 @@ public sealed partial class ArInvoicePostingMigrationTests
         var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
         {
             invoice.Status = InvoiceStatus.PendingApproval;
+            invoice.ApprovalRequired = true;
         });
-        await SeedCompletedInvoiceWorkflowAsync(db, fixture.Invoice);
-        var (service, _) = CreateService(db, tenantId);
+        var workflowType = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Name = "Customer Invoice",
+            Code = "INVOICE", IsActive = true
+        };
+        var workflow = new WorkflowInstance
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, EntityId = fixture.Invoice.Id,
+            EntityTypeId = workflowType.Id, EntityType = workflowType,
+            WorkflowDefinitionId = Guid.NewGuid(), InitiatedById = Guid.NewGuid(),
+            Status = WorkflowInstanceStatus.InProgress
+        };
+        fixture.Invoice.WorkflowInstanceId = workflow.Id;
+        db.Add(workflow);
+        await db.SaveChangesAsync();
+        var currentUser = CreateCurrentUser(tenantId);
+        var sourceBookAuthority = new FinanceSourceBookAuthorityService(db, currentUser.Object);
+        var frozen = await sourceBookAuthority.FreezeInitialPrimaryAsync(
+            new FinanceSourceBookAuthorityFreezeRequest
+            {
+                OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                SourceDocumentType = "CustomerInvoice",
+                SourceDocumentId = fixture.Invoice.Id,
+                PostingAction = "Post",
+                EffectiveDate = fixture.Invoice.InvoiceDate.Date,
+                TransactionCurrencyCode = fixture.Invoice.CurrencyCode,
+                FreezeStage = FinanceSourceBookAuthorityFreezeStages.Submitted,
+                SourceWorkflowInstanceId = workflow.Id,
+                SourceWorkflowEntityType = "Invoice"
+            });
+        fixture.Invoice.SourceBookAuthorityId = frozen.AuthorityId;
+        workflow.Status = WorkflowInstanceStatus.Completed;
+        workflow.CompletedDate = DateTime.UtcNow;
+        AddCompletedWorkflowApproval(db, fixture.Invoice.TenantId, workflow, tenantId);
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId, sourceBookAuthority: sourceBookAuthority);
 
         var result = await service.SendInvoiceAsync(fixture.Invoice.Id);
 
         result.Status.Should().Be(nameof(InvoiceStatus.Sent));
         result.JournalEntryId.Should().NotBeNull();
+        var authority = await db.FinanceSourceBookAuthorities.SingleAsync(item => item.Id == frozen.AuthorityId);
+        authority.OriginModuleCode.Should().Be(FinanceModuleLockCatalog.Finance);
+        authority.OriginalJournalEntryId.Should().Be(result.JournalEntryId);
+        authority.OriginalFinancePostingEventId.Should().NotBeNull();
+        var postingEvent = await db.FinancePostingEvents.SingleAsync(item =>
+            item.Id == authority.OriginalFinancePostingEventId);
+        postingEvent.OriginModuleCode.Should().Be(FinanceModuleLockCatalog.Finance);
     }
 
     [Fact]
@@ -1180,6 +1222,29 @@ public sealed partial class ArInvoicePostingMigrationTests
             InitiatedById = Guid.NewGuid(), Status = WorkflowInstanceStatus.Completed, CompletedDate = DateTime.UtcNow };
         db.Add(instance);
         await db.SaveChangesAsync();
+    }
+
+    private static void AddCompletedWorkflowApproval(
+        ApplicationDbContext db,
+        Guid tenantId,
+        WorkflowInstance workflow,
+        Guid processorId)
+    {
+        var processedAt = workflow.CompletedDate ?? DateTime.UtcNow;
+        var step = new WorkflowStepInstance
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, WorkflowInstanceId = workflow.Id,
+            WorkflowStepId = Guid.NewGuid(), Status = WorkflowStepInstanceStatus.Completed,
+            CompletedDate = processedAt
+        };
+        db.WorkflowStepInstances.Add(step);
+        db.WorkflowApprovals.Add(new WorkflowApproval
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, StepInstanceId = step.Id,
+            ApproverId = processorId, Status = WorkflowApprovalStatus.Approved,
+            RequestedDate = processedAt.AddMinutes(-1), ProcessedDate = processedAt,
+            ProcessedById = processorId
+        });
     }
 
     [Fact]
