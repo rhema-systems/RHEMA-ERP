@@ -82,7 +82,7 @@
 | MPOS-0303 | Outstanding-invoice lookup | In progress - selected eligible customers use the canonical `IPaymentService` outstanding-invoice query through a `MobilePOS.Customer.View` protected endpoint; mobile balance view and focused tests pass; live AR/API evidence remains |
 | MPOS-0304 | Invoice preview/create/lifecycle adapter | Planned |
 | MPOS-0305 | Customer receipt and allocation adapter | Planned |
-| MPOS-0306 | Server idempotency registry | Planned |
+| MPOS-0306 | Server idempotency registry | In progress - server-computed command fingerprints, tenant/device/client-mutation uniqueness, atomic relational transaction locking, exact completed/rejected replay, mismatch conflicts, and focused tests implemented; live SQL concurrency and write-endpoint orchestration evidence remains |
 | MPOS-0307 | Canonical receipt projection | Planned |
 | MPOS-0308 | AR/GL/liquidity/audit/reconciliation tests | Planned |
 

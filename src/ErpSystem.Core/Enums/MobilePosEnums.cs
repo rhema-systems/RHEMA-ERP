@@ -32,3 +32,26 @@ public enum MobilePosOfflineGrantStatus
     Revoked = 3,
     Consumed = 4
 }
+
+public enum MobilePosSaleStatus
+{
+    Pending = 1,
+    Completed = 2,
+    Rejected = 3,
+    Reversed = 4
+}
+
+public enum MobilePosTenderStatus
+{
+    Pending = 1,
+    Completed = 2,
+    Rejected = 3,
+    Reversed = 4
+}
+
+public enum MobileMutationReceiptStatus
+{
+    Processing = 1,
+    Completed = 2,
+    Rejected = 3
+}

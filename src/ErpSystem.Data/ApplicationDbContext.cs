@@ -246,6 +246,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<MobilePosDevice> MobilePosDevices { get; set; }
     public DbSet<MobilePosDeviceAssignmentHistory> MobilePosDeviceAssignmentHistories { get; set; }
     public DbSet<MobilePosOfflineGrant> MobilePosOfflineGrants { get; set; }
+    public DbSet<MobilePosSale> MobilePosSales { get; set; }
+    public DbSet<MobilePosSaleLine> MobilePosSaleLines { get; set; }
+    public DbSet<MobilePosTender> MobilePosTenders { get; set; }
+    public DbSet<MobileMutationReceipt> MobileMutationReceipts { get; set; }
     public DbSet<CashierTillCountLine> CashierTillCountLines { get; set; }
     public DbSet<FinanceControlledDocumentIssue> FinanceControlledDocumentIssues { get; set; }
     public DbSet<BankDepositBatch> BankDepositBatches { get; set; }
@@ -1319,6 +1323,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new MobilePosDeviceConfiguration());
         builder.ApplyConfiguration(new MobilePosDeviceAssignmentHistoryConfiguration());
         builder.ApplyConfiguration(new MobilePosOfflineGrantConfiguration());
+        builder.ApplyConfiguration(new MobilePosSaleConfiguration());
+        builder.ApplyConfiguration(new MobilePosSaleLineConfiguration());
+        builder.ApplyConfiguration(new MobilePosTenderConfiguration());
+        builder.ApplyConfiguration(new MobileMutationReceiptConfiguration());
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyEnquiryProspectConfiguration());
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyProspectDepositPolicyConfiguration());
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.ProspectDepositReceiptConfiguration());

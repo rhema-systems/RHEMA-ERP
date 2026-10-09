@@ -148,6 +148,29 @@ public sealed class MobilePosFoundationTests
             && key.DeleteBehavior == DeleteBehavior.Restrict);
     }
 
+    [Fact]
+    public void TransactionModel_ShouldEnforceDeviceMutationSaleLineAndTenderIdentities()
+    {
+        using var db = CreateContext();
+
+        AssertUniqueFilteredIndex<MobileMutationReceipt>(db,
+            nameof(MobileMutationReceipt.TenantId),
+            nameof(MobileMutationReceipt.MobilePosDeviceId),
+            nameof(MobileMutationReceipt.ClientMutationId));
+        AssertUniqueFilteredIndex<MobilePosSale>(db,
+            nameof(MobilePosSale.TenantId),
+            nameof(MobilePosSale.MobilePosDeviceId),
+            nameof(MobilePosSale.ClientMutationId));
+        AssertUniqueFilteredIndex<MobilePosSaleLine>(db,
+            nameof(MobilePosSaleLine.TenantId),
+            nameof(MobilePosSaleLine.MobilePosSaleId),
+            nameof(MobilePosSaleLine.ClientLineId));
+        AssertUniqueFilteredIndex<MobilePosTender>(db,
+            nameof(MobilePosTender.TenantId),
+            nameof(MobilePosTender.MobilePosSaleId),
+            nameof(MobilePosTender.Sequence));
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

@@ -138,3 +138,111 @@ public sealed class MobilePosOfflineGrantConfiguration : IEntityTypeConfiguratio
             .HasForeignKey(item => item.MobilePosOfflinePolicyId).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public sealed class MobilePosSaleConfiguration : IEntityTypeConfiguration<MobilePosSale>
+{
+    public void Configure(EntityTypeBuilder<MobilePosSale> entity)
+    {
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosDeviceId, item.ClientMutationId })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosDeviceId, item.LocalReference })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosStoreId, item.BusinessDate, item.Status });
+        entity.HasIndex(item => new { item.TenantId, item.InvoiceId })
+            .IsUnique().HasFilter("[IsDeleted] = 0 AND [InvoiceId] IS NOT NULL");
+        entity.Property(item => item.CurrencyCode).IsUnicode(false);
+        entity.Property(item => item.OfflinePolicySnapshotHash).IsUnicode(false);
+
+        entity.HasOne(item => item.MobilePosStore).WithMany()
+            .HasForeignKey(item => item.MobilePosStoreId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosTill).WithMany()
+            .HasForeignKey(item => item.MobilePosTillId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.CashierTillSession).WithMany()
+            .HasForeignKey(item => item.CashierTillSessionId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosDevice).WithMany()
+            .HasForeignKey(item => item.MobilePosDeviceId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.OperatorUser).WithMany()
+            .HasForeignKey(item => item.OperatorUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.BusinessPartner).WithMany()
+            .HasForeignKey(item => item.BusinessPartnerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.BusinessPartnerRole).WithMany()
+            .HasForeignKey(item => item.BusinessPartnerRoleId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosOfflineGrant).WithMany()
+            .HasForeignKey(item => item.MobilePosOfflineGrantId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.Invoice).WithMany()
+            .HasForeignKey(item => item.InvoiceId).OnDelete(DeleteBehavior.Restrict);
+
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_MobilePosSales_Amounts",
+                "[SubTotal] >= 0 AND [TaxAmount] >= 0 AND [DiscountAmount] >= 0 AND [TotalAmount] >= 0");
+            table.HasCheckConstraint("CK_MobilePosSales_PolicyHash",
+                "[OfflinePolicySnapshotHash] IS NULL OR LEN([OfflinePolicySnapshotHash]) = 64");
+        });
+    }
+}
+
+public sealed class MobilePosSaleLineConfiguration : IEntityTypeConfiguration<MobilePosSaleLine>
+{
+    public void Configure(EntityTypeBuilder<MobilePosSaleLine> entity)
+    {
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosSaleId, item.Sequence })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosSaleId, item.ClientLineId })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasOne(item => item.MobilePosSale).WithMany(item => item.Lines)
+            .HasForeignKey(item => item.MobilePosSaleId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(item => item.InventoryItem).WithMany()
+            .HasForeignKey(item => item.InventoryItemId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.TaxGroup).WithMany()
+            .HasForeignKey(item => item.TaxGroupId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table => table.HasCheckConstraint("CK_MobilePosSaleLines_Values",
+            "[Sequence] > 0 AND [Quantity] > 0 AND [UnitPrice] >= 0 AND [DiscountAmount] >= 0 AND [TaxAmount] >= 0 AND [LineTotal] >= 0"));
+    }
+}
+
+public sealed class MobilePosTenderConfiguration : IEntityTypeConfiguration<MobilePosTender>
+{
+    public void Configure(EntityTypeBuilder<MobilePosTender> entity)
+    {
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosSaleId, item.Sequence })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.CustomerPaymentId })
+            .IsUnique().HasFilter("[IsDeleted] = 0 AND [CustomerPaymentId] IS NOT NULL");
+        entity.HasOne(item => item.MobilePosSale).WithMany(item => item.Tenders)
+            .HasForeignKey(item => item.MobilePosSaleId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(item => item.PaymentMethod).WithMany()
+            .HasForeignKey(item => item.PaymentMethodId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.LiquidityAccount).WithMany()
+            .HasForeignKey(item => item.LiquidityAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.BankAccount).WithMany()
+            .HasForeignKey(item => item.BankAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.CustomerPayment).WithMany()
+            .HasForeignKey(item => item.CustomerPaymentId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table => table.HasCheckConstraint("CK_MobilePosTenders_Amount", "[Amount] > 0"));
+    }
+}
+
+public sealed class MobileMutationReceiptConfiguration : IEntityTypeConfiguration<MobileMutationReceipt>
+{
+    public void Configure(EntityTypeBuilder<MobileMutationReceipt> entity)
+    {
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosDeviceId, item.ClientMutationId })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.Status, item.LastAttemptAtUtc });
+        entity.Property(item => item.RequestHash).IsUnicode(false);
+        entity.Property(item => item.ResultHash).IsUnicode(false);
+        entity.HasOne(item => item.MobilePosDevice).WithMany()
+            .HasForeignKey(item => item.MobilePosDeviceId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosSale).WithMany()
+            .HasForeignKey(item => item.MobilePosSaleId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.CanonicalInvoice).WithMany()
+            .HasForeignKey(item => item.CanonicalInvoiceId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_MobileMutationReceipts_Hashes",
+                "LEN([RequestHash]) = 64 AND ([ResultHash] IS NULL OR LEN([ResultHash]) = 64)");
+            table.HasCheckConstraint("CK_MobileMutationReceipts_SchemaVersion", "[SchemaVersion] > 0");
+        });
+    }
+}

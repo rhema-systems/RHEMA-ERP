@@ -4,7 +4,7 @@
 
 Audit the committed Flash ERP Android mobile application and the current RHEMA ERP Finance, AR, payment, till, security, tenant, location, and offline capabilities. Produce an implementation-ready architecture and phased delivery plan for the RHEMA Field POS and Revenue Collection mobile application. The plan must incorporate the management policies recorded in `C:\Users\USER\Desktop\Mobile app.docx`, including per-store default walk-in customers.
 
-The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. The Phase 3 read slice adds governed approved-customer search, automatic store default-customer resolution, and canonical outstanding-invoice lookup. The Phase 3 Finance-route milestone adds distinct compiled invoice and customer-payment producer routes, external-producer contracts, module-lock identity, and canonical AR guard/settlement support. It does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
+The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. The Phase 3 read slice adds governed approved-customer search, automatic store default-customer resolution, and canonical outstanding-invoice lookup. The Phase 3 Finance-route milestone adds distinct compiled invoice and customer-payment producer routes, external-producer contracts, module-lock identity, and canonical AR guard/settlement support. The current transaction-foundation milestone adds persisted sale, line, tender, and mutation-receipt source envelopes plus server-side idempotent command execution. It does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
 
 ## Branch and worktree
 
@@ -90,13 +90,23 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Added a `MOBILEPOS` Finance module-lock identity that resolves to the tenant's Sales module without coupling authorization to a fixed role name.
 - Extended the canonical AR invoice creation/approval boundary to accept the Mobile POS invoice route.
 - Extended the canonical AR customer-payment boundary to accept the Mobile POS payment route, use its trusted destination line, and derive settlement allocation dimensions from the paired Mobile POS invoice route.
-- This milestone establishes route identity and canonical service acceptance only. Mobile POS sale/tender persistence, server idempotency, invoice/payment command orchestration, and live producer-readiness certification remain outstanding.
+- This route milestone established route identity and canonical service acceptance only. The transaction foundation below now supplies sale/tender persistence and server idempotency; invoice/payment command orchestration and live producer-readiness certification remain outstanding.
+
+## Phase 3 transaction and idempotency foundation
+
+- Added tenant-scoped Mobile POS sale, immutable commercial line, and tender source envelopes with device, store, till, cashier-session, operator, customer, offline-grant, canonical invoice, canonical customer-payment, and split-tender sequence links.
+- Added a persisted mutation receipt keyed by tenant, device, and client mutation ID. The server serializes and hashes the command type, schema version, and command payload rather than trusting a client-supplied fingerprint.
+- Exact completed requests replay the stored result without invoking the handler again. Explicit business rejections are persisted and replayed. Reuse of a mutation key with a different command, schema, or payload is rejected as a conflict.
+- Relational execution uses the provider execution strategy, a serializable database transaction, and the existing transaction-lock boundary so the future invoice/payment handler can participate in the same atomic unit of work.
+- This milestone supplies the persistence and execution prerequisite. The public sale command, canonical invoice/payment orchestration, relational concurrency fixture, and live SQL/API evidence remain outstanding.
 
 ## Migrations and application state
 
 - Migration created: `20261009054618_AddMobilePosFoundation`.
 - Migration tables: stores, store dimension defaults, tills, till payment methods, user-store assignments, devices, device assignment histories, offline policies, and offline grants.
-- Migration was not applied to a database.
+- Migration created: `20261009114817_AddMobilePosTransactionFoundation`.
+- Transaction migration tables: Mobile POS sales, sale lines, tenders, and mutation receipts, including tenant/device idempotency identities and canonical Finance-document links.
+- Neither Mobile POS migration was applied to a database.
 - No production deployment, service restart, live device enrollment, or provider call was performed.
 
 ## Verification evidence
@@ -110,9 +120,12 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Full migration-aware API build passed with 0 errors; the build preserved 89 EF models and compiled the new migration metadata.
 - The Phase 3 read-slice API rebuild passed with 0 errors after the customer eligibility, read service, controller, and permission changes.
 - The Core and API Release builds passed with 0 errors after adding the Mobile POS Finance producer routes and AR integration guards.
+- The migration-aware API Release build passed with 0 errors after the transaction foundation; it preserved 90 full EF models and compiled 9,047 distinct statements across two lookup contexts.
 - Idempotent SQL generation from `20261008192833_AddPropertySalesOrderDepositLifecycle` to `20261009054618_AddMobilePosFoundation` passed. The 28,333-byte script contains nine `CREATE TABLE` statements and the expected stores, tills, devices, policies, and migration-history marker.
 - Eighteen focused Mobile POS API tests passed. Coverage includes authorization/model contracts, customer eligibility/default resolution, canonical outstanding-invoice delegation and ineligible-customer rejection, store/customer persistence, assignment replacement, device lifecycle, the offline-and-till permission pair, signed grant issuance and supersession, permission-filtered commands, tender filtering, bounded snapshots, token round-trip, tamper rejection, and expiry rejection.
 - Fifty-two focused Finance-route and Mobile POS API tests passed together, covering the new external contracts, module-lock mapping, invoice approval route, existing Mobile POS foundation, and customer/read behavior.
+- Twenty-two focused Mobile POS API tests passed after the transaction foundation. The new coverage proves exact success replay, changed-payload conflict without handler re-execution, persisted explicit rejection replay, and the sale/line/tender/mutation uniqueness contracts.
+- Idempotent SQL generation from `20261009054618_AddMobilePosFoundation` to `20261009114817_AddMobilePosTransactionFoundation` passed. The generated script contains exactly the four expected transaction tables and the new migration-history marker.
 - Frontend TypeScript check passed. Focused ESLint passed for the Mobile POS page/service and changed route/navigation/auth files.
 - Frontend administration/access tests passed: 27 tests across the route guard, Settings registry, and navigation access helper.
 - Frontend production build passed. The generated app manifest contains `/administration/mobile-pos/page`.
@@ -129,7 +142,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 
 ## Remaining work
 
-Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migration in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer and invoice read slice and producer-route readiness, then implement sale/tender persistence plus the canonical invoice, receipt/allocation, idempotency, receipt-projection, and reconciliation write orchestration. Offline grant consumption and aggregate-limit enforcement remain in Phase 5. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
+Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer and invoice read slice and producer-route readiness. Next, implement the public sale command and canonical invoice, receipt/allocation, receipt-projection, and reconciliation orchestration on the persisted transaction/idempotency foundation, with a SQL Server concurrency fixture. Offline grant consumption and aggregate-limit enforcement remain in Phase 5. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
 
 ## Authorization boundaries
 
