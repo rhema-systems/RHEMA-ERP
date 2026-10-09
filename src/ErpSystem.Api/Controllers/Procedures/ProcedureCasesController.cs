@@ -39,9 +39,24 @@ public sealed class ProcedureCasesController : ControllerBase
         [FromQuery] string? entityType,
         [FromQuery] bool mineOnly = false,
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10)
+        [FromQuery] int pageSize = 10,
+        [FromQuery] string? search = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? stage = null,
+        [FromQuery] string? requestType = null,
+        [FromQuery] string? workflowMode = null)
     {
-        var cases = await _procedureCaseService.GetCasesPageAsync(module, entityType, mineOnly, page, pageSize);
+        var cases = await _procedureCaseService.GetCasesPageAsync(
+            module,
+            entityType,
+            mineOnly,
+            page,
+            pageSize,
+            search,
+            status,
+            stage,
+            requestType,
+            workflowMode);
         return Ok(new { success = true, data = cases });
     }
 

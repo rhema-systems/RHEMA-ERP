@@ -8,6 +8,8 @@ export interface ProcedureCaseSummary {
   title: string;
   referenceNumber?: string | null;
   applicantName?: string | null;
+  submittedByName?: string | null;
+  submittedAt?: string | null;
   organizationLevelId?: string | null;
   organizationLevelName?: string | null;
   organizationUnitId?: string | null;
@@ -139,6 +141,14 @@ export interface PagedResult<T> {
   hasNext?: boolean;
 }
 
+export interface ProcedureCasePageFilters {
+  search?: string;
+  status?: string;
+  stage?: string;
+  requestType?: string;
+  workflowMode?: string;
+}
+
 interface CreateCasePayload {
   module: string;
   entityType: string;
@@ -194,7 +204,8 @@ class ProcedureCaseService {
     entityType: string,
     page = 1,
     pageSize = 10,
-    mineOnly = false
+    mineOnly = false,
+    filters: ProcedureCasePageFilters = {}
   ): Promise<PagedResult<ProcedureCaseSummary>> {
     const response = await apiService.get<ApiResponse<PagedResult<ProcedureCaseSummary>>>(
       '/procedure-cases/paged',
@@ -204,6 +215,7 @@ class ProcedureCaseService {
         page,
         pageSize,
         mineOnly,
+        ...filters,
       }
     );
 
