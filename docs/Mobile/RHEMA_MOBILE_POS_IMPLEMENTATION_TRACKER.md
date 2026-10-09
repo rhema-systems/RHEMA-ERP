@@ -90,7 +90,7 @@
 
 | ID | Work item | Status |
 | --- | --- | --- |
-| MPOS-0401 | Catalogue/service search and cache contract | In progress - the assigned store/device/till-scoped online search returns active sale-ready items with current price, UOM, tax group, and warehouse availability; offline change feed and device cache remain |
+| MPOS-0401 | Catalogue/service search and cache contract | In progress - online search plus a permission-protected resumable change feed return sale-ready upserts and tombstones for item and assigned-warehouse quantity changes; the scoped SQLite catalogue cache warms online and provides local network-failure search; physical Android persistence evidence remains |
 | MPOS-0402 | Camera/manual/keyboard-wedge scanner boundary | In progress - camera permission and barcode modal, normalized scan contract, manual/Enter-triggered catalogue input compatible with keyboard wedges, and a disposable test adapter are implemented; physical camera/wedge evidence and the Phase 7 ZCS adapter remain |
 | MPOS-0403 | Cart, pricing preview, tax display, discounts | In progress - mobile cart quantity controls, server-calculated subtotal/discount/tax/total, dynamic `MobilePOS.Discount.Apply` authorization, permission-gated line discount entry, and preview/final-sale server enforcement are implemented; offline preview remains |
 | MPOS-0404 | Tender UI and metadata rules | In progress - mobile checkout supports multiple till-mapped online tenders, amount reconciliation, required references, retry-stable mutation identity, and a searchable selector for active GL-mapped same-currency bank accounts within the operator's Finance scope; visible-device acceptance remains |
@@ -102,8 +102,8 @@
 
 | ID | Work item | Status |
 | --- | --- | --- |
-| MPOS-0501 | SQLite schema and migrations | Planned |
-| MPOS-0502 | Scoped catalogue/customer/config cache | Planned |
+| MPOS-0501 | SQLite schema and migrations | In progress - versioned Expo SQLite migration creates scoped catalogue, customer, tender, receipt, cursor, and outbox tables with WAL, foreign keys, and no tokens or signing secrets; Android install/upgrade persistence evidence remains |
+| MPOS-0502 | Scoped catalogue/customer/config cache | In progress - catalogue changes are isolated by tenant/user/device/store/till, cursor-resumable, transactionally applied, and locally searchable; approved-customer and configuration cache population remain |
 | MPOS-0503 | Transactional outbox | Planned |
 | MPOS-0504 | Signed offline-grant enforcement | Planned |
 | MPOS-0505 | Idempotent sync push/pull | Planned |

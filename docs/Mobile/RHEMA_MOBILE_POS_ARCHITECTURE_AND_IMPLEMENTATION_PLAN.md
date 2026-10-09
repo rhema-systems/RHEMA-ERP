@@ -415,6 +415,8 @@ SQLite contains:
 
 PII is minimized. Tokens and signing secrets never enter SQLite. SQLCipher feasibility is evaluated during Phase 2 prebuild work; its adoption must be proven compatible with Expo SDK and required native hardware modules.
 
+The implemented version-1 Expo SQLite schema uses WAL, foreign keys, explicit migrations, and a tenant/user/device/store/till scope key. Catalogue synchronization stores a durable page cursor after every transaction, resumes interrupted snapshots, applies inactive/deleted items as tombstones, and advances the server watermark only after the final page. Item-master and assigned-warehouse quantity changes both feed the cache. Online catalogue search remains authoritative; network failures may fall back to the latest scoped local projection with an explicit offline notice.
+
 ### Outbox state machine
 
 `DraftLocal -> Pending -> Syncing -> Synced`
