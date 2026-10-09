@@ -722,7 +722,12 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             cancellationToken);
         var permissionSet = authorizedPermissions.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var canCashSale = policy.AllowCashSale && HasPermissions(permissionSet,
-            MobilePosPermissions.CreateInvoice, MobilePosPermissions.PostInvoice, MobilePosPermissions.CollectPayment);
+            MobilePosPermissions.CreateInvoice,
+            MobilePosPermissions.PostInvoice,
+            MobilePosPermissions.CollectPayment,
+            FinancePermissions.CreateArInvoices,
+            FinancePermissions.ApprovePostArInvoices,
+            FinancePermissions.ReceiveCustomerPayments);
         var canCashReceipt = policy.AllowCashReceipt && permissionSet.Contains(MobilePosPermissions.CollectPayment);
         var canPartialPayment = policy.AllowPartialPayment && canCashReceipt;
         var canReturn = policy.AllowReturns && permissionSet.Contains(MobilePosPermissions.CreateReturn);
@@ -778,6 +783,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             MaximumTransactionCount = policy.MaximumTransactionCount,
             MaximumOfflineAgeMinutes = policy.MaximumOfflineAgeMinutes,
             AllowPartialPayment = canPartialPayment,
+            AllowDiscounts = permissionSet.Contains(MobilePosPermissions.ApplyDiscount),
             AllowProvisionalReceipt = policy.AllowProvisionalReceipt && (canCashSale || canCashReceipt),
             AllowDayEndSubmissionWithPendingSync = canPendingDayEnd,
             AllowedCommandTypes = allowedCommands,

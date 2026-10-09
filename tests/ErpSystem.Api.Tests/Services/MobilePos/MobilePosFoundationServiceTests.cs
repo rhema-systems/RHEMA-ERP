@@ -284,7 +284,10 @@ public sealed class MobilePosFoundationServiceTests
         {
             MobilePosPermissions.CreateInvoice,
             MobilePosPermissions.PostInvoice,
-            MobilePosPermissions.CollectPayment
+            MobilePosPermissions.CollectPayment,
+            FinancePermissions.CreateArInvoices,
+            FinancePermissions.ApprovePostArInvoices,
+            FinancePermissions.ReceiveCustomerPayments
         };
         var first = await fixture.Service.IssueOfflineGrantAsync(
             new MobilePosOfflineGrantRequestDto { InstallationId = installationId },

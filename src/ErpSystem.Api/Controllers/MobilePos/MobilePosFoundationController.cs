@@ -18,6 +18,7 @@ public sealed class MobilePosRuntimeController : ControllerBase
     private readonly IMobilePosFinanceReadService _financeReads;
     private readonly IMobilePosCheckoutReadService _checkout;
     private readonly IMobilePosSaleService _sales;
+    private readonly IMobilePosSyncService _sync;
     private readonly IMobilePosReceiptService _receipts;
 
     public MobilePosRuntimeController(
@@ -26,6 +27,7 @@ public sealed class MobilePosRuntimeController : ControllerBase
         IMobilePosFinanceReadService financeReads,
         IMobilePosCheckoutReadService checkout,
         IMobilePosSaleService sales,
+        IMobilePosSyncService sync,
         IMobilePosReceiptService receipts)
     {
         _service = service;
@@ -33,6 +35,7 @@ public sealed class MobilePosRuntimeController : ControllerBase
         _financeReads = financeReads;
         _checkout = checkout;
         _sales = sales;
+        _sync = sync;
         _receipts = receipts;
     }
 
@@ -69,9 +72,13 @@ public sealed class MobilePosRuntimeController : ControllerBase
             MobilePosPermissions.CreateInvoice,
             MobilePosPermissions.PostInvoice,
             MobilePosPermissions.CollectPayment,
+            MobilePosPermissions.ApplyDiscount,
             MobilePosPermissions.CreateReturn,
             MobilePosPermissions.CreateReversal,
-            MobilePosPermissions.CloseTill
+            MobilePosPermissions.CloseTill,
+            FinancePermissions.CreateArInvoices,
+            FinancePermissions.ApprovePostArInvoices,
+            FinancePermissions.ReceiveCustomerPayments
         };
         var authorizedPermissions = new List<string>();
         foreach (var permission in candidatePermissions)
@@ -195,6 +202,14 @@ public sealed class MobilePosRuntimeController : ControllerBase
             return RejectedSale(exception, "Mobile POS sale rejected");
         }
     }
+
+    [HttpPost("sync/push")]
+    [Authorize(Policy = MobilePosPermissions.UseOffline)]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    public async Task<ActionResult<MobilePosSyncPushResultDto>> PushOfflineCommand(
+        [FromBody] MobilePosSyncPushRequestDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _sync.PushAsync(dto, cancellationToken));
 
     [HttpGet("receipts/{id:guid}")]
     [Authorize(Policy = MobilePosPermissions.Access)]

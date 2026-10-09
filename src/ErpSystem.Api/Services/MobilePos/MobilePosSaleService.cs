@@ -19,6 +19,11 @@ public interface IMobilePosSaleService
     Task<MobilePosSaleResultDto> CompleteAsync(
         MobilePosCompleteSaleRequestDto request,
         CancellationToken cancellationToken);
+
+    Task<MobilePosSaleResultDto> CompleteOfflineAsync(
+        MobilePosCompleteSaleRequestDto request,
+        MobilePosOfflineGrantAuthorization authorization,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -29,6 +34,7 @@ public interface IMobilePosSaleService
 public sealed class MobilePosSaleService : IMobilePosSaleService
 {
     private const string CommandType = "MobilePos.CompleteSale";
+    private const string OfflineCommandType = "CashSale";
     private const int SchemaVersion = 1;
     private static readonly FinancePostingProducerContext InvoiceProducer =
         FinanceExternalProducerContractCatalog.GetRequired(
@@ -85,13 +91,56 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         if (!bootstrap.CurrentTillSessionId.HasValue)
             throw Reject("MOBILE_POS_TILL_SESSION_REQUIRED", "Open your assigned till session before completing a sale.");
 
+        var context = new SaleExecutionContext(
+            bootstrap.Device.Id,
+            bootstrap.Store.Id,
+            bootstrap.Till.Id,
+            bootstrap.CurrentTillSessionId.Value,
+            false,
+            null,
+            null,
+            false);
+
         var execution = await _mutations.ExecuteAsync<MobilePosCompleteSaleRequestDto, MobilePosSaleResultDto>(
             bootstrap.Device.Id,
             request.ClientMutationId,
             CommandType,
             SchemaVersion,
             request,
-            token => CompleteCoreAsync(bootstrap, request, token),
+            token => CompleteCoreAsync(context, request, token),
+            cancellationToken);
+        execution.Result.MutationReceiptId = execution.ReceiptId;
+        execution.Result.IsReplay = execution.IsReplay;
+        return execution.Result;
+    }
+
+    public async Task<MobilePosSaleResultDto> CompleteOfflineAsync(
+        MobilePosCompleteSaleRequestDto request,
+        MobilePosOfflineGrantAuthorization authorization,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(authorization);
+        if (!request.OccurredAtUtc.HasValue)
+            throw Reject("MOBILE_POS_OFFLINE_OCCURRED_AT_REQUIRED", "An offline sale must retain the time recorded on the device.");
+
+        var grant = authorization.Grant;
+        var context = new SaleExecutionContext(
+            grant.MobilePosDeviceId,
+            grant.MobilePosStoreId,
+            grant.MobilePosTillId,
+            grant.CashierTillSessionId,
+            true,
+            grant.Id,
+            grant.PolicySnapshotHash,
+            authorization.Policy.AllowDiscounts);
+        var execution = await _mutations.ExecuteAsync<MobilePosCompleteSaleRequestDto, MobilePosSaleResultDto>(
+            grant.MobilePosDeviceId,
+            request.ClientMutationId,
+            OfflineCommandType,
+            SchemaVersion,
+            request,
+            token => CompleteCoreAsync(context, request, token),
             cancellationToken);
         execution.Result.MutationReceiptId = execution.ReceiptId;
         execution.Result.IsReplay = execution.IsReplay;
@@ -99,13 +148,15 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
     }
 
     private async Task<MobilePosMutationCompletion<MobilePosSaleResultDto>> CompleteCoreAsync(
-        MobilePosBootstrapDto bootstrap,
+        SaleExecutionContext context,
         MobilePosCompleteSaleRequestDto request,
         CancellationToken cancellationToken)
     {
         ValidateRequest(request);
         if (request.Lines.Any(line => line.DiscountPercentage > 0m)
-            && !await HasPermissionAsync(MobilePosPermissions.ApplyDiscount, cancellationToken))
+            && !(context.RecordedOffline
+                ? context.AllowDiscounts
+                : await HasPermissionAsync(MobilePosPermissions.ApplyDiscount, cancellationToken)))
         {
             throw Reject("MOBILE_POS_DISCOUNT_NOT_AUTHORIZED", "Your role is not authorized to apply Mobile POS discounts.");
         }
@@ -115,23 +166,26 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         var localReference = Required(request.LocalReference, 100, "local reference");
 
         var device = await _db.MobilePosDevices.SingleOrDefaultAsync(item =>
-            item.TenantId == tenantId && item.Id == bootstrap.Device.Id && !item.IsDeleted,
+            item.TenantId == tenantId && item.Id == context.DeviceId && !item.IsDeleted,
             cancellationToken) ?? throw Reject("MOBILE_POS_DEVICE_NOT_FOUND", "The enrolled device was not found.");
         if (device.Status != MobilePosDeviceStatus.Active
-            || device.MobilePosStoreId != bootstrap.Store.Id
-            || device.MobilePosTillId != bootstrap.Till.Id)
+            || device.MobilePosStoreId != context.StoreId
+            || device.MobilePosTillId != context.TillId)
         {
             throw Reject("MOBILE_POS_DEVICE_ASSIGNMENT_CHANGED", "The device assignment changed. Refresh Mobile POS before retrying.");
         }
 
-        var assignmentActive = await _db.MobilePosUserStoreAssignments.AnyAsync(item =>
-            item.TenantId == tenantId && item.UserId == userId && item.IsActive && !item.IsDeleted
-            && item.MobilePosStoreId == bootstrap.Store.Id
-            && item.EffectiveFromUtc <= now
-            && (!item.EffectiveToUtc.HasValue || item.EffectiveToUtc > now),
-            cancellationToken);
-        if (!assignmentActive)
-            throw Reject("MOBILE_POS_STORE_ASSIGNMENT_EXPIRED", "Your Mobile POS store assignment is no longer active.");
+        if (!context.RecordedOffline)
+        {
+            var assignmentActive = await _db.MobilePosUserStoreAssignments.AnyAsync(item =>
+                item.TenantId == tenantId && item.UserId == userId && item.IsActive && !item.IsDeleted
+                && item.MobilePosStoreId == context.StoreId
+                && item.EffectiveFromUtc <= now
+                && (!item.EffectiveToUtc.HasValue || item.EffectiveToUtc > now),
+                cancellationToken);
+            if (!assignmentActive)
+                throw Reject("MOBILE_POS_STORE_ASSIGNMENT_EXPIRED", "Your Mobile POS store assignment is no longer active.");
+        }
 
         var store = await _db.MobilePosStores
             .Include(item => item.DimensionDefaults)
@@ -139,32 +193,43 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
             .Include(item => item.DimensionDefaults)
                 .ThenInclude(item => item.FinanceDimensionValue)
             .SingleOrDefaultAsync(item => item.TenantId == tenantId
-                && item.Id == bootstrap.Store.Id && !item.IsDeleted,
+                && item.Id == context.StoreId && !item.IsDeleted,
                 cancellationToken) ?? throw Reject("MOBILE_POS_STORE_NOT_FOUND", "The assigned Mobile POS store was not found.");
         var till = await _db.MobilePosTills.SingleOrDefaultAsync(item =>
-            item.TenantId == tenantId && item.Id == bootstrap.Till.Id
+            item.TenantId == tenantId && item.Id == context.TillId
             && item.MobilePosStoreId == store.Id && !item.IsDeleted,
             cancellationToken) ?? throw Reject("MOBILE_POS_TILL_NOT_FOUND", "The assigned Mobile POS till was not found.");
         if (store.Status != MobilePosStoreStatus.Active || till.Status != MobilePosTillStatus.Active)
             throw Reject("MOBILE_POS_STORE_OR_TILL_INACTIVE", "The assigned store or till is no longer active.");
 
-        var sessionId = bootstrap.CurrentTillSessionId!.Value;
+        var sessionId = context.TillSessionId;
         var session = await _db.CashierTillSessions.SingleOrDefaultAsync(item =>
             item.TenantId == tenantId && item.Id == sessionId && !item.IsDeleted,
             cancellationToken) ?? throw Reject("MOBILE_POS_TILL_SESSION_NOT_FOUND", "The till session was not found.");
-        if (session.Status != CashierTillSessionStatus.Open
+        var allowedSessionState = session.Status == CashierTillSessionStatus.Open
+            || (context.RecordedOffline && session.Status == CashierTillSessionStatus.PendingReview);
+        if (!allowedSessionState
             || session.CashierUserId != userId
             || session.LiquidityAccountId != till.LiquidityAccountId)
         {
             throw Reject("MOBILE_POS_TILL_SESSION_CHANGED", "The till session is no longer open for this operator and till.");
         }
 
-        var allowedTenders = await _db.MobilePosTillPaymentMethods.AsNoTracking()
+        var tenderQuery = _db.MobilePosTillPaymentMethods.AsNoTracking()
             .Where(mapping => mapping.TenantId == tenantId && mapping.MobilePosTillId == till.Id
-                && mapping.AllowOnline && !mapping.IsDeleted && mapping.PaymentMethod.IsActive)
+                && !mapping.IsDeleted && mapping.PaymentMethod.IsActive);
+        tenderQuery = context.RecordedOffline
+            ? tenderQuery.Where(mapping => mapping.AllowOffline)
+            : tenderQuery.Where(mapping => mapping.AllowOnline);
+        var allowedTenders = await tenderQuery
             .Include(mapping => mapping.PaymentMethod)
             .ToDictionaryAsync(mapping => mapping.PaymentMethodId, cancellationToken);
-        await ValidateTendersAsync(request.Tenders, allowedTenders, store.CurrencyCode, cancellationToken);
+        await ValidateTendersAsync(
+            request.Tenders,
+            allowedTenders,
+            store.CurrencyCode,
+            context.RecordedOffline,
+            cancellationToken);
 
         var selectedPartnerId = request.BusinessPartnerId ?? store.DefaultWalkInBusinessPartnerId;
         var selectedRoleId = request.BusinessPartnerRoleId ?? store.DefaultWalkInBusinessPartnerRoleId;
@@ -335,6 +400,8 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
             DiscountAmount = canonicalDiscount,
             TotalAmount = invoice.TotalAmount,
             Status = MobilePosSaleStatus.Completed,
+            MobilePosOfflineGrantId = context.OfflineGrantId,
+            OfflinePolicySnapshotHash = context.OfflinePolicySnapshotHash,
             InvoiceId = invoice.Id,
             InvoiceNumber = invoice.InvoiceNumber,
             SynchronizedAtUtc = now,
@@ -385,7 +452,7 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
                 PaymentNumber = result.payment.PaymentNumber,
                 ProviderReference = Clean(input.ExternalReference),
                 ProviderStatus = result.payment.Status,
-                WasRecordedOffline = false,
+                WasRecordedOffline = context.RecordedOffline,
                 Status = MobilePosTenderStatus.Completed,
                 CreatedAt = now,
                 CreatedBy = UserName,
@@ -429,11 +496,14 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         IReadOnlyList<MobilePosTenderInputDto> tenders,
         IReadOnlyDictionary<Guid, MobilePosTillPaymentMethod> allowedTenders,
         string currencyCode,
+        bool recordedOffline,
         CancellationToken cancellationToken)
     {
         var requestedMethodIds = tenders.Select(tender => tender.PaymentMethodId).Distinct().ToArray();
         if (requestedMethodIds.Any(id => !allowedTenders.ContainsKey(id)))
-            throw Reject("MOBILE_POS_TENDER_NOT_ALLOWED", "One or more tender methods are not active and enabled for online use at this till.");
+            throw Reject(
+                "MOBILE_POS_TENDER_NOT_ALLOWED",
+                $"One or more tender methods are not active and enabled for {(recordedOffline ? "offline" : "online")} use at this till.");
 
         foreach (var tender in tenders)
         {
@@ -562,4 +632,14 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static MobilePosCommandRejectedException Reject(string code, string detail) => new(code, detail);
+
+    private sealed record SaleExecutionContext(
+        Guid DeviceId,
+        Guid StoreId,
+        Guid TillId,
+        Guid TillSessionId,
+        bool RecordedOffline,
+        Guid? OfflineGrantId,
+        string? OfflinePolicySnapshotHash,
+        bool AllowDiscounts);
 }

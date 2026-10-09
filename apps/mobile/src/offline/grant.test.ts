@@ -75,6 +75,7 @@ const grant: MobilePosOfflineGrant = {
     defaultWalkInBusinessPartnerRoleId: "role-1",
     maximumOfflineAgeMinutes: 240,
     allowPartialPayment: false,
+    allowDiscounts: false,
     allowProvisionalReceipt: true,
     allowDayEndSubmissionWithPendingSync: false,
     allowedCommandTypes: ["CashSale", "CashReceipt"],

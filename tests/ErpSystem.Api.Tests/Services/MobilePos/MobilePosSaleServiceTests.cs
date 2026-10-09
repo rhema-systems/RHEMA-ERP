@@ -134,6 +134,49 @@ public sealed class MobilePosSaleServiceTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task CompleteOfflineAsync_ShouldUseTheSignedContextAndPersistOfflineEvidenceDuringPendingReview()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var device = await fixture.Db.MobilePosDevices.SingleAsync();
+        var store = await fixture.Db.MobilePosStores.SingleAsync();
+        var till = await fixture.Db.MobilePosTills.SingleAsync();
+        var session = await fixture.Db.CashierTillSessions.SingleAsync();
+        session.Status = CashierTillSessionStatus.PendingReview;
+        foreach (var mapping in await fixture.Db.MobilePosTillPaymentMethods.ToListAsync())
+            mapping.AllowOffline = true;
+        await fixture.Db.SaveChangesAsync();
+        var grantId = Guid.NewGuid();
+        var authorization = new MobilePosOfflineGrantAuthorization(
+            new MobilePosOfflineGrant
+            {
+                Id = grantId,
+                TenantId = store.TenantId,
+                MobilePosDeviceId = device.Id,
+                MobilePosStoreId = store.Id,
+                MobilePosTillId = till.Id,
+                CashierTillSessionId = session.Id,
+                PolicySnapshotHash = new string('A', 64)
+            },
+            new MobilePosOfflineGrantPolicySnapshotDto
+            {
+                AllowedCommandTypes = ["CashSale"],
+                AllowDiscounts = false
+            });
+        var request = fixture.ValidRequest();
+        request.OccurredAtUtc = DateTime.UtcNow.AddMinutes(-5);
+
+        var result = await fixture.Service.CompleteOfflineAsync(request, authorization, CancellationToken.None);
+
+        result.IsReplay.Should().BeFalse();
+        var sale = await fixture.Db.MobilePosSales.Include(item => item.Tenders).SingleAsync();
+        sale.MobilePosOfflineGrantId.Should().Be(grantId);
+        sale.OfflinePolicySnapshotHash.Should().Be(new string('A', 64));
+        sale.SynchronizedAtUtc.Should().NotBeNull();
+        sale.Tenders.Should().OnlyContain(tender => tender.WasRecordedOffline);
+        (await fixture.Db.MobileMutationReceipts.SingleAsync()).CommandType.Should().Be("CashSale");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly Guid _itemId;
@@ -323,12 +366,14 @@ public sealed class MobilePosSaleServiceTests
                 new MobilePosTillPaymentMethod
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, MobilePosTillId = tillId,
-                    PaymentMethodId = firstMethodId, PaymentMethod = firstMethod, AllowOnline = true
+                    PaymentMethodId = firstMethodId, PaymentMethod = firstMethod, AllowOnline = true,
+                    AllowOffline = true
                 },
                 new MobilePosTillPaymentMethod
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, MobilePosTillId = tillId,
-                    PaymentMethodId = secondMethodId, PaymentMethod = secondMethod, AllowOnline = true
+                    PaymentMethodId = secondMethodId, PaymentMethod = secondMethod, AllowOnline = true,
+                    AllowOffline = true
                 });
             if (grantDiscountPermission)
             {

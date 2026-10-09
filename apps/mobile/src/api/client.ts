@@ -20,6 +20,8 @@ import type {
   MobilePosSalePreview,
   MobilePosSalePreviewRequest,
   MobilePosSaleResult,
+  MobilePosSyncPushRequest,
+  MobilePosSyncPushResult,
   MobilePosReceipt,
   MobilePosReceiptReprintRequest,
   OutstandingInvoice,
@@ -204,6 +206,10 @@ export const mobileApi = {
   ),
   completeSale: (request: MobilePosCompleteSaleRequest) => authorizedRequest<MobilePosSaleResult>(
     "/api/mobile-pos/v1/sales",
+    { method: "POST", body: JSON.stringify(request) },
+  ),
+  pushOfflineCommand: (request: MobilePosSyncPushRequest) => authorizedRequest<MobilePosSyncPushResult>(
+    "/api/mobile-pos/v1/sync/push",
     { method: "POST", body: JSON.stringify(request) },
   ),
   getReceipt: (saleId: string, installationId: string) => authorizedRequest<MobilePosReceipt>(

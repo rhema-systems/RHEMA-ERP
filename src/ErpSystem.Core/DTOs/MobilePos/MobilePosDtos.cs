@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.MobilePos;
@@ -308,10 +309,48 @@ public sealed class MobilePosOfflineGrantPolicySnapshotDto
     public int? MaximumTransactionCount { get; set; }
     public int MaximumOfflineAgeMinutes { get; set; }
     public bool AllowPartialPayment { get; set; }
+    public bool AllowDiscounts { get; set; }
     public bool AllowProvisionalReceipt { get; set; }
     public bool AllowDayEndSubmissionWithPendingSync { get; set; }
     public IReadOnlyList<string> AllowedCommandTypes { get; set; } = [];
     public IReadOnlyList<MobilePosOfflinePaymentMethodSnapshotDto> AllowedPaymentMethods { get; set; } = [];
+}
+
+public sealed class MobilePosSyncPushRequestDto
+{
+    [Required]
+    public string OfflineGrantToken { get; set; } = string.Empty;
+
+    public Guid OfflineGrantId { get; set; }
+    public Guid DeviceId { get; set; }
+    public Guid StoreId { get; set; }
+    public Guid TillId { get; set; }
+    public Guid TillSessionId { get; set; }
+
+    [Required, MaxLength(100)]
+    public string ClientMutationId { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string LocalReference { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string CommandType { get; set; } = string.Empty;
+
+    public int SchemaVersion { get; set; }
+
+    [Required, StringLength(64, MinimumLength = 64)]
+    public string PayloadHash { get; set; } = string.Empty;
+
+    public JsonElement Payload { get; set; }
+}
+
+public sealed class MobilePosSyncPushResultDto
+{
+    public string State { get; set; } = string.Empty;
+    public string ClientMutationId { get; set; } = string.Empty;
+    public MobilePosSaleResultDto? Sale { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? ErrorDetail { get; set; }
 }
 
 public sealed class MobilePosOfflineGrantDto

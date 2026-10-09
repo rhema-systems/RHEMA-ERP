@@ -176,6 +176,7 @@ export interface MobilePosOfflineGrantPolicySnapshot {
   maximumTransactionCount?: number;
   maximumOfflineAgeMinutes: number;
   allowPartialPayment: boolean;
+  allowDiscounts: boolean;
   allowProvisionalReceipt: boolean;
   allowDayEndSubmissionWithPendingSync: boolean;
   allowedCommandTypes: string[];
@@ -382,6 +383,29 @@ export interface MobilePosSaleResult {
   discountAmount: number;
   totalAmount: number;
   tenders: MobilePosSaleTenderResult[];
+}
+
+export interface MobilePosSyncPushRequest {
+  offlineGrantToken: string;
+  offlineGrantId: string;
+  deviceId: string;
+  storeId: string;
+  tillId: string;
+  tillSessionId: string;
+  clientMutationId: string;
+  localReference: string;
+  commandType: string;
+  schemaVersion: number;
+  payloadHash: string;
+  payload: unknown;
+}
+
+export interface MobilePosSyncPushResult {
+  state: "Synced" | "Rejected" | "Conflict";
+  clientMutationId: string;
+  sale?: MobilePosSaleResult;
+  errorCode?: string;
+  errorDetail?: string;
 }
 
 export interface MobilePosReceiptReprintRequest {
