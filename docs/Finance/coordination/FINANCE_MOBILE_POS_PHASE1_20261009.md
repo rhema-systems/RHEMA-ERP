@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `c4fd481ab8f6b80d294be80e86d643e76f834377`
+- Current implementation checkpoint: `201506dd3d1dc784336cd6983a56354233b3b9ea`
 - Pull request: not created
 
 ## Source baselines
@@ -72,6 +72,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `31399b06bd9` - Canonical Mobile POS receipt projection, assigned-store access boundary, permission-gated idempotent reprint audit, mobile receipt UI, and focused tests.
 - `e8967f404f4` - Safe receipt HTML renderer, retained PDF output, Android system print and native sharing fallback, tests, and Expo dependencies.
 - `c4fd481ab8f` - Camera/manual/keyboard-wedge scanning boundary, barcode normalization contract, catalogue integration, tests, and Expo Camera dependency.
+- `201506dd3d1` - Dynamic Mobile POS discount permission, preview/final-sale enforcement, permission-gated mobile line entry, and focused tests.
 
 ## Phase 2 application foundation
 
@@ -145,6 +146,8 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Management supplied `SmartPos_1.8.1_R231213_SDK.zip`; its SHA-256 is `8A5A259076030F17DFA629F413968B67CEBA55B02EA8B2018BF67F1B0C26AF66` and it contains 160 entries.
 - The package documents `DriverManager`/`Sys` initialization, built-in `Printer` operations, and direct `HQrsanner` scanning for the Z90/Z91/Z92/Z100 family. Its SmartPos JAR and ARM64/ARMv7 JNI hashes are recorded in the architecture report and tracker.
 - No licence, notice, or redistribution terms were detected. The vendor demo targets Android 26 while RHEMA targets Android 35. The native adapter remains scheduled for Phase 7 after Phase 4 through Phase 6; signed distribution and device claims require written redistribution approval and physical Z92S Android 14 evidence.
+- Added `MobilePOS.Discount.Apply` to the dynamic permission catalogue. Positive line discounts are rejected by both server preview and final sale orchestration unless the current user's assigned role has that permission; no sales role name is hardcoded.
+- The mobile line discount control is only rendered for authorized users. Every discount edit invalidates the earlier server preview and tender state, requiring canonical Finance recalculation before checkout.
 
 ## Migrations and application state
 
@@ -184,6 +187,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The API Release compilation completed with zero errors for the receipt service/controller/DTO/DI changes. Existing repository warnings and ImageSharp advisories remained warnings.
 - Expo Doctor is installed as a reproducible development dependency and passed 18/18 checks. Android bundle export passed again after adding the supported Expo file-system, print, and sharing modules, generating the Hermes bundle and metadata under the ignored `apps/mobile/dist/android` output.
 - The Phase 4 scanner change passed the Expo TypeScript check and all 33 mobile tests, including normalization, empty/oversized scan rejection, and disposable adapter behavior. Expo Doctor passed 18/18 and the Android Hermes bundle export passed with the camera module included.
+- The discount authorization slice passed the Release Mobile POS API test filter with 34/34 tests, including unauthorized preview and final-sale rejection before tax/invoice creation. The API, Core, Data, and test projects compiled with zero errors; existing repository warnings and ImageSharp advisories remained warnings. The Expo TypeScript check and all 33 mobile tests also passed.
 - The supplied ZCS archive hash, entry count, JAR/JNI hashes, documented public printer/scanner APIs, ABIs, sample target, and absence of detected licence files were checked read-only. No vendor binary was added to the application at this stage.
 
 ## Known failures and constraints

@@ -495,6 +495,7 @@ Proposed permissions:
 | `MobilePOS.Invoice.Create` | Create mobile invoices/sales |
 | `MobilePOS.Invoice.Post` | Authorize immediate mobile posting where policy allows |
 | `MobilePOS.Payment.Collect` | Create and allocate customer receipts |
+| `MobilePOS.Discount.Apply` | Apply a line discount during Mobile POS checkout |
 | `MobilePOS.Receipt.Reprint` | Reprint existing receipt |
 | `MobilePOS.Return.Create` | Initiate a return/credit workflow |
 | `MobilePOS.Reversal.Create` | Initiate a controlled reversal |
