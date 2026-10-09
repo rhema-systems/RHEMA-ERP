@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `201506dd3d1dc784336cd6983a56354233b3b9ea`
+- Current implementation checkpoint: `a8978d2664febbe293263eb4ea3c17f90bb1570f`
 - Pull request: not created
 
 ## Source baselines
@@ -73,6 +73,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `e8967f404f4` - Safe receipt HTML renderer, retained PDF output, Android system print and native sharing fallback, tests, and Expo dependencies.
 - `c4fd481ab8f` - Camera/manual/keyboard-wedge scanning boundary, barcode normalization contract, catalogue integration, tests, and Expo Camera dependency.
 - `201506dd3d1` - Dynamic Mobile POS discount permission, preview/final-sale enforcement, permission-gated mobile line entry, and focused tests.
+- `a8978d2664f` - Governed bank-account lookup, searchable tender destination selection, canonical validation, Finance scope enforcement, and focused tests.
 
 ## Phase 2 application foundation
 
@@ -126,7 +127,9 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Added the native mobile sale route with approved-customer override, governed catalogue search, cart quantity controls, canonical server preview, multiple till-mapped tenders, required-reference checks, exact tender-total reconciliation, and atomic completion.
 - Completion derives commercial fields from the latest server preview and retains one client mutation ID/local reference across network retries. A changed cart, customer, preview, or tender set invalidates that pending identity.
 - The success state displays the canonical invoice and payment identifiers returned by the server and then loads the canonical receipt projection described below. Printer output remains separate work.
-- Bank-account selection for payment methods that require a bank account is deliberately blocked with an explicit message until the governed account lookup/selection contract exists.
+- Bank-required payment methods now load a searchable list of active, non-deleted, GL-mapped accounts in the store currency and the current user's Finance operating scope. The mobile client receives the account name, bank, currency, and a masked number only.
+- Completion revalidates the selected account inside the sale transaction before invoice creation. It rejects a missing account, an account on a method that does not permit one, conflicting bank/liquidity destinations, tenant/currency/status/GL failures, and accounts outside the operator's current Finance scope.
+- The validated bank account is passed to the existing canonical `IPaymentService`; no Mobile POS-specific bank ledger or direct posting path was added.
 
 ## Phase 3 canonical receipt and Phase 4 receipt/reprint slice
 
@@ -188,6 +191,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Expo Doctor is installed as a reproducible development dependency and passed 18/18 checks. Android bundle export passed again after adding the supported Expo file-system, print, and sharing modules, generating the Hermes bundle and metadata under the ignored `apps/mobile/dist/android` output.
 - The Phase 4 scanner change passed the Expo TypeScript check and all 33 mobile tests, including normalization, empty/oversized scan rejection, and disposable adapter behavior. Expo Doctor passed 18/18 and the Android Hermes bundle export passed with the camera module included.
 - The discount authorization slice passed the Release Mobile POS API test filter with 34/34 tests, including unauthorized preview and final-sale rejection before tax/invoice creation. The API, Core, Data, and test projects compiled with zero errors; existing repository warnings and ImageSharp advisories remained warnings. The Expo TypeScript check and all 33 mobile tests also passed.
+- The governed bank-tender slice passed the Release Mobile POS API test filter with 24/24 tests after a fresh API/test build. Coverage includes Finance operating-scope filtering, active/GL-mapped/store-currency eligibility, masked account output, rejection before invoice creation when a required bank destination is missing, and propagation of an eligible account into the canonical payment command. The Expo TypeScript check and all 33 mobile tests passed, including the bank-account endpoint and completion request mapping.
 - The supplied ZCS archive hash, entry count, JAR/JNI hashes, documented public printer/scanner APIs, ABIs, sample target, and absence of detected licence files were checked read-only. No vendor binary was added to the application at this stage.
 
 ## Known failures and constraints
@@ -200,7 +204,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 
 ## Remaining work
 
-Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, receipt, and mobile checkout paths. Continue Phase 4 in tracker order with the offline catalogue change feed/cache, governed discount controls, bank-account selection for eligible payment methods, SQL Server concurrency/failure-injection coverage, and end-to-end Finance reconciliation evidence. Then complete the Phase 5 offline and Phase 6 till/day-end flows before implementing the supplied ZCS native printer/scanner adapters in Phase 7. Android device acceptance remains for the camera, keyboard wedge, and system print/share fallbacks; Z92S adapter acceptance also requires written redistribution approval and a physical Android 14 unit.
+Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, receipt, and mobile checkout paths. Continue Phase 4 in tracker order with the offline catalogue change feed/cache, SQL Server concurrency/failure-injection coverage, end-to-end Finance reconciliation evidence, and visible Android checkout/receipt acceptance. Then complete the Phase 5 offline and Phase 6 till/day-end flows before implementing the supplied ZCS native printer/scanner adapters in Phase 7. Android device acceptance remains for the camera, keyboard wedge, and system print/share fallbacks; Z92S adapter acceptance also requires written redistribution approval and a physical Android 14 unit.
 
 ## Authorization boundaries
 

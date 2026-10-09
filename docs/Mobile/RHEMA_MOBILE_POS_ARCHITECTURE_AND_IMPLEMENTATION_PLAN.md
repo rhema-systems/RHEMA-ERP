@@ -651,6 +651,7 @@ Deliver this report, the implementation tracker, and the Finance coordination le
 - Catalogue/service search, camera/manual scan, cart, discounts, tender entry, split tender, receipt and reprint.
 - Atomic mobile sale orchestration.
 - Printer abstraction and PDF/system fallback.
+- Bank-required tenders load only active, GL-mapped accounts in the store currency and the operator's Finance operating scope. The selected account is revalidated before invoice creation and passed to the canonical payment command; safe account metadata is shown to the operator and full account numbers are never returned to the mobile client.
 
 **Exit gate:** single and split-tender checkout is atomic and renders/prints one canonical receipt projection.
 
