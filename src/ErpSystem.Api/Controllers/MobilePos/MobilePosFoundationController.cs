@@ -83,6 +83,15 @@ public sealed class MobilePosRuntimeController : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await _tillSessions.OpenAsync(dto, cancellationToken));
 
+    [HttpGet("till-sessions/{sessionId:guid}/reconciliation")]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    [Authorize(Policy = FinancePermissions.OperateCashTills)]
+    public async Task<ActionResult<MobilePosTillReconciliationDto>> GetTillReconciliation(
+        Guid sessionId,
+        [FromQuery] string installationId,
+        CancellationToken cancellationToken)
+        => Ok(await _tillSessions.GetReconciliationAsync(sessionId, installationId, cancellationToken));
+
     [HttpPost("offline-grants")]
     [Authorize(Policy = MobilePosPermissions.UseOffline)]
     [Authorize(Policy = MobilePosPermissions.OperateTill)]

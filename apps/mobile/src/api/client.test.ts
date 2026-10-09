@@ -176,6 +176,18 @@ describe("Mobile POS API client", () => {
     });
   });
 
+  it("loads the server-derived till reconciliation with encoded context", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse({ completedSaleCount: 2, salesAndTendersBalance: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await mobileApi.getTillReconciliation("session/1", "installation till/1");
+
+    expect(result.completedSaleCount).toBe(2);
+    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/till-sessions/session%2F1/reconciliation?installationId=installation%20till%2F1",
+    );
+  });
+
   it("encodes approved-customer search and outstanding-invoice request context", async () => {
     const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);

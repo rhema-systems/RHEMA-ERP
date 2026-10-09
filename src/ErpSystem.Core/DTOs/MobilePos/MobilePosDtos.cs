@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.MobilePos;
@@ -255,6 +256,43 @@ public sealed class MobilePosOpenTillSessionRequestDto
     public string? OpeningNotes { get; set; }
 
     public Guid? OpeningEvidenceFileId { get; set; }
+}
+
+public sealed class MobilePosTillTenderReconciliationDto
+{
+    public Guid PaymentMethodId { get; set; }
+    public string PaymentMethodCode { get; set; } = string.Empty;
+    public string PaymentMethodName { get; set; } = string.Empty;
+    public string PaymentMethodType { get; set; } = string.Empty;
+    public int TenderCount { get; set; }
+    public decimal Amount { get; set; }
+    public int OfflineTenderCount { get; set; }
+    public decimal OfflineAmount { get; set; }
+    public int CanonicalPaymentCount { get; set; }
+}
+
+/// <summary>
+/// Server-derived commercial reconciliation for one canonical Finance till session. The Finance
+/// cashier-session projection remains the custody authority; these values explain the Mobile POS
+/// sales and tenders that contributed to it without accepting client-authored totals.
+/// </summary>
+public sealed class MobilePosTillReconciliationDto
+{
+    public DateTime GeneratedAtUtc { get; set; }
+    public CashierTillSessionDto Session { get; set; } = new();
+    public int CompletedSaleCount { get; set; }
+    public int OfflineSaleCount { get; set; }
+    public int PendingSaleCount { get; set; }
+    public int RejectedSaleCount { get; set; }
+    public decimal SubTotal { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal SalesTotal { get; set; }
+    public decimal TenderTotal { get; set; }
+    public decimal SalesTenderDifference { get; set; }
+    public bool SalesAndTendersBalance { get; set; }
+    public int IncompleteTenderCount { get; set; }
+    public IReadOnlyList<MobilePosTillTenderReconciliationDto> Tenders { get; set; } = [];
 }
 
 public sealed class MobilePosCustomerSearchResultDto

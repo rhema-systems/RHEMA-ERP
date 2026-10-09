@@ -194,6 +194,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The mobile runtime can now load the assigned operator's current Finance till session or open one with an opening float, note, and optional governed evidence file. The business date is calculated in the configured store time zone from server UTC rather than trusted device time.
 - Both endpoints require the dynamic `MobilePOS.Till.Operate` permission and the canonical `Finance.CashTills.Operate` permission. The service rejects a Finance session returned for any liquidity account other than the assigned Mobile POS till.
 - Added the mobile till screen and dashboard link with current session status, opening float, expected cash, transaction movements, deposits, count, variance, and denomination evidence. The app does not calculate or maintain a second custody balance.
+- Added a server-derived session reconciliation for the current operator and assigned till. It groups completed tenders by configured payment method, identifies offline tenders, counts linked canonical CustomerPayments, reports pending/rejected/incomplete exceptions, and explicitly compares completed sales with completed tender totals. The mobile screen displays this explanation alongside the Finance custody balance.
 
 ## Verification evidence
 
@@ -234,6 +235,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The operator sync and historical-grant retention slice passed the Expo TypeScript check and all 53 mobile tests. Added coverage proves dispatcher lookup by queued grant ID, retained grant availability after the current authorization pointer is cleared, deliberate retained-grant deletion, and malformed grant-ID rejection.
 - The fresh Release Mobile POS API build and focused test run passed 43/43 tests after unifying online and offline cash-sale mutation identity for safe response-loss replay. The build preserved 90 EF models, compiled 355,610 ordered migration statements and 9,047 distinct statements, and completed with existing repository warnings only.
 - The Phase 6 till-session slice passed the Expo TypeScript check and all 54 mobile tests. A fresh Release API/test build passed 4/4 focused till-session tests covering dual permission enforcement, assigned-liquidity routing, store-local business date calculation, and cross-till rejection. Existing repository warnings and ImageSharp advisories remained warnings.
+- The Phase 6 server-reconciliation slice passed the Expo TypeScript check and all 55 mobile tests. The fresh Release API/test build passed 6/6 focused tests, including exact completed-sale/tender totals, online/offline grouping, canonical-payment counts, rejected-sale exclusion, and sales-to-tender balance. Existing repository warnings and ImageSharp advisories remained warnings.
 - The supplied ZCS archive hash, entry count, JAR/JNI hashes, documented public printer/scanner APIs, ABIs, sample target, and absence of detected licence files were checked read-only. No vendor binary was added to the application at this stage.
 
 ## Known failures and constraints

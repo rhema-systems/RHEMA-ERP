@@ -200,6 +200,36 @@ export interface MobilePosOpenTillSessionRequest {
   openingNotes?: string;
 }
 
+export interface MobilePosTillTenderReconciliation {
+  paymentMethodId: string;
+  paymentMethodCode: string;
+  paymentMethodName: string;
+  paymentMethodType: string;
+  tenderCount: number;
+  amount: number;
+  offlineTenderCount: number;
+  offlineAmount: number;
+  canonicalPaymentCount: number;
+}
+
+export interface MobilePosTillReconciliation {
+  generatedAtUtc: string;
+  session: MobilePosTillSession;
+  completedSaleCount: number;
+  offlineSaleCount: number;
+  pendingSaleCount: number;
+  rejectedSaleCount: number;
+  subTotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  salesTotal: number;
+  tenderTotal: number;
+  salesTenderDifference: number;
+  salesAndTendersBalance: boolean;
+  incompleteTenderCount: number;
+  tenders: MobilePosTillTenderReconciliation[];
+}
+
 export interface MobilePosOfflinePaymentMethodSnapshot {
   paymentMethodId: string;
   code: string;

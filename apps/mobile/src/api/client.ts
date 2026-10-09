@@ -10,6 +10,7 @@ import type {
   LoginResponse,
   MobilePosBootstrap,
   MobilePosOpenTillSessionRequest,
+  MobilePosTillReconciliation,
   MobilePosTillSession,
   MobilePosDevice,
   MobilePosOfflineGrant,
@@ -174,6 +175,9 @@ export const mobileApi = {
   openTillSession: (request: MobilePosOpenTillSessionRequest) => authorizedRequest<MobilePosTillSession>(
     "/api/mobile-pos/v1/till-sessions/open",
     { method: "POST", body: JSON.stringify(request) },
+  ),
+  getTillReconciliation: (sessionId: string, installationId: string) => authorizedRequest<MobilePosTillReconciliation>(
+    `/api/mobile-pos/v1/till-sessions/${encodeURIComponent(sessionId)}/reconciliation?installationId=${encodeURIComponent(installationId)}`,
   ),
   issueOfflineGrant: (installationId: string) => authorizedRequest<MobilePosOfflineGrant>(
     "/api/mobile-pos/v1/offline-grants",
