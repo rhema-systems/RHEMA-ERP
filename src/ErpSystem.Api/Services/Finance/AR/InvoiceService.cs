@@ -1573,6 +1573,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     sourceLineDimensions,
                     invoiceDecimalPlaces,
                     functionalDecimalPlaces,
+                    producer,
                     cancellationToken);
             }
 
@@ -1791,6 +1792,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AR",
+                OriginModuleCode = ResolveInvoiceOriginModuleCode(producer),
                 SourceDocumentType = "CustomerInvoice",
                 SourceDocumentId = invoice.Id,
                 SourceDocumentTenantId = invoice.TenantId,
@@ -1819,6 +1821,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceLineDimensions,
             int invoiceDecimalPlaces,
             int functionalDecimalPlaces,
+            FinancePostingProducerContext? producer,
             CancellationToken cancellationToken)
         {
             var rateSnapshot = await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
@@ -1916,6 +1919,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AR",
+                OriginModuleCode = ResolveInvoiceOriginModuleCode(producer),
                 SourceDocumentType = "CustomerInvoice",
                 SourceDocumentId = invoice.Id,
                 SourceDocumentTenantId = invoice.TenantId,
@@ -2524,15 +2528,18 @@ namespace ErpSystem.Api.Services.Finance.AR
             _sourceBookAuthority ?? throw new InvalidOperationException(
                 "Finance source-book authority is not configured for AR invoice posting.");
 
+        private static string ResolveInvoiceOriginModuleCode(FinancePostingProducerContext? producer) =>
+            producer is null
+                ? FinanceModuleLockCatalog.Finance
+                : FinanceModuleLockCatalog.ResolveOriginModuleCode(producer.Definition.ProducerModule);
+
         private FinanceSourceBookAuthorityFreezeRequest InvoiceBookAuthorityRequest(
             Invoice invoice,
             FinancePostingProducerContext? producer,
             string freezeStage,
             bool retainLegacy = false) => new()
         {
-            OriginModuleCode = producer is null
-                ? FinanceModuleLockCatalog.Finance
-                : FinanceModuleLockCatalog.ResolveOriginModuleCode(producer.Definition.ProducerModule),
+            OriginModuleCode = ResolveInvoiceOriginModuleCode(producer),
             SourceDocumentType = "CustomerInvoice",
             SourceDocumentId = invoice.Id,
             PostingAction = "Post",
