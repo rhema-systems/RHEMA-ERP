@@ -169,7 +169,8 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
     {
         ArgumentNullException.ThrowIfNull(producer);
         if (producer.RouteId is not (FinanceDimensionRouteId.FinanceArCustomerPayment
-            or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt))
+            or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
+            or FinanceDimensionRouteId.MobilePosCustomerPayment))
             throw new InvalidOperationException("The trusted producer context is not a supported Finance customer-payment route.");
     }
 
@@ -236,9 +237,14 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
         CancellationToken cancellationToken)
     {
         var invoiceIds = allocations.Select(item => item.InvoiceId).Distinct().ToArray();
-        var invoiceRouteId = producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
-            ? FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice
-            : FinanceDimensionRouteId.FinanceArCustomerInvoice;
+        var invoiceRouteId = producer.RouteId switch
+        {
+            FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt =>
+                FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice,
+            FinanceDimensionRouteId.MobilePosCustomerPayment =>
+                FinanceDimensionRouteId.MobilePosCustomerInvoice,
+            _ => FinanceDimensionRouteId.FinanceArCustomerInvoice
+        };
         var auctionIds = invoiceRouteId == FinanceDimensionRouteId.FinanceArCustomerInvoice
             ? await _db.Set<ErpSystem.Core.Entities.Inventory.InventoryDisposalAuctionInvoice>().AsNoTracking()
                 .Where(value => value.TenantId == TenantId && invoiceIds.Contains(value.InvoiceId))

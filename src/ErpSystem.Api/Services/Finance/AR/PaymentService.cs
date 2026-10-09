@@ -3147,10 +3147,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                 lineNumber++,
                      receiptDebitTag,
                      payment.ExchangeRateId,
-                     sourceDocumentLineId: producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
+                     sourceDocumentLineId: UsesTrustedReceiptDestinationLine(producer)
                          ? FinanceSourceLineIdentity.Create(payment.Id, "RECEIPT-DESTINATION", payment.Id)
                          : null,
-                     dimensions: producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
+                     dimensions: UsesTrustedReceiptDestinationLine(producer)
                          ? sourceLineDimensions.GetValueOrDefault(
                              FinanceSourceLineIdentity.Create(payment.Id, "RECEIPT-DESTINATION", payment.Id))
                              ?? Array.Empty<FinancePostingDimensionValueDto>()
@@ -3292,7 +3292,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             {
                 foreach (var allocation in activeAllocations)
                 {
-                    if (producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt)
+                    if (UsesTrustedReceiptDestinationLine(producer))
                     {
                         var principalEvidence = RequireCustomerSettlementComponentEvidence(
                             settlementDimensions,
@@ -3731,10 +3731,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
             if (GetEffectivePaymentDimensionAllocations(allocationRows).Count > 0
-                && producer.RouteId != FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt)
+                && !UsesTrustedReceiptDestinationLine(producer))
                 return Array.Empty<FinanceSourceDocumentLineContext>();
 
-            if (producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt)
+            if (UsesTrustedReceiptDestinationLine(producer))
             {
                 Guid destinationAccountId;
                 if (payment.LiquidityAccountId.HasValue)
@@ -3902,10 +3902,15 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             ArgumentNullException.ThrowIfNull(producer);
             if (producer.RouteId is not (FinanceDimensionRouteId.FinanceArCustomerPayment
-                or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt))
+                or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
+                or FinanceDimensionRouteId.MobilePosCustomerPayment))
                 throw new InvalidOperationException("The trusted producer context is not a supported Finance customer-payment route.");
             return producer;
         }
+
+        private static bool UsesTrustedReceiptDestinationLine(FinancePostingProducerContext producer) =>
+            producer.RouteId is FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
+                or FinanceDimensionRouteId.MobilePosCustomerPayment;
 
         private IFinanceSourceBookAuthorityService RequireSourceBookAuthority() =>
             _sourceBookAuthority

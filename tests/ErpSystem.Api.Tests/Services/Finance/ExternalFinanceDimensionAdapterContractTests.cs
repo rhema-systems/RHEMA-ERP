@@ -104,6 +104,8 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
     [InlineData(FinanceExternalProducerContractId.EstateGroundRentCharge, FinanceModuleLockCatalog.Estate)]
     [InlineData(FinanceExternalProducerContractId.LegalTransferFeeBilling, FinanceModuleLockCatalog.Legal)]
     [InlineData(FinanceExternalProducerContractId.MaintenanceWorkOrderBilling, FinanceModuleLockCatalog.Maintenance)]
+    [InlineData(FinanceExternalProducerContractId.MobilePosCustomerInvoice, FinanceModuleLockCatalog.MobilePos)]
+    [InlineData(FinanceExternalProducerContractId.MobilePosCustomerPayment, FinanceModuleLockCatalog.MobilePos)]
     public void Newly_discovered_producers_have_dedicated_period_lock_modules(
         FinanceExternalProducerContractId contractId,
         string expectedModule)

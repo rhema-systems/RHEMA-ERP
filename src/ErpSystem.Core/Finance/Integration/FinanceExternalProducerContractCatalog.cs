@@ -26,7 +26,9 @@ public enum FinanceExternalProducerContractId
     MaintenanceWorkOrderBilling,
     HrPayrollJournal,
     ProcurementSupplierReturnDispatch,
-    ProcurementSupplierReturnResolution
+    ProcurementSupplierReturnResolution,
+    MobilePosCustomerInvoice,
+    MobilePosCustomerPayment
 }
 
 public static class FinanceExternalProducerContractCatalog
@@ -51,7 +53,9 @@ public static class FinanceExternalProducerContractCatalog
             [FinanceExternalProducerContractId.MaintenanceWorkOrderBilling] = FinanceDimensionRouteId.MaintenanceWorkOrderBilling,
             [FinanceExternalProducerContractId.HrPayrollJournal] = FinanceDimensionRouteId.HrPayrollJournal,
             [FinanceExternalProducerContractId.ProcurementSupplierReturnDispatch] = FinanceDimensionRouteId.ProcurementSupplierReturnDispatch,
-            [FinanceExternalProducerContractId.ProcurementSupplierReturnResolution] = FinanceDimensionRouteId.ProcurementSupplierReturnResolution
+            [FinanceExternalProducerContractId.ProcurementSupplierReturnResolution] = FinanceDimensionRouteId.ProcurementSupplierReturnResolution,
+            [FinanceExternalProducerContractId.MobilePosCustomerInvoice] = FinanceDimensionRouteId.MobilePosCustomerInvoice,
+            [FinanceExternalProducerContractId.MobilePosCustomerPayment] = FinanceDimensionRouteId.MobilePosCustomerPayment
         };
 
     public static FinancePostingProducerContext GetRequired(FinanceExternalProducerContractId contractId)

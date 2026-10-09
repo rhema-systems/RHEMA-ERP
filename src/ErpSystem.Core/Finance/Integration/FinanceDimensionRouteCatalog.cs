@@ -52,7 +52,9 @@ public enum FinanceDimensionRouteId
     ProcurementSupplierReturnDispatch = 76,
     ProcurementSupplierReturnResolution = 77,
     InventoryDisposalAuctionInvoice = 78,
-    SalesOrderCustomerInvoice = 79
+    SalesOrderCustomerInvoice = 79,
+    MobilePosCustomerInvoice = 80,
+    MobilePosCustomerPayment = 81
 }
 
 public enum FinanceDimensionCertificationState
@@ -332,6 +334,10 @@ public static class FinanceDimensionRouteCatalog
             "inventory.disposals.auction-invoices", "CustomerInvoice", "Canonical non-stock auction invoice linked to an authorized inventory disposal."),
         External(FinanceDimensionRouteId.SalesOrderCustomerInvoice, "Sales", "AR",
             "sales.orders.customer-invoices", "CustomerInvoice", "Canonical stock/customer invoice generated from an immutable approved Sales order."),
+        External(FinanceDimensionRouteId.MobilePosCustomerInvoice, "MobilePOS", "AR",
+            "mobile-pos.sales.customer-invoices", "CustomerInvoice", "Canonical customer invoice generated from a governed Mobile POS sale and store dimension snapshot."),
+        External(FinanceDimensionRouteId.MobilePosCustomerPayment, "MobilePOS", "AR",
+            "mobile-pos.collections.customer-payments", "CustomerPayment", "Canonical customer receipt generated from a governed Mobile POS collection or sale tender."),
         External(FinanceDimensionRouteId.QuantitySurveyPaymentCertificate, "QuantitySurvey", "AP",
             "quantity-survey.payment-certificates.ap", "VendorInvoice", "Approved main-contract payment certificate handed to AP."),
         External(FinanceDimensionRouteId.QuantitySurveySubcontractCertificate, "QuantitySurvey", "AP",
