@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { ApiProblem, mobileApi } from "@/src/api/client";
+import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
 import { buildCompleteSaleRequest, sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
 import { useSession } from "@/src/session/session-context";
 import { getInstallationId } from "@/src/storage/secure-session";
@@ -79,8 +80,9 @@ export default function SaleScreen() {
   const [pendingIdentity, setPendingIdentity] = useState<PendingIdentity | null>(null);
   const [result, setResult] = useState<MobilePosSaleResult | null>(null);
   const [receipt, setReceipt] = useState<MobilePosReceipt | null>(null);
-  const [busy, setBusy] = useState<"catalogue" | "customer" | "preview" | "complete" | "reprint" | null>(null);
+  const [busy, setBusy] = useState<"catalogue" | "customer" | "preview" | "complete" | "reprint" | "print" | "share" | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
+  const [outputMessage, setOutputMessage] = useState<string | null>(null);
 
   const onlineMethods = useMemo(
     () => bootstrap?.till.paymentMethods.filter(method => method.allowOnline) ?? [],
@@ -267,6 +269,7 @@ export default function SaleScreen() {
     setResult(null);
     setReceipt(null);
     setError(null);
+    setOutputMessage(null);
     setCustomer(defaultCustomer);
   };
 
@@ -274,12 +277,43 @@ export default function SaleScreen() {
     if (!result || !canReprintReceipt) return;
     setBusy("reprint");
     setError(null);
+    setOutputMessage(null);
     try {
       setReceipt(await mobileApi.recordReceiptReprint(result.saleId, {
         installationId: await getInstallationId(),
         clientEventId: Crypto.randomUUID(),
         reason: "Cashier requested another receipt copy",
       }));
+    } catch (caught) {
+      setError(asProblem(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const printCurrentReceipt = async () => {
+    if (!receipt) return;
+    setBusy("print");
+    setError(null);
+    setOutputMessage(null);
+    try {
+      await printReceiptAsync(receipt);
+      setOutputMessage(`${receipt.copyType === "REPRINT" ? `Reprint copy ${receipt.copyNumber}` : "Original receipt"} sent to the system print service.`);
+    } catch (caught) {
+      setError(asProblem(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const shareCurrentReceipt = async () => {
+    if (!receipt) return;
+    setBusy("share");
+    setError(null);
+    setOutputMessage(null);
+    try {
+      await shareReceiptPdfAsync(receipt);
+      setOutputMessage("The receipt PDF was saved on this device and opened in the share sheet.");
     } catch (caught) {
       setError(asProblem(caught));
     } finally {
@@ -343,6 +377,17 @@ export default function SaleScreen() {
           </View>
         )}
         <Text style={styles.receiptNote}>This receipt is projected from the canonical RHEMA invoice and allocated payment records. Generating another copy records an audit event and does not repost the sale.</Text>
+        {outputMessage && <View style={styles.outputMessage}><Ionicons name="checkmark-circle-outline" size={19} color={colors.success} /><Text style={styles.outputMessageText}>{outputMessage}</Text></View>}
+        {receipt && (
+          <View style={styles.outputActions}>
+            <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void printCurrentReceipt()} style={[styles.outputButton, busy !== null && styles.disabled]}>
+              {busy === "print" ? <ActivityIndicator color={colors.blue} /> : <><Ionicons name="print-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>System print</Text></>}
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void shareCurrentReceipt()} style={[styles.outputButton, busy !== null && styles.disabled]}>
+              {busy === "share" ? <ActivityIndicator color={colors.blue} /> : <><Ionicons name="share-social-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>Share PDF</Text></>}
+            </Pressable>
+          </View>
+        )}
         {receipt && canReprintReceipt && (
           <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void createReprintCopy()} style={[styles.secondaryButton, busy !== null && styles.disabled]}>
             {busy === "reprint" ? <ActivityIndicator color={colors.blue} /> : <Text style={styles.secondaryButtonText}>Generate audited reprint copy</Text>}
@@ -561,4 +606,9 @@ const styles = StyleSheet.create({
   receiptLineAmount: { color: colors.ink, fontSize: 13, fontWeight: "700" },
   reprintMark: { marginBottom: 12, color: colors.danger, fontSize: 13, fontWeight: "800", letterSpacing: 1.5, textAlign: "center" },
   qrReference: { marginTop: 16, color: colors.slate, fontSize: 10, textAlign: "center" },
+  outputActions: { marginTop: 10, flexDirection: "row", gap: 10 },
+  outputButton: { flex: 1, minHeight: 48, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: "#B2CCFF", backgroundColor: colors.white },
+  outputButtonText: { color: colors.blue, fontSize: 13, fontWeight: "700" },
+  outputMessage: { marginTop: 12, flexDirection: "row", gap: 8, alignItems: "center", padding: 11, borderRadius: 11, backgroundColor: colors.successBg },
+  outputMessageText: { flex: 1, color: colors.success, fontSize: 11, lineHeight: 16 },
 });
