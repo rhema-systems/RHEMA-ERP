@@ -3,12 +3,52 @@ using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using System.Reflection;
 using Xunit;
+using AlignSourceBookAuthorityJournalOriginMigration = ErpSystem.Data.Migrations.AlignSourceBookAuthorityJournalOrigin;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FinanceSourceBookAuthorityMigrationTests
 {
+    [Fact]
+    public void JournalOriginAlignmentMigration_UsesExplicitOriginWithLegacyFallback_AndGuardsDown()
+    {
+        var source = ReadMigration("src/ErpSystem.Data/Migrations/20261009163000_AlignSourceBookAuthorityJournalOrigin.cs");
+
+        source.Should().Contain("Migration(\"20261009163000_AlignSourceBookAuthorityJournalOrigin\")")
+            .And.Contain("EvidenceTriggerSql(useExplicitJournalOrigin: true)")
+            .And.Contain("EvidenceTriggerSql(useExplicitJournalOrigin: false)")
+            .And.Contain("CREATE OR ALTER TRIGGER [dbo].[TR_FinanceSourceBookAuthorities_Evidence]")
+            .And.Contain("NULLIF(UPPER(LTRIM(RTRIM(j.OriginModuleCode))),N'')")
+            .And.Contain("CASE UPPER(LTRIM(RTRIM(j.SourceModule)))")
+            .And.Contain("SOURCE_BOOK_AUTHORITY_POSTING_EVIDENCE_MISMATCH")
+            .And.Contain("SOURCE_BOOK_AUTHORITY_JOURNAL_ORIGIN_DOWN_BLOCKED");
+        source.Should().Contain("AND (CASE UPPER(LTRIM(RTRIM(j.SourceModule)))")
+            .And.Contain("<>a.OriginModuleCode COLLATE Latin1_General_100_BIN2");
+
+        var migration = new AlignSourceBookAuthorityJournalOriginMigration();
+        var upBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        InvokeMigration(migration, "Up", upBuilder);
+        var upSql = upBuilder.Operations.Should().ContainSingle().Which.Should().BeOfType<SqlOperation>().Which.Sql;
+        upSql.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_FinanceSourceBookAuthorities_Evidence]")
+            .And.Contain("COALESCE(NULLIF(UPPER(LTRIM(RTRIM(j.OriginModuleCode))),N'')")
+            .And.Contain("CASE UPPER(LTRIM(RTRIM(j.SourceModule)))");
+
+        var downBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        InvokeMigration(migration, "Down", downBuilder);
+        downBuilder.Operations.Should().HaveCount(2).And.OnlyContain(operation => operation is SqlOperation);
+        var downSql = downBuilder.Operations.Cast<SqlOperation>().Select(operation => operation.Sql).ToArray();
+        downSql[0].Should().Contain("SOURCE_BOOK_AUTHORITY_JOURNAL_ORIGIN_DOWN_BLOCKED")
+            .And.Contain("CASE UPPER(LTRIM(RTRIM(j.SourceModule)))")
+            .And.NotContain("j.OriginModuleCode");
+        downSql[1].Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_FinanceSourceBookAuthorities_Evidence]")
+            .And.Contain("CASE UPPER(LTRIM(RTRIM(j.SourceModule)))")
+            .And.NotContain("j.OriginModuleCode");
+    }
+
     [Fact]
     public void CallerBindingMigration_BackfillsWorkflowType_AndAddsTenantExactLinksWithGuardedDown()
     {
@@ -103,5 +143,12 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
             if (File.Exists(path)) return File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
         }
         throw new FileNotFoundException(relative);
+    }
+
+    private static void InvokeMigration(Migration migration, string methodName, MigrationBuilder builder)
+    {
+        var method = migration.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        method.Should().NotBeNull();
+        method!.Invoke(migration, [builder]);
     }
 }
