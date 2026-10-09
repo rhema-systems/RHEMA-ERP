@@ -66,6 +66,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `457fa545294` - Phase 3 compiled Mobile POS invoice/payment Finance routes, external contracts, module-lock identity, canonical AR guards, tests, and coordination evidence.
 - `c8c9c8e1869` - Phase 3 persisted sale/line/tender source envelopes, server-side mutation idempotency execution, migration, tests, and tracker evidence.
 - `f4d64bf0abf` - Phase 3 public online sale command, canonical invoice/posting and split-payment allocation orchestration, validation, authorization, tests, and tracker evidence.
+- `939e0190b38` - Phase 4 governed catalogue search, canonical sale preview, native cart and split-tender checkout, API/client tests, and tracker evidence.
 
 ## Phase 2 application foundation
 
