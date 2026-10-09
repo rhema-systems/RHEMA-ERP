@@ -102,8 +102,8 @@
 
 | ID | Work item | Status |
 | --- | --- | --- |
-| MPOS-0501 | SQLite schema and migrations | In progress - versioned Expo SQLite migration creates scoped catalogue, customer, tender, receipt, cursor, and outbox tables with WAL, foreign keys, and no tokens or signing secrets; Android install/upgrade persistence evidence remains |
-| MPOS-0502 | Scoped catalogue/customer/config cache | In progress - catalogue changes are isolated by tenant/user/device/store/till, cursor-resumable, transactionally applied, and locally searchable; approved-customer and configuration cache population remain |
+| MPOS-0501 | SQLite schema and migrations | In progress - versioned Expo SQLite migrations create scoped catalogue, approved-customer, tender, bootstrap/configuration, receipt, cursor, and outbox tables with WAL, foreign keys, and no tokens or signing secrets; Android install/upgrade persistence evidence remains |
+| MPOS-0502 | Scoped catalogue/customer/config cache | In progress - catalogue and approved-customer change feeds are isolated by tenant/user/device/store/till, cursor-resumable, transactionally applied, tombstone-aware, and locally searchable; bootstrap and current till payment-method projections are replaced transactionally; physical Android persistence and broader server pull evidence remain |
 | MPOS-0503 | Transactional outbox | Planned |
 | MPOS-0504 | Signed offline-grant enforcement | Planned |
 | MPOS-0505 | Idempotent sync push/pull | Planned |

@@ -4,7 +4,7 @@
 
 Audit the committed Flash ERP Android mobile application and the current RHEMA ERP Finance, AR, payment, till, security, tenant, location, and offline capabilities. Produce an implementation-ready architecture and phased delivery plan for the RHEMA Field POS and Revenue Collection mobile application. The plan must incorporate the management policies recorded in `C:\Users\USER\Desktop\Mobile app.docx`, including per-store default walk-in customers.
 
-The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. The Phase 3 read slice adds governed approved-customer search, automatic store default-customer resolution, and canonical outstanding-invoice lookup. The Phase 3 Finance-route milestone adds distinct compiled invoice and customer-payment producer routes, external-producer contracts, module-lock identity, and canonical AR guard/settlement support. The transaction foundation adds persisted sale, line, tender, and mutation-receipt source envelopes plus server-side idempotent command execution. The online-sale milestone composes one validated invoice and one allocated canonical CustomerPayment per split tender inside that transaction boundary. The current checkout milestone adds governed catalogue search, canonical server preview, a mobile cart and split-tender flow that calls the atomic command, a canonical receipt projection, permission-gated idempotent reprint auditing, and the Phase 4 camera/manual/keyboard-wedge scanner boundary. The supplied ZCS package has been inventoried for Phase 7 without moving its integration ahead of the tracker. This work does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
+The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. The Phase 3 read slice adds governed approved-customer search, automatic store default-customer resolution, and canonical outstanding-invoice lookup. The Phase 3 Finance-route milestone adds distinct compiled invoice and customer-payment producer routes, external-producer contracts, module-lock identity, and canonical AR guard/settlement support. The transaction foundation adds persisted sale, line, tender, and mutation-receipt source envelopes plus server-side idempotent command execution. The online-sale milestone composes one validated invoice and one allocated canonical CustomerPayment per split tender inside that transaction boundary. The checkout milestone adds governed catalogue search, canonical server preview, a mobile cart and split-tender flow that calls the atomic command, a canonical receipt projection, permission-gated idempotent reprint auditing, and the Phase 4 camera/manual/keyboard-wedge scanner boundary. Phase 5 now has versioned scoped SQLite persistence plus resumable catalogue and approved-customer feeds and transactional bootstrap/tender configuration caching. The supplied ZCS package has been inventoried for Phase 7 without moving its integration ahead of the tracker. This work does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
 
 ## Branch and worktree
 
@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `00e2d2d8aa3fdedc99f91a2006ce535880d59212`
+- Current implementation checkpoint: `161c2b29ec3b7507eeac422d482819657ef93f76`
 - Pull request: not created
 
 ## Source baselines
@@ -75,6 +75,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `201506dd3d1` - Dynamic Mobile POS discount permission, preview/final-sale enforcement, permission-gated mobile line entry, and focused tests.
 - `a8978d2664f` - Governed bank-account lookup, searchable tender destination selection, canonical validation, Finance scope enforcement, and focused tests.
 - `00e2d2d8aa3` - Permission-protected catalogue change feed, scoped Expo SQLite migration/cache, durable cursor resume, network fallback, and focused tests.
+- `161c2b29ec3` - Approved-customer change feed, customer tombstones/search fallback, bootstrap/payment-method configuration cache, shared scoped change cursor, and focused tests.
 
 ## Phase 2 application foundation
 
@@ -153,13 +154,15 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Added `MobilePOS.Discount.Apply` to the dynamic permission catalogue. Positive line discounts are rejected by both server preview and final sale orchestration unless the current user's assigned role has that permission; no sales role name is hardcoded.
 - The mobile line discount control is only rendered for authorized users. Every discount edit invalidates the earlier server preview and tender state, requiring canonical Finance recalculation before checkout.
 
-## Phase 4 catalogue cache and Phase 5 SQLite foundation
+## Phase 4 catalogue cache and Phase 5 SQLite/reference-cache foundation
 
 - Added the permission-protected `GET /api/mobile-pos/v1/catalogue/changes` contract. Its opaque cursor fixes a server snapshot and page offset; the feed returns sale-ready upserts plus tombstones for inactive, deleted, or no-longer-postable items.
 - Change selection includes both Inventory item timestamps and the assigned store warehouse's quantity timestamps so offline availability is refreshed as stock moves.
 - Added the version-1 Expo SQLite database with WAL, foreign keys, explicit migration history, scoped catalogue/customer/payment-method/receipt/sync tables, and the durable outbox shape required by MPOS-0503. JWTs, refresh tokens, offline grant tokens, and signing secrets are excluded.
 - Local cache scope binds tenant, user, device, store, and till. Each page is applied transactionally; an interrupted page cursor is retained, and the completed watermark advances only after the final page.
 - The app warms the catalogue after bootstrap for authorized users and synchronizes it before retaining a new offline grant. A network-level catalogue search failure falls back to the scoped local cache and shows the operator that saved data is being used.
+- Added a permission-protected approved-customer change feed using the same tenant/store-bound opaque cursor model. Customer-role, Business Partner, and approved AR-profile timestamps feed each snapshot; records that no longer satisfy the canonical Mobile POS customer-eligibility query are returned as tombstones.
+- The client transactionally caches approved customer projections, bootstrap configuration, and the current till's payment-method policy under the same tenant/user/device/store/till scope. Approved-customer search falls back only on a network-level failure and clearly labels cached results.
 
 ## Migrations and application state
 
@@ -202,6 +205,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The discount authorization slice passed the Release Mobile POS API test filter with 34/34 tests, including unauthorized preview and final-sale rejection before tax/invoice creation. The API, Core, Data, and test projects compiled with zero errors; existing repository warnings and ImageSharp advisories remained warnings. The Expo TypeScript check and all 33 mobile tests also passed.
 - The governed bank-tender slice passed the Release Mobile POS API test filter with 24/24 tests after a fresh API/test build. Coverage includes Finance operating-scope filtering, active/GL-mapped/store-currency eligibility, masked account output, rejection before invoice creation when a required bank destination is missing, and propagation of an eligible account into the canonical payment command. The Expo TypeScript check and all 33 mobile tests passed, including the bank-account endpoint and completion request mapping.
 - The catalogue/SQLite slice passed the Release Mobile POS API filter with 27/27 tests after a fresh build. New coverage proves offline/till/invoice authorization, upsert/tombstone projection, opaque multi-page continuation, and stable snapshot time. The Expo TypeScript check and all 39 mobile tests passed, including migration scope/token exclusion, resumable synchronization, cursor validation, search normalization, and API encoding. Expo Doctor passed 18/18 and the Android Hermes export completed with `expo-sqlite` bundled.
+- The approved-customer/configuration cache slice passed the Release Mobile POS API filter with 29/29 tests after a fresh build. Added coverage proves dual offline/customer authorization, eligible customer upserts, ineligible-customer tombstones, and current canonical customer filtering. The Expo TypeScript check and all 40 mobile tests passed for the version-2 SQLite schema, customer/configuration cache, resumable customer cursor, and encoded client contract.
 - The supplied ZCS archive hash, entry count, JAR/JNI hashes, documented public printer/scanner APIs, ABIs, sample target, and absence of detected licence files were checked read-only. No vendor binary was added to the application at this stage.
 
 ## Known failures and constraints
