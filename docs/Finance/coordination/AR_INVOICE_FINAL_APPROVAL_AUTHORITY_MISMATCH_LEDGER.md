@@ -17,6 +17,8 @@ Diagnose and remediate the application and SQL evidence checks that reject a Sal
 - Publication checkpoint branch: `codex/ar-invoice-authority-publication`
 - Trigger remediation branch: `codex/ar-invoice-authority-trigger-origin`
 - Trigger remediation exact base: `41522940015e4288ff5ce381ca2e3ff48bc2369b` (`origin/master` on 2026-10-09).
+- Deployment-preflight follow-up branch: `codex/ar-invoice-authority-preflight`
+- Deployment-preflight exact base: `0e7ee924c5f8a39b8124ef94d74f2ec79eb8e484` (`origin/master` after PR #393 on 2026-10-09).
 - Prior merged fix/test commits contained by the base: `311c3469823` and `bd753c15e3b` (PR #381).
 - Verified implementation/test commit: `4334e1b2faf` (`fix(finance): preserve AR producer origin on approval`).
 - Ledger implementation checkpoint: `1511ead16be` (`docs(finance): record AR producer authority remediation`).
@@ -28,6 +30,8 @@ Diagnose and remediate the application and SQL evidence checks that reject a Sal
 - Guarded deployment run `37951681381` completed successfully and the live public environment descriptor subsequently reported build `4152294`, application version `41522940-20261009-152900`, deployed at `2026-10-09T16:00:23.6072792+00:00`.
 - Final approval then advanced past the earlier application exception and reached `SaveChanges`, where SQL Server trigger `TR_FinanceSourceBookAuthorities_Evidence` rejected the new authority binding with error 51006, `SOURCE_BOOK_AUTHORITY_POSTING_EVIDENCE_MISMATCH`.
 - The new trace reaches `FinanceSourceBookAuthorityService.BindOriginalPostingAsync` line 165 from `InvoiceService.CompleteArInvoicePostingAsync`, confirming the posted event/journal and retained authority were created in the approval transaction before the database trigger rejected the update.
+- PR #393 merged the trigger migration and tests as `0e7ee924c5f8a39b8124ef94d74f2ec79eb8e484`.
+- PR validation run `37963894288` then failed closed before build because the guarded migration was not yet source-hash pinned in `CanonicalMigrationPreflight.json`; no deployment was attempted from that run.
 
 - Newly attached deployed trace still reports `SOURCE_BOOK_AUTHORITY_POSTING_MISMATCH: posted event/journal differs from frozen authority.` from `FinanceSourceBookAuthorityService.BindOriginalPostingAsync`, reached by final workflow approval through `FinanceApprovalsController.ApplyApprovedOutcomeAsync`.
 - The live public environment descriptor reported build `2b8a6ff`, application version `2b8a6ff8-20261009-120809`, deployed at `2026-10-09T12:45:22.4498465+00:00`.
@@ -60,6 +64,7 @@ Diagnose and remediate the application and SQL evidence checks that reject a Sal
 - The test fixture now supplies stable Inventory UOM evidence required by current commercial-quantity governance.
 - Migration `20261009163000_AlignSourceBookAuthorityJournalOrigin` replaces only the evidence trigger definition. It resolves journal origin from the normalized explicit origin first and retains the legacy source-module mapping as fallback.
 - The migration downgrade is guarded: it refuses to restore the legacy trigger while retained authorities rely on explicit journal origins that the old source-only mapping would reject.
+- The VPS preflight manifest now classifies the migration as `trigger-definition`, pins normalized migration source hash `DBF6465E7B3C4DF9CE54A8DEC5B4797347605FEA9EFBE2A349509A9EABD412C4`, and runs a read-only schema probe for the authority table plus the journal source/origin columns before release build.
 
 ## Verification
 
@@ -78,6 +83,10 @@ Diagnose and remediate the application and SQL evidence checks that reject a Sal
 - Strengthened migration operation test passed:
   - 4 passed, 0 failed, 0 skipped.
   - It verifies one explicit-origin `Up` SQL operation and ordered guarded-rollback plus legacy-trigger `Down` operations.
+- Canonical migration preflight contract passed locally:
+  - all 43 pinned coverage IDs accepted;
+  - retained-data rejection, stale-review rejection, and pre-build guard enforcement passed.
+- VPS ZIP packaging and native-warning handling contract tests passed locally. The broader artifact-flow script could not run in this workstation shell because `node` is not installed on its PATH; the GitHub runner supplies the repository-pinned Node runtime.
 - `git diff --check`: passed.
 - Existing repository warnings include ImageSharp advisories and unrelated compiler/analyzer warnings.
 
@@ -85,13 +94,14 @@ Diagnose and remediate the application and SQL evidence checks that reject a Sal
 
 - Migration added: `20261009163000_AlignSourceBookAuthorityJournalOrigin`.
 - Application status: compiled and tested locally; the migration has not yet been applied to the VPS database.
+- Trigger migration PR #393 was merged; the required source-hash-pinned deployment preflight is the remaining follow-up publication.
 - Branch `codex/ar-invoice-producer-authority` was pushed and PR #391 was opened and merged.
 - A guarded Windows VPS CI/CD dispatch was created from merge commit `f01aec28d49` as run `37943695807`; the publication checkpoint advances `master`, so the workflow must be re-dispatched from the final ledger merge commit to satisfy the deployment freshness gate.
 - No manual VPS action or database mutation was performed.
 
 ## Remaining work
 
-1. Commit and publish the focused trigger migration and test, merge its pull request, and dispatch the guarded Windows VPS CI/CD workflow from resulting current `master`.
+1. Commit and publish the focused deployment-preflight follow-up, merge its pull request, and dispatch the guarded Windows VPS CI/CD workflow from resulting current `master`.
 2. Confirm the deployment applies `20261009163000_AlignSourceBookAuthorityJournalOrigin` and exposes the corresponding build.
 3. Retry final approval. A correctly frozen `SALES` authority should bind to the `AR` journal carrying explicit origin `SALES`; an old incorrectly frozen `FIN` authority still requires supported reject/resubmit and re-freeze.
 
