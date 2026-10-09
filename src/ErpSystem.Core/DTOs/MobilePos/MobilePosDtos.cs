@@ -450,6 +450,92 @@ public sealed class MobilePosSaleTenderResultDto
     public string PaymentStatus { get; set; } = string.Empty;
 }
 
+public sealed class MobilePosReceiptReprintRequestDto
+{
+    [Required, StringLength(200, MinimumLength = 16)]
+    public string InstallationId { get; set; } = string.Empty;
+
+    [Required, StringLength(100, MinimumLength = 8)]
+    public string ClientEventId { get; set; } = string.Empty;
+
+    [MaxLength(500)]
+    public string? Reason { get; set; }
+}
+
+public sealed class MobilePosReceiptDto
+{
+    public Guid ReceiptId { get; set; }
+    public string CopyType { get; set; } = "ORIGINAL";
+    public int CopyNumber { get; set; }
+    public int ReprintCount { get; set; }
+    public Guid? AuditEventId { get; set; }
+    public DateTime GeneratedAtUtc { get; set; }
+    public string? ReprintReason { get; set; }
+    public string QrReference { get; set; } = string.Empty;
+
+    public Guid TenantId { get; set; }
+    public string TenantCode { get; set; } = string.Empty;
+    public string TenantName { get; set; } = string.Empty;
+
+    public Guid StoreId { get; set; }
+    public string StoreCode { get; set; } = string.Empty;
+    public string StoreName { get; set; } = string.Empty;
+    public string LocationName { get; set; } = string.Empty;
+    public Guid TillId { get; set; }
+    public string TillNumber { get; set; } = string.Empty;
+    public string TillName { get; set; } = string.Empty;
+    public Guid TillSessionId { get; set; }
+    public string TillSessionNumber { get; set; } = string.Empty;
+    public DateTime BusinessDate { get; set; }
+    public Guid DeviceId { get; set; }
+    public string DeviceName { get; set; } = string.Empty;
+
+    public Guid CashierUserId { get; set; }
+    public string CashierName { get; set; } = string.Empty;
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public string CustomerCode { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public bool UsedStoreDefaultCustomer { get; set; }
+
+    public Guid InvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public string InvoiceStatus { get; set; } = string.Empty;
+    public string LocalReference { get; set; } = string.Empty;
+    public DateTime OccurredAtUtc { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal SubTotal { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal TotalAmount { get; set; }
+    public IReadOnlyList<MobilePosReceiptLineDto> Lines { get; set; } = [];
+    public IReadOnlyList<MobilePosReceiptTenderDto> Tenders { get; set; } = [];
+}
+
+public sealed class MobilePosReceiptLineDto
+{
+    public int Sequence { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal LineTotal { get; set; }
+    public string UnitOfMeasureCode { get; set; } = string.Empty;
+}
+
+public sealed class MobilePosReceiptTenderDto
+{
+    public int Sequence { get; set; }
+    public string PaymentMethodCode { get; set; } = string.Empty;
+    public string PaymentMethodName { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string? ExternalReference { get; set; }
+    public Guid CustomerPaymentId { get; set; }
+    public string PaymentNumber { get; set; } = string.Empty;
+    public string PaymentStatus { get; set; } = string.Empty;
+}
+
 public sealed class MobilePosCatalogueItemDto
 {
     public Guid InventoryItemId { get; set; }

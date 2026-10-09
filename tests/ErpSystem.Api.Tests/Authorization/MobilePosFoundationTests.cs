@@ -140,6 +140,24 @@ public sealed class MobilePosFoundationTests
     }
 
     [Fact]
+    public void ReceiptEndpoints_ShouldUseDynamicAccessAndReprintPermissions()
+    {
+        var getReceipt = typeof(MobilePosRuntimeController).GetMethod(nameof(MobilePosRuntimeController.GetReceipt));
+        var reprint = typeof(MobilePosRuntimeController).GetMethod(nameof(MobilePosRuntimeController.RecordReceiptReprint));
+
+        getReceipt.Should().NotBeNull();
+        getReceipt!.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .Should().ContainSingle(policy => policy == MobilePosPermissions.Access);
+        reprint.Should().NotBeNull();
+        reprint!.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .Should().BeEquivalentTo(MobilePosPermissions.Access, MobilePosPermissions.ReprintReceipt);
+    }
+
+    [Fact]
     public void AdministrationController_ShouldProtectEveryActionWithAMobilePosPermission()
     {
         var actions = typeof(MobilePosAdministrationController).GetMethods()

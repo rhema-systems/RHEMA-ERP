@@ -354,3 +354,76 @@ export interface MobilePosSaleResult {
   totalAmount: number;
   tenders: MobilePosSaleTenderResult[];
 }
+
+export interface MobilePosReceiptReprintRequest {
+  installationId: string;
+  clientEventId: string;
+  reason?: string;
+}
+
+export interface MobilePosReceiptLine {
+  sequence: number;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  discountAmount: number;
+  taxAmount: number;
+  lineTotal: number;
+  unitOfMeasureCode: string;
+}
+
+export interface MobilePosReceiptTender {
+  sequence: number;
+  paymentMethodCode: string;
+  paymentMethodName: string;
+  amount: number;
+  externalReference?: string;
+  customerPaymentId: string;
+  paymentNumber: string;
+  paymentStatus: string;
+}
+
+export interface MobilePosReceipt {
+  receiptId: string;
+  copyType: "ORIGINAL" | "REPRINT";
+  copyNumber: number;
+  reprintCount: number;
+  auditEventId?: string;
+  generatedAtUtc: string;
+  reprintReason?: string;
+  qrReference: string;
+  tenantId: string;
+  tenantCode: string;
+  tenantName: string;
+  storeId: string;
+  storeCode: string;
+  storeName: string;
+  locationName: string;
+  tillId: string;
+  tillNumber: string;
+  tillName: string;
+  tillSessionId: string;
+  tillSessionNumber: string;
+  businessDate: string;
+  deviceId: string;
+  deviceName: string;
+  cashierUserId: string;
+  cashierName: string;
+  businessPartnerId: string;
+  businessPartnerRoleId: string;
+  customerCode: string;
+  customerName: string;
+  usedStoreDefaultCustomer: boolean;
+  invoiceId: string;
+  invoiceNumber: string;
+  invoiceStatus: string;
+  localReference: string;
+  occurredAtUtc: string;
+  currencyCode: string;
+  subTotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  lines: MobilePosReceiptLine[];
+  tenders: MobilePosReceiptTender[];
+}

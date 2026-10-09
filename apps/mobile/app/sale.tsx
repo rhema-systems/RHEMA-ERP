@@ -19,6 +19,7 @@ import type {
   MobilePosCatalogueItem,
   MobilePosCustomerSearchResult,
   MobilePosPaymentMethod,
+  MobilePosReceipt,
   MobilePosSalePreview,
   MobilePosSaleResult,
 } from "@/src/types/api";
@@ -65,6 +66,7 @@ export default function SaleScreen() {
   const missingPreviewPermission = previewPermissions.find(permission => !permissions.includes(permission));
   const missingCompletionPermission = completionPermissions.find(permission => !permissions.includes(permission));
   const canSearchCustomers = permissions.includes("MobilePOS.Customer.View");
+  const canReprintReceipt = permissions.includes("MobilePOS.Receipt.Reprint");
 
   const [catalogueQuery, setCatalogueQuery] = useState("");
   const [catalogueResults, setCatalogueResults] = useState<MobilePosCatalogueItem[]>([]);
@@ -76,7 +78,8 @@ export default function SaleScreen() {
   const [tenders, setTenders] = useState<TenderDraft[]>([]);
   const [pendingIdentity, setPendingIdentity] = useState<PendingIdentity | null>(null);
   const [result, setResult] = useState<MobilePosSaleResult | null>(null);
-  const [busy, setBusy] = useState<"catalogue" | "customer" | "preview" | "complete" | null>(null);
+  const [receipt, setReceipt] = useState<MobilePosReceipt | null>(null);
+  const [busy, setBusy] = useState<"catalogue" | "customer" | "preview" | "complete" | "reprint" | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
 
   const onlineMethods = useMemo(
@@ -248,6 +251,7 @@ export default function SaleScreen() {
         tenders,
       }));
       setResult(completed);
+      setReceipt(await mobileApi.getReceipt(completed.saleId, await getInstallationId()));
     } catch (caught) {
       setError(asProblem(caught));
     } finally {
@@ -261,8 +265,26 @@ export default function SaleScreen() {
     setTenders([]);
     setPendingIdentity(null);
     setResult(null);
+    setReceipt(null);
     setError(null);
     setCustomer(defaultCustomer);
+  };
+
+  const createReprintCopy = async () => {
+    if (!result || !canReprintReceipt) return;
+    setBusy("reprint");
+    setError(null);
+    try {
+      setReceipt(await mobileApi.recordReceiptReprint(result.saleId, {
+        installationId: await getInstallationId(),
+        clientEventId: Crypto.randomUUID(),
+        reason: "Cashier requested another receipt copy",
+      }));
+    } catch (caught) {
+      setError(asProblem(caught));
+    } finally {
+      setBusy(null);
+    }
   };
 
   if (result) {
@@ -270,16 +292,62 @@ export default function SaleScreen() {
       <ScrollView style={styles.page} contentContainerStyle={styles.content}>
         <View style={styles.successIcon}><Ionicons name="checkmark" size={34} color={colors.white} /></View>
         <Text style={styles.successTitle}>Sale completed</Text>
-        <Text style={styles.successNumber}>{result.invoiceNumber}</Text>
+        <Text style={styles.successNumber}>{receipt?.invoiceNumber ?? result.invoiceNumber}</Text>
         <Text style={styles.successAmount}>{money(result.totalAmount, result.currencyCode, preview?.currencyDecimalPlaces ?? 2)}</Text>
-        <View style={styles.card}>
-          <LabelValue label="Invoice status" value={result.invoiceStatus} />
-          <LabelValue label="Local reference" value={result.localReference} />
-          {result.tenders.map(tender => (
-            <LabelValue key={tender.tenderId} label={tender.paymentNumber} value={money(tender.amount, result.currencyCode, preview?.currencyDecimalPlaces ?? 2)} />
-          ))}
-        </View>
-        <Text style={styles.receiptNote}>The canonical invoice and allocated payment records were created by RHEMA Finance.</Text>
+        {error && <ErrorBox message={`${error.message}${error.correlationId ? ` Reference: ${error.correlationId}` : ""}`} />}
+        {receipt ? (
+          <View style={styles.receiptCard}>
+            {receipt.copyType === "REPRINT" && <Text style={styles.reprintMark}>REPRINT · COPY {receipt.copyNumber}</Text>}
+            <Text style={styles.receiptTenant}>{receipt.tenantName || "RHEMA ERP"}</Text>
+            <Text style={styles.receiptMeta}>{receipt.storeName} · {receipt.locationName || receipt.storeCode}</Text>
+            <Text style={styles.receiptMeta}>{receipt.tillNumber} · {receipt.tillSessionNumber}</Text>
+            <View style={styles.receiptDivider} />
+            <LabelValue label="Customer" value={`${receipt.customerName} (${receipt.customerCode})`} />
+            <LabelValue label="Cashier" value={receipt.cashierName} />
+            <LabelValue label="Invoice" value={`${receipt.invoiceNumber} · ${receipt.invoiceStatus}`} />
+            <LabelValue label="Reference" value={receipt.localReference} />
+            <View style={styles.receiptDivider} />
+            {receipt.lines.map(line => (
+              <View key={line.sequence} style={styles.receiptLine}>
+                <View style={styles.grow}>
+                  <Text style={styles.lineTitle}>{line.description}</Text>
+                  <Text style={styles.meta}>{line.quantity} {line.unitOfMeasureCode} × {money(line.unitPrice, receipt.currencyCode, 2)}</Text>
+                </View>
+                <Text style={styles.receiptLineAmount}>{money(line.lineTotal, receipt.currencyCode, 2)}</Text>
+              </View>
+            ))}
+            <View style={styles.receiptDivider} />
+            <LabelValue label="Subtotal" value={money(receipt.subTotal, receipt.currencyCode, 2)} />
+            <LabelValue label="Discount" value={money(receipt.discountAmount, receipt.currencyCode, 2)} />
+            <LabelValue label="Tax" value={money(receipt.taxAmount, receipt.currencyCode, 2)} />
+            <View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>{money(receipt.totalAmount, receipt.currencyCode, 2)}</Text></View>
+            <View style={styles.receiptDivider} />
+            {receipt.tenders.map(tender => (
+              <View key={tender.sequence} style={styles.receiptTender}>
+                <View style={styles.grow}>
+                  <Text style={styles.lineTitle}>{tender.paymentMethodName}</Text>
+                  <Text style={styles.meta}>{tender.paymentNumber}{tender.externalReference ? ` · ${tender.externalReference}` : ""}</Text>
+                </View>
+                <Text style={styles.receiptLineAmount}>{money(tender.amount, receipt.currencyCode, 2)}</Text>
+              </View>
+            ))}
+            <Text selectable style={styles.qrReference}>{receipt.qrReference}</Text>
+          </View>
+        ) : (
+          <View style={styles.card}>
+            <LabelValue label="Invoice status" value={result.invoiceStatus} />
+            <LabelValue label="Local reference" value={result.localReference} />
+            {result.tenders.map(tender => (
+              <LabelValue key={tender.tenderId} label={tender.paymentNumber} value={money(tender.amount, result.currencyCode, preview?.currencyDecimalPlaces ?? 2)} />
+            ))}
+          </View>
+        )}
+        <Text style={styles.receiptNote}>This receipt is projected from the canonical RHEMA invoice and allocated payment records. Generating another copy records an audit event and does not repost the sale.</Text>
+        {receipt && canReprintReceipt && (
+          <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void createReprintCopy()} style={[styles.secondaryButton, busy !== null && styles.disabled]}>
+            {busy === "reprint" ? <ActivityIndicator color={colors.blue} /> : <Text style={styles.secondaryButtonText}>Generate audited reprint copy</Text>}
+          </Pressable>
+        )}
         <Pressable accessibilityRole="button" onPress={startNewSale} style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>Start another sale</Text>
         </Pressable>
@@ -484,4 +552,13 @@ const styles = StyleSheet.create({
   successNumber: { marginTop: 6, color: colors.slate, fontSize: 14, fontWeight: "700", textAlign: "center" },
   successAmount: { marginTop: 10, marginBottom: 22, color: colors.navy, fontSize: 28, fontWeight: "800", textAlign: "center" },
   receiptNote: { marginTop: 14, color: colors.slate, fontSize: 12, lineHeight: 18, textAlign: "center" },
+  receiptCard: { marginTop: 4, padding: 18, borderRadius: 18, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white },
+  receiptTenant: { color: colors.navy, fontSize: 18, fontWeight: "800", textAlign: "center" },
+  receiptMeta: { marginTop: 3, color: colors.slate, fontSize: 12, textAlign: "center" },
+  receiptDivider: { height: 1, marginVertical: 14, backgroundColor: colors.line },
+  receiptLine: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 5 },
+  receiptTender: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 5 },
+  receiptLineAmount: { color: colors.ink, fontSize: 13, fontWeight: "700" },
+  reprintMark: { marginBottom: 12, color: colors.danger, fontSize: 13, fontWeight: "800", letterSpacing: 1.5, textAlign: "center" },
+  qrReference: { marginTop: 16, color: colors.slate, fontSize: 10, textAlign: "center" },
 });

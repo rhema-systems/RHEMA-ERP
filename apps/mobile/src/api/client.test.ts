@@ -203,6 +203,12 @@ describe("Mobile POS API client", () => {
       }],
       tenders: [{ paymentMethodId: "cash-1", amount: 23 }],
     });
+    await mobileApi.getReceipt("sale/1", "install/01");
+    await mobileApi.recordReceiptReprint("sale/1", {
+      installationId: "install/01",
+      clientEventId: "reprint-event-1",
+      reason: "Customer copy",
+    });
 
     expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
       "https://erp.example.com/api/mobile-pos/v1/catalogue/search?installationId=install%2F01&q=A%26B&limit=12",
@@ -218,6 +224,19 @@ describe("Mobile POS API client", () => {
       clientMutationId: "mutation-1",
       expectedTotalAmount: 23,
       tenders: [{ paymentMethodId: "cash-1", amount: 23 }],
+    });
+    expect(fetchMock.mock.calls[3]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/receipts/sale%2F1?installationId=install%2F01",
+    );
+    const [, reprintInit] = fetchMock.mock.calls[4] as unknown as [string, RequestInit];
+    expect(fetchMock.mock.calls[4]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/receipts/sale%2F1/reprint-events",
+    );
+    expect(reprintInit.method).toBe("POST");
+    expect(JSON.parse(String(reprintInit.body))).toEqual({
+      installationId: "install/01",
+      clientEventId: "reprint-event-1",
+      reason: "Customer copy",
     });
   });
 });

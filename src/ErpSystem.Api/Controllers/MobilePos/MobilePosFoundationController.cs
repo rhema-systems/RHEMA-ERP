@@ -18,19 +18,22 @@ public sealed class MobilePosRuntimeController : ControllerBase
     private readonly IMobilePosFinanceReadService _financeReads;
     private readonly IMobilePosCheckoutReadService _checkout;
     private readonly IMobilePosSaleService _sales;
+    private readonly IMobilePosReceiptService _receipts;
 
     public MobilePosRuntimeController(
         IMobilePosFoundationService service,
         IAuthorizationService authorization,
         IMobilePosFinanceReadService financeReads,
         IMobilePosCheckoutReadService checkout,
-        IMobilePosSaleService sales)
+        IMobilePosSaleService sales,
+        IMobilePosReceiptService receipts)
     {
         _service = service;
         _authorization = authorization;
         _financeReads = financeReads;
         _checkout = checkout;
         _sales = sales;
+        _receipts = receipts;
     }
 
     [HttpPost("devices/enrollment-requests")]
@@ -156,6 +159,41 @@ public sealed class MobilePosRuntimeController : ControllerBase
         catch (MobilePosCommandRejectedException exception)
         {
             return RejectedSale(exception, "Mobile POS sale rejected");
+        }
+    }
+
+    [HttpGet("receipts/{id:guid}")]
+    [Authorize(Policy = MobilePosPermissions.Access)]
+    public async Task<ActionResult<MobilePosReceiptDto>> GetReceipt(
+        Guid id,
+        [FromQuery] string installationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _receipts.GetAsync(id, installationId, cancellationToken));
+        }
+        catch (MobilePosCommandRejectedException exception)
+        {
+            return RejectedSale(exception, "Mobile POS receipt unavailable");
+        }
+    }
+
+    [HttpPost("receipts/{id:guid}/reprint-events")]
+    [Authorize(Policy = MobilePosPermissions.Access)]
+    [Authorize(Policy = MobilePosPermissions.ReprintReceipt)]
+    public async Task<ActionResult<MobilePosReceiptDto>> RecordReceiptReprint(
+        Guid id,
+        [FromBody] MobilePosReceiptReprintRequestDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _receipts.RecordReprintAsync(id, dto, cancellationToken));
+        }
+        catch (MobilePosCommandRejectedException exception)
+        {
+            return RejectedSale(exception, "Mobile POS receipt reprint rejected");
         }
     }
 

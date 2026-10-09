@@ -17,6 +17,8 @@ import type {
   MobilePosSalePreview,
   MobilePosSalePreviewRequest,
   MobilePosSaleResult,
+  MobilePosReceipt,
+  MobilePosReceiptReprintRequest,
   OutstandingInvoice,
   SelectTenantResponse,
   UserInfo,
@@ -178,6 +180,13 @@ export const mobileApi = {
   ),
   completeSale: (request: MobilePosCompleteSaleRequest) => authorizedRequest<MobilePosSaleResult>(
     "/api/mobile-pos/v1/sales",
+    { method: "POST", body: JSON.stringify(request) },
+  ),
+  getReceipt: (saleId: string, installationId: string) => authorizedRequest<MobilePosReceipt>(
+    `/api/mobile-pos/v1/receipts/${encodeURIComponent(saleId)}?installationId=${encodeURIComponent(installationId)}`,
+  ),
+  recordReceiptReprint: (saleId: string, request: MobilePosReceiptReprintRequest) => authorizedRequest<MobilePosReceipt>(
+    `/api/mobile-pos/v1/receipts/${encodeURIComponent(saleId)}/reprint-events`,
     { method: "POST", body: JSON.stringify(request) },
   ),
   requestEnrollment: (request: DeviceEnrollmentRequest) => authorizedRequest<MobilePosDevice>(
