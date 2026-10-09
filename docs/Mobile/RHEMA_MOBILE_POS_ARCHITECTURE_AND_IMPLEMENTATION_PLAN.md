@@ -1,8 +1,11 @@
 # RHEMA Field POS and Revenue Collection mobile architecture
 
-**Status:** Phase 1 architecture gate complete  
-**Date:** 2026-10-09  
-**Target baseline:** `rhema-systems/RHEMA-ERP` `9044371f533ee3fac77472d74aecfe006e8c6872`  
+**Status:** Phase 1 architecture gate complete
+
+**Date:** 2026-10-09
+
+**Target baseline:** `rhema-systems/RHEMA-ERP` `9044371f533ee3fac77472d74aecfe006e8c6872`
+
 **Reference baseline:** `flashyjunior/Flash-ERP` `526acb8f46e5f003b493f1807d8cbd0372a88dda`
 
 ## 1. Purpose and governing principles

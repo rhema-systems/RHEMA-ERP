@@ -1,7 +1,9 @@
 # RHEMA Field POS implementation tracker
 
-**Branch:** `codex/mobile-pos-phase1`  
-**Phase 1 base:** `9044371f533ee3fac77472d74aecfe006e8c6872`  
+**Branch:** `codex/mobile-pos-phase1`
+
+**Phase 1 base:** `9044371f533ee3fac77472d74aecfe006e8c6872`
+
 **Architecture:** [RHEMA_MOBILE_POS_ARCHITECTURE_AND_IMPLEMENTATION_PLAN.md](RHEMA_MOBILE_POS_ARCHITECTURE_AND_IMPLEMENTATION_PLAN.md)
 
 ## Status legend

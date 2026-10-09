@@ -57,7 +57,7 @@ This workstream begins with architecture and contract mapping. It does not autho
 
 ## Commits
 
-- None yet.
+- `fb707967413` - Phase 1 architecture report, implementation tracker, and initial coordination ledger.
 
 ## Migrations and application state
 
