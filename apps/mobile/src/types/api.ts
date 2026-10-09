@@ -147,6 +147,51 @@ export interface MobilePosBootstrap {
   serverTimeUtc: string;
 }
 
+export interface MobilePosOfflinePaymentMethodSnapshot {
+  paymentMethodId: string;
+  code: string;
+  name: string;
+  type: string;
+  requiresReference: boolean;
+  requireExternalAuthorizationReference: boolean;
+}
+
+export interface MobilePosOfflineGrantPolicySnapshot {
+  policyId: string;
+  policyName: string;
+  policyVersionUtc: string;
+  currencyCode: string;
+  defaultWalkInBusinessPartnerId: string;
+  defaultWalkInBusinessPartnerRoleId: string;
+  maximumTransactionAmount?: number;
+  maximumAggregateAmount?: number;
+  maximumTransactionCount?: number;
+  maximumOfflineAgeMinutes: number;
+  allowPartialPayment: boolean;
+  allowProvisionalReceipt: boolean;
+  allowDayEndSubmissionWithPendingSync: boolean;
+  allowedCommandTypes: string[];
+  allowedPaymentMethods: MobilePosOfflinePaymentMethodSnapshot[];
+}
+
+export interface MobilePosOfflineGrant {
+  id: string;
+  version: number;
+  token: string;
+  tenantId: string;
+  userId: string;
+  mobilePosDeviceId: string;
+  mobilePosStoreId: string;
+  mobilePosTillId: string;
+  cashierTillSessionId: string;
+  mobilePosOfflinePolicyId: string;
+  issuedAtUtc: string;
+  expiresAtUtc: string;
+  revocationEpoch: number;
+  policySnapshotHash: string;
+  policy: MobilePosOfflineGrantPolicySnapshot;
+}
+
 export interface DeviceEnrollmentRequest {
   installationId: string;
   deviceName: string;

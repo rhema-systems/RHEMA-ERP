@@ -1011,6 +1011,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankAccountService, ErpSystem.Api.Services.Finance.Cash.BankAccountService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankingSettlementService, ErpSystem.Api.Services.Finance.Cash.BankingSettlementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICashierTillService, ErpSystem.Api.Services.Finance.Cash.CashierTillService>();
+            services.AddSingleton<ErpSystem.Api.Services.MobilePos.IMobilePosOfflineGrantTokenService, ErpSystem.Api.Services.MobilePos.MobilePosOfflineGrantTokenService>();
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosFoundationService, ErpSystem.Api.Services.MobilePos.MobilePosFoundationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReportExportService, ErpSystem.Api.Services.Finance.Reporting.FinanceReportExportService>();
             // FR-RP-010 deliberately extends the shared report/template model.

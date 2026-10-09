@@ -74,6 +74,18 @@ public sealed class MobilePosFoundationTests
     }
 
     [Fact]
+    public void OfflineGrantEndpoint_ShouldRequireOfflineAndTillPermissions()
+    {
+        var action = typeof(MobilePosRuntimeController).GetMethod(nameof(MobilePosRuntimeController.IssueOfflineGrant));
+
+        action.Should().NotBeNull();
+        action!.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .Should().BeEquivalentTo(MobilePosPermissions.UseOffline, MobilePosPermissions.OperateTill);
+    }
+
+    [Fact]
     public void AdministrationController_ShouldProtectEveryActionWithAMobilePosPermission()
     {
         var actions = typeof(MobilePosAdministrationController).GetMethods()

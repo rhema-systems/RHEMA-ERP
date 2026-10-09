@@ -2,11 +2,18 @@ import { Ionicons } from "@expo/vector-icons";
 import { Link, Redirect } from "expo-router";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { environmentColor } from "@/src/config/environment";
+import { offlineGrantMinutesRemaining } from "@/src/offline/grant";
 import { useSession } from "@/src/session/session-context";
 import { colors } from "@/src/ui/theme";
 
 export default function HomeScreen() {
   const session = useSession();
+  const canRequestOffline = Boolean(
+    session.bootstrap?.currentTillSessionId
+    && session.bootstrap.offlinePolicy
+    && session.user?.permissions.includes("MobilePOS.Offline.Use")
+    && session.user.permissions.includes("MobilePOS.Till.Operate"),
+  );
 
   if (session.status === "signedOut" || session.status === "mfaRequired") return <Redirect href="/login" />;
   if (session.status === "initializing") {
@@ -88,6 +95,49 @@ export default function HomeScreen() {
 
           <View style={styles.infoCard}>
             <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>Offline authorization</Text>
+              <View style={session.offlineGrant ? styles.openPill : styles.closedPill}>
+                <Text style={session.offlineGrant ? styles.openText : styles.closedText}>
+                  {session.offlineGrant ? "Ready" : "Not active"}
+                </Text>
+              </View>
+            </View>
+            {session.offlineGrant ? (
+              <>
+                <Text style={styles.grantHeadline}>
+                  {offlineGrantMinutesRemaining(session.offlineGrant)} minutes remaining
+                </Text>
+                <Text style={styles.infoText}>
+                  {session.offlineGrant.policy.allowedCommandTypes.join(", ")} · {session.offlineGrant.policy.allowedPaymentMethods.length} offline tender(s)
+                </Text>
+                <Text style={styles.grantLimit}>
+                  {formatGrantLimits(session.offlineGrant.policy.currencyCode, session.offlineGrant.policy.maximumTransactionAmount, session.offlineGrant.policy.maximumAggregateAmount, session.offlineGrant.policy.maximumTransactionCount)}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.infoText}>{offlineUnavailableReason(session)}</Text>
+            )}
+            {session.offlineGrantError && (
+              <Text accessibilityRole="alert" style={styles.inlineError}>
+                {session.offlineGrantError.message}
+                {session.offlineGrantError.correlationId ? ` Reference: ${session.offlineGrantError.correlationId}` : ""}
+              </Text>
+            )}
+            <Pressable
+              accessibilityRole="button"
+              disabled={!canRequestOffline || session.offlineGrantBusy}
+              onPress={() => void session.requestOfflineGrant().catch(() => undefined)}
+              style={[styles.grantButton, (!canRequestOffline || session.offlineGrantBusy) && styles.buttonDisabled]}
+            >
+              {session.offlineGrantBusy
+                ? <ActivityIndicator size="small" color={colors.white} />
+                : <Ionicons name="cloud-offline-outline" size={18} color={colors.white} />}
+              <Text style={styles.grantButtonText}>{session.offlineGrant ? "Renew authorization" : "Authorize offline use"}</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.infoCard}>
+            <View style={styles.sectionRow}>
               <Text style={styles.sectionTitle}>Till session</Text>
               <View style={session.bootstrap.currentTillSessionId ? styles.openPill : styles.closedPill}>
                 <Text style={session.bootstrap.currentTillSessionId ? styles.openText : styles.closedText}>
@@ -122,6 +172,24 @@ export default function HomeScreen() {
       )}
     </ScrollView>
   );
+}
+
+function offlineUnavailableReason(session: ReturnType<typeof useSession>): string {
+  if (!session.user?.permissions.includes("MobilePOS.Offline.Use") || !session.user.permissions.includes("MobilePOS.Till.Operate")) {
+    return "Your assigned role does not authorize offline Mobile POS operation.";
+  }
+  if (!session.bootstrap?.offlinePolicy) return "No active offline policy is assigned to this store.";
+  if (!session.bootstrap.currentTillSessionId) return "Open your assigned cashier till session before requesting offline authorization.";
+  return "Request a time-limited authorization before working without a connection.";
+}
+
+function formatGrantLimits(currency: string, transaction?: number, aggregate?: number, count?: number): string {
+  const limits = [
+    transaction != null ? `${currency} ${transaction.toLocaleString()} per transaction` : null,
+    aggregate != null ? `${currency} ${aggregate.toLocaleString()} total` : null,
+    count != null ? `${count} transaction${count === 1 ? "" : "s"}` : null,
+  ].filter((value): value is string => Boolean(value));
+  return limits.length > 0 ? `Limits: ${limits.join(" · ")}` : "No amount or transaction-count limit is configured.";
 }
 
 function Metric({ icon, label, value }: { icon: React.ComponentProps<typeof Ionicons>["name"]; label: string; value: string }) {
@@ -188,6 +256,12 @@ const styles = StyleSheet.create({
   customerName: { marginTop: 12, color: colors.navy, fontSize: 18, fontWeight: "700" },
   customerCode: { marginTop: 2, color: colors.slate, fontSize: 12 },
   infoText: { marginTop: 10, color: colors.slate, fontSize: 13, lineHeight: 19 },
+  grantHeadline: { marginTop: 12, color: colors.success, fontSize: 16, fontWeight: "700" },
+  grantLimit: { marginTop: 6, color: colors.muted, fontSize: 12, lineHeight: 18 },
+  inlineError: { marginTop: 10, padding: 10, borderRadius: 9, backgroundColor: colors.dangerBg, color: colors.danger, fontSize: 12, lineHeight: 17 },
+  grantButton: { marginTop: 14, minHeight: 46, flexDirection: "row", gap: 8, borderRadius: 11, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center" },
+  grantButtonText: { color: colors.white, fontSize: 13, fontWeight: "700" },
+  buttonDisabled: { opacity: 0.45 },
   openPill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: colors.successBg },
   openText: { color: colors.success, fontSize: 11, fontWeight: "700" },
   closedPill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: colors.warningBg },

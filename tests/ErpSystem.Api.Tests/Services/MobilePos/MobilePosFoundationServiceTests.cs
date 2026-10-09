@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ErpSystem.Api.Services.MobilePos;
 using ErpSystem.Core.DTOs.MobilePos;
 using ErpSystem.Core.Entities;
@@ -8,11 +10,14 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Moq;
 using Xunit;
+using FinancePaymentMethod = ErpSystem.Core.Entities.Finance.PaymentMethod;
 
 namespace ErpSystem.Api.Tests.Services.MobilePos;
 
@@ -169,14 +174,180 @@ public sealed class MobilePosFoundationServiceTests
         await heartbeat.Should().ThrowAsync<UnauthorizedAccessException>().WithMessage("*Revoked*");
     }
 
+    [Fact]
+    public async Task IssueOfflineGrantAsync_ShouldBindTheActiveContextFilterCapabilitiesAndSupersedeThePriorGrant()
+    {
+        await using var fixture = Fixture.Create();
+        var now = DateTime.UtcNow;
+        var customer = fixture.SeedCustomer("Approved");
+        var policy = new MobilePosOfflinePolicy
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            Name = "Cash collection offline",
+            IsActive = true,
+            AuthorizationWindowMinutes = 120,
+            MaximumOfflineAgeMinutes = 60,
+            MaximumTransactionAmount = 500m,
+            MaximumAggregateAmount = 2_000m,
+            MaximumTransactionCount = 10,
+            AllowCashSale = true,
+            AllowCashReceipt = true,
+            AllowPartialPayment = true,
+            AllowReturns = true,
+            AllowReversals = true,
+            AllowProvisionalReceipt = true,
+            RequireExternalReferenceForElectronicTender = true,
+            CreatedAt = now.AddMinutes(-5)
+        };
+        fixture.Db.MobilePosOfflinePolicies.Add(policy);
+        var store = fixture.SeedActiveStore("STORE-A");
+        store.DefaultWalkInBusinessPartnerId = customer.Partner.Id;
+        store.DefaultWalkInBusinessPartnerRoleId = customer.Role.Id;
+        store.OfflinePolicyId = policy.Id;
+        store.OfflinePolicy = policy;
+        var till = fixture.SeedActiveTill(store);
+        var cashMethod = new FinancePaymentMethod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            Name = "Cash",
+            Code = "CASH",
+            Type = PaymentMethodType.Cash,
+            IsActive = true,
+            RequiresBankAccount = false
+        };
+        var disabledCardMethod = new FinancePaymentMethod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            Name = "Card",
+            Code = "CARD",
+            Type = PaymentMethodType.Card,
+            IsActive = true,
+            RequiresReference = true
+        };
+        fixture.Db.PaymentMethods.AddRange(cashMethod, disabledCardMethod);
+        fixture.Db.MobilePosTillPaymentMethods.AddRange(
+            new MobilePosTillPaymentMethod
+            {
+                Id = Guid.NewGuid(), TenantId = fixture.TenantId, MobilePosTillId = till.Id,
+                MobilePosTill = till, PaymentMethodId = cashMethod.Id, PaymentMethod = cashMethod,
+                AllowOnline = true, AllowOffline = true, DisplayOrder = 1
+            },
+            new MobilePosTillPaymentMethod
+            {
+                Id = Guid.NewGuid(), TenantId = fixture.TenantId, MobilePosTillId = till.Id,
+                MobilePosTill = till, PaymentMethodId = disabledCardMethod.Id, PaymentMethod = disabledCardMethod,
+                AllowOnline = true, AllowOffline = false, DisplayOrder = 2
+            });
+
+        var user = new ApplicationUser
+        {
+            Id = fixture.ActorId,
+            TenantId = fixture.TenantId,
+            UserName = "mobile.cashier",
+            NormalizedUserName = "MOBILE.CASHIER",
+            Email = "cashier@example.invalid",
+            IsActive = true
+        };
+        fixture.Db.Users.Add(user);
+        fixture.Db.MobilePosUserStoreAssignments.Add(new MobilePosUserStoreAssignment
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, UserId = user.Id, User = user,
+            MobilePosStoreId = store.Id, MobilePosStore = store, EffectiveFromUtc = now.AddHours(-1), IsActive = true
+        });
+        const string installationId = "install-offline-grant-device";
+        var device = new MobilePosDevice
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            InstallationIdHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(installationId))),
+            DeviceName = "Offline test device", Status = MobilePosDeviceStatus.Active,
+            RequestedByUserId = user.Id, RequestedByUser = user, RequestedAtUtc = now.AddHours(-1),
+            MobilePosStoreId = store.Id, MobilePosStore = store, MobilePosTillId = till.Id,
+            MobilePosTill = till, ApprovedByUserId = user.Id, ApprovedAtUtc = now.AddMinutes(-30),
+            RevocationEpoch = 3
+        };
+        fixture.Db.MobilePosDevices.Add(device);
+        var tillSession = new CashierTillSession
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, SessionNumber = "TILL-SESSION-001",
+            LiquidityAccountId = till.LiquidityAccountId, LiquidityAccount = till.LiquidityAccount,
+            BusinessDate = now.Date, Currency = "GHS", CashierUserId = user.Id,
+            CashierName = "Mobile Cashier", Status = CashierTillSessionStatus.Open,
+            OpeningFloatAmount = 100m, OpenedAt = now.AddMinutes(-20), OpenedById = user.Id
+        };
+        fixture.Db.CashierTillSessions.Add(tillSession);
+        await fixture.Db.SaveChangesAsync();
+
+        var permissions = new[]
+        {
+            MobilePosPermissions.CreateInvoice,
+            MobilePosPermissions.PostInvoice,
+            MobilePosPermissions.CollectPayment
+        };
+        var first = await fixture.Service.IssueOfflineGrantAsync(
+            new MobilePosOfflineGrantRequestDto { InstallationId = installationId },
+            permissions,
+            CancellationToken.None);
+
+        first.Token.Should().StartWith("MPG1.");
+        first.CashierTillSessionId.Should().Be(tillSession.Id);
+        first.ExpiresAtUtc.Should().BeCloseTo(first.IssuedAtUtc.AddMinutes(60), TimeSpan.FromSeconds(2));
+        first.Policy.AllowedCommandTypes.Should().BeEquivalentTo("CashSale", "CashReceipt", "PartialPayment");
+        first.Policy.AllowedCommandTypes.Should().NotContain("Return");
+        first.Policy.AllowedPaymentMethods.Should().ContainSingle(item => item.PaymentMethodId == cashMethod.Id);
+        first.RevocationEpoch.Should().Be(3);
+        var payload = fixture.GrantTokens.Validate(first.Token, first.IssuedAtUtc.AddSeconds(1));
+        payload.GrantId.Should().Be(first.Id);
+        payload.PolicySnapshotHash.Should().Be(first.PolicySnapshotHash);
+
+        var second = await fixture.Service.IssueOfflineGrantAsync(
+            new MobilePosOfflineGrantRequestDto { InstallationId = installationId },
+            permissions,
+            CancellationToken.None);
+
+        second.Id.Should().NotBe(first.Id);
+        var stored = await fixture.Db.MobilePosOfflineGrants.OrderBy(item => item.IssuedAtUtc).ToListAsync();
+        stored.Should().HaveCount(2);
+        stored.Should().ContainSingle(item => item.Id == first.Id && item.Status == MobilePosOfflineGrantStatus.Revoked);
+        stored.Should().ContainSingle(item => item.Id == second.Id && item.Status == MobilePosOfflineGrantStatus.Active);
+    }
+
+    [Fact]
+    public async Task OfflineGrantToken_ShouldRejectTamperingAndExpiry()
+    {
+        await using var fixture = Fixture.Create();
+        var now = DateTime.UtcNow;
+        var payload = new MobilePosOfflineGrantTokenPayload(
+            MobilePosOfflineGrantTokenService.CurrentVersion,
+            Guid.NewGuid(), fixture.TenantId, fixture.ActorId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            Guid.NewGuid(), Guid.NewGuid(), new string('A', 64), 2, now, now.AddMinutes(30));
+        var token = fixture.GrantTokens.Sign(payload);
+
+        fixture.GrantTokens.Validate(token, now.AddMinutes(1)).Should().Be(payload);
+        var replacement = token[^1] == 'A' ? 'B' : 'A';
+        var tampered = token[..^1] + replacement;
+        var tamperAction = () => fixture.GrantTokens.Validate(tampered, now.AddMinutes(1));
+        tamperAction.Should().Throw<UnauthorizedAccessException>().WithMessage("*signature*");
+        var expiryAction = () => fixture.GrantTokens.Validate(token, now.AddMinutes(31));
+        expiryAction.Should().Throw<UnauthorizedAccessException>().WithMessage("*expired*");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
-        private Fixture(ApplicationDbContext db, Guid tenantId, Guid actorId, MobilePosFoundationService service)
+        private Fixture(
+            ApplicationDbContext db,
+            Guid tenantId,
+            Guid actorId,
+            MobilePosFoundationService service,
+            MobilePosOfflineGrantTokenService grantTokens)
         {
             Db = db;
             TenantId = tenantId;
             ActorId = actorId;
             Service = service;
+            GrantTokens = grantTokens;
             LocationId = Guid.NewGuid();
             Db.Locations.Add(new Location
             {
@@ -195,6 +366,7 @@ public sealed class MobilePosFoundationServiceTests
         public Guid ActorId { get; }
         public Guid LocationId { get; }
         public MobilePosFoundationService Service { get; }
+        public MobilePosOfflineGrantTokenService GrantTokens { get; }
 
         public static Fixture Create()
         {
@@ -211,8 +383,14 @@ public sealed class MobilePosFoundationServiceTests
             currentUser.SetupGet(item => item.UserAgent).Returns("Mobile POS service test");
             var environment = new Mock<IHostEnvironment>();
             environment.SetupGet(item => item.EnvironmentName).Returns("Testing");
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["MobilePos:OfflineGrantSigningKey"] = new string('T', 64)
+            }).Build();
+            var grantTokens = new MobilePosOfflineGrantTokenService(configuration);
             return new Fixture(db, tenantId, actorId,
-                new MobilePosFoundationService(db, currentUser.Object, environment.Object));
+                new MobilePosFoundationService(db, currentUser.Object, environment.Object, grantTokens),
+                grantTokens);
         }
 
         public (BusinessPartner Partner, BusinessPartnerRole Role) SeedCustomer(string registrationStatus)

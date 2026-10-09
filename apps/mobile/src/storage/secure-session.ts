@@ -1,7 +1,7 @@
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import type { ServerProfile } from "@/src/types/api";
+import type { MobilePosOfflineGrant, ServerProfile } from "@/src/types/api";
 
 const keys = {
   accessToken: "rhema.mobile.access-token",
@@ -9,6 +9,7 @@ const keys = {
   tokenExpiry: "rhema.mobile.token-expiry",
   serverProfile: "rhema.mobile.server-profile",
   installationId: "rhema.mobile.installation-id",
+  offlineGrant: "rhema.mobile.offline-grant",
 } as const;
 
 async function getValue(key: string): Promise<string | null> {
@@ -56,6 +57,25 @@ export async function clearTokens(): Promise<void> {
     deleteValue(keys.refreshToken),
     deleteValue(keys.tokenExpiry),
   ]);
+}
+
+export async function loadOfflineGrant(): Promise<MobilePosOfflineGrant | null> {
+  const value = await getValue(keys.offlineGrant);
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as MobilePosOfflineGrant;
+  } catch {
+    await deleteValue(keys.offlineGrant);
+    return null;
+  }
+}
+
+export async function saveOfflineGrant(grant: MobilePosOfflineGrant): Promise<void> {
+  await setValue(keys.offlineGrant, JSON.stringify(grant));
+}
+
+export async function clearOfflineGrant(): Promise<void> {
+  await deleteValue(keys.offlineGrant);
 }
 
 export async function loadServerProfile(): Promise<ServerProfile | null> {

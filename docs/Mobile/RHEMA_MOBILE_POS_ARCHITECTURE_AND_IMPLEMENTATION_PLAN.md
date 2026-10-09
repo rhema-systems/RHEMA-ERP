@@ -396,6 +396,8 @@ The server issues a signed offline grant containing:
 - catalogue/customer/policy version watermarks
 - revocation epoch
 
+The Phase 2 implementation uses a versioned compact HMAC-SHA256 token whose key is purpose-derived from `MobilePos:OfflineGrantSigningKey` (or the existing deployment JWT secret when no dedicated key is configured). The readable policy snapshot is returned separately, and its SHA-256 hash is included in the signed token. The signing key never leaves the API. The Android client keeps the current token and snapshot in Keystore-backed SecureStore, rejects a cached grant when its tenant, user, device, store, till, session, policy, default walk-in customer, revocation epoch, or expiry no longer matches bootstrap, and clears it on sign-out or tenant change. Synchronization must still verify the signature and the persisted grant status before consuming any queued command.
+
 The app refuses new offline work after expiry or local limit exhaustion. It may still display and synchronize existing work.
 
 ### Local database
@@ -620,6 +622,7 @@ Deliver this report, the implementation tracker, and the Finance coordination le
 - Implement error boundary, API client, ProblemDetails, environment profile, secure storage, and session state machine.
 - Implement login, MFA, tenant selection, logout, refresh, bootstrap, dashboard shell, account, and diagnostics.
 - Add persisted device/store/till/offline-policy server models, permission catalogue, HQ administration, enrollment, and heartbeat.
+- Issue a signed, expiring offline grant only for an open cashier session, filtering commands and tenders through the current dynamic permissions and store policy.
 - Add Android development and preview build configuration.
 
 **Exit gate:** enrolled test device can authenticate with MFA, resolve one store/till/default customer, render real bootstrap/dashboard values, revoke safely, and pass Phase 2 gates.

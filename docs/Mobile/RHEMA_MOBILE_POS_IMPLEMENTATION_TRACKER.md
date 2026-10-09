@@ -61,15 +61,15 @@
 | MPOS-0202 | Metro singleton/runtime protection | Complete | Metro pins React/React Native to the app root; Expo Doctor and Android bundle export passed |
 | MPOS-0203 | Root crash boundary and sanitized diagnostics | In progress | Root boundary, compact reference-only diagnostic view, and deterministic support-reference test implemented; visible fault injection evidence remains |
 | MPOS-0204 | Environment/server profile with HTTPS production policy | Complete | TEST/UAT/PRODUCTION profiles, production HTTPS rejection, origin-only validation, and six focused tests pass |
-| MPOS-0205 | Typed API client and ProblemDetails model | Complete | Typed client, ProblemDetails/correlation mapping, sanitized non-JSON handling, single-flight refresh, retry-once 401, and four focused contract tests pass |
-| MPOS-0206 | Secure token/install-secret storage | In progress | SecureStore-backed native session and install secret implemented; physical Android keystore evidence remains |
+| MPOS-0205 | Typed API client and ProblemDetails model | Complete | Typed client, ProblemDetails/correlation mapping, sanitized non-JSON handling, single-flight refresh, retry-once 401, and five focused contract tests pass |
+| MPOS-0206 | Secure token/install-secret storage | In progress | SecureStore-backed native session, install secret, and signed offline grant implemented; automatic expiry/context invalidation tests pass; physical Android keystore evidence remains |
 | MPOS-0207 | Login, MFA, tenant select, refresh, logout state machine | In progress | Real auth APIs implemented; tenant switch now returns a tenant-scoped refresh token; visible device lifecycle remains |
 | MPOS-0208 | Mobile POS permission catalogue and policies | Complete | Six focused authorization/model tests pass; controller actions use dynamic `MobilePOS.*` policies without role names |
 | MPOS-0209 | Store/default-customer/dimension model | In progress | Migration, approved-customer validation, dimension defaults, tenant indexes, and service integration cases pass; authorized SQL migration/application evidence remains |
 | MPOS-0210 | Till and tender mappings | In progress | CashTill and payment-method mappings with uniqueness checks and admin UI implemented; database mapping cases remain |
 | MPOS-0211 | Effective user-store assignment | In progress | Effective assignment command and service test close the prior current assignment; relational concurrency evidence remains |
 | MPOS-0212 | Persisted device enrollment, approval, revoke, heartbeat | In progress | APIs, assignment history, revocation epoch, grant revocation, admin UI, and service lifecycle test pass; live remote-disable flow remains |
-| MPOS-0213 | Offline policy and grant model | In progress | Persisted policy/grant foundation and policy UI implemented; grant signing/issuance and limit tests remain |
+| MPOS-0213 | Offline policy and grant model | In progress | Signed issuance requires offline/till permissions and an open cashier session; grant binds tenant/user/device/store/till/session/policy/revocation epoch, snapshots filtered command/tender/limit policy, supersedes prior grants, and has backend/client tests; sync-side signature/status/aggregate consumption enforcement remains MPOS-0504 |
 | MPOS-0214 | Bootstrap, dashboard shell, account, diagnostics | In progress | Dashboard and account surfaces use real bootstrap/auth values; authenticated visible-device evidence remains |
 | MPOS-0215 | HQ Mobile POS administration UI | In progress | Permission-gated route, navigation, stores/tills/policies/devices/assignments UI, typecheck, lint, and 27 route/access tests pass; browser verification remains |
 

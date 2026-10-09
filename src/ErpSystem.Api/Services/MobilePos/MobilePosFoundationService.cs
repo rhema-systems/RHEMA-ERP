@@ -9,6 +9,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.MobilePos;
@@ -29,22 +30,30 @@ public interface IMobilePosFoundationService
     Task<MobilePosDeviceDto> RevokeDeviceAsync(Guid id, MobilePosDeviceStatusChangeDto dto, CancellationToken cancellationToken);
     Task<MobilePosDeviceDto> RecordHeartbeatAsync(MobilePosHeartbeatDto dto, CancellationToken cancellationToken);
     Task<MobilePosBootstrapDto> GetBootstrapAsync(string installationId, CancellationToken cancellationToken);
+    Task<MobilePosOfflineGrantDto> IssueOfflineGrantAsync(
+        MobilePosOfflineGrantRequestDto dto,
+        IReadOnlyCollection<string> authorizedPermissions,
+        CancellationToken cancellationToken);
 }
 
 public sealed class MobilePosFoundationService : IMobilePosFoundationService
 {
+    private static readonly JsonSerializerOptions GrantJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly IHostEnvironment _environment;
+    private readonly IMobilePosOfflineGrantTokenService _offlineGrantTokens;
 
     public MobilePosFoundationService(
         ApplicationDbContext db,
         ICurrentUserService currentUser,
-        IHostEnvironment environment)
+        IHostEnvironment environment,
+        IMobilePosOfflineGrantTokenService offlineGrantTokens)
     {
         _db = db;
         _currentUser = currentUser;
         _environment = environment;
+        _offlineGrantTokens = offlineGrantTokens;
     }
 
     private Guid TenantId => _currentUser.TenantId is { } id && id != Guid.Empty
@@ -711,6 +720,178 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         return await GetDeviceRequiredAsync(device.Id, cancellationToken);
     }
 
+    public async Task<MobilePosOfflineGrantDto> IssueOfflineGrantAsync(
+        MobilePosOfflineGrantRequestDto dto,
+        IReadOnlyCollection<string> authorizedPermissions,
+        CancellationToken cancellationToken)
+    {
+        var bootstrap = await GetBootstrapAsync(dto.InstallationId, cancellationToken);
+        if (!bootstrap.CurrentTillSessionId.HasValue)
+            throw new InvalidOperationException("Open your assigned cashier till session before requesting offline authorization.");
+        if (bootstrap.OfflinePolicy == null || !bootstrap.Store.OfflinePolicyId.HasValue)
+            throw new InvalidOperationException("The assigned store does not have an active offline policy.");
+
+        var policy = await _db.MobilePosOfflinePolicies.AsNoTracking().SingleAsync(item =>
+            item.TenantId == TenantId && item.Id == bootstrap.Store.OfflinePolicyId.Value && item.IsActive,
+            cancellationToken);
+        var permissionSet = authorizedPermissions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var canCashSale = policy.AllowCashSale && HasPermissions(permissionSet,
+            MobilePosPermissions.CreateInvoice, MobilePosPermissions.PostInvoice, MobilePosPermissions.CollectPayment);
+        var canCashReceipt = policy.AllowCashReceipt && permissionSet.Contains(MobilePosPermissions.CollectPayment);
+        var canPartialPayment = policy.AllowPartialPayment && canCashReceipt;
+        var canReturn = policy.AllowReturns && permissionSet.Contains(MobilePosPermissions.CreateReturn);
+        var canReversal = policy.AllowReversals && permissionSet.Contains(MobilePosPermissions.CreateReversal);
+        var canPendingDayEnd = policy.AllowDayEndSubmissionWithPendingSync &&
+                               permissionSet.Contains(MobilePosPermissions.CloseTill);
+
+        var allowedCommands = new List<string>();
+        if (canCashSale) allowedCommands.Add("CashSale");
+        if (canCashReceipt) allowedCommands.Add("CashReceipt");
+        if (canPartialPayment) allowedCommands.Add("PartialPayment");
+        if (canReturn) allowedCommands.Add("Return");
+        if (canReversal) allowedCommands.Add("Reversal");
+        if (canPendingDayEnd) allowedCommands.Add("DayEndSubmissionWithPendingSync");
+        if (allowedCommands.Count == 0)
+            throw new UnauthorizedAccessException(
+                "Your current permissions and store policy do not authorize any offline Mobile POS operations.");
+
+        var paymentMethods = await _db.MobilePosTillPaymentMethods.AsNoTracking()
+            .Include(item => item.PaymentMethod)
+            .Where(item => item.TenantId == TenantId && item.MobilePosTillId == bootstrap.Till.Id &&
+                           item.AllowOffline && item.PaymentMethod.IsActive)
+            .OrderBy(item => item.DisplayOrder)
+            .Select(item => new MobilePosOfflinePaymentMethodSnapshotDto
+            {
+                PaymentMethodId = item.PaymentMethodId,
+                Code = item.PaymentMethod.Code ?? item.PaymentMethod.Name,
+                Name = item.PaymentMethod.Name,
+                Type = item.PaymentMethod.Type.ToString(),
+                RequiresReference = item.PaymentMethod.RequiresReference,
+                RequireExternalAuthorizationReference = item.RequireExternalAuthorizationReference ||
+                    (policy.RequireExternalReferenceForElectronicTender &&
+                     item.PaymentMethod.Type != PaymentMethodType.Cash)
+            })
+            .ToListAsync(cancellationToken);
+        if ((canCashSale || canCashReceipt) && paymentMethods.Count == 0)
+            throw new InvalidOperationException(
+                "The assigned till has no active payment method authorized for offline use.");
+
+        var now = DateTime.UtcNow;
+        var windowMinutes = Math.Min(policy.AuthorizationWindowMinutes, policy.MaximumOfflineAgeMinutes);
+        var expiresAt = now.AddMinutes(windowMinutes);
+        var snapshot = new MobilePosOfflineGrantPolicySnapshotDto
+        {
+            PolicyId = policy.Id,
+            PolicyName = policy.Name,
+            PolicyVersionUtc = (policy.UpdatedAt ?? policy.CreatedAt).ToUniversalTime(),
+            CurrencyCode = bootstrap.Store.CurrencyCode,
+            DefaultWalkInBusinessPartnerId = bootstrap.Store.DefaultWalkInBusinessPartnerId,
+            DefaultWalkInBusinessPartnerRoleId = bootstrap.Store.DefaultWalkInBusinessPartnerRoleId,
+            MaximumTransactionAmount = policy.MaximumTransactionAmount,
+            MaximumAggregateAmount = policy.MaximumAggregateAmount,
+            MaximumTransactionCount = policy.MaximumTransactionCount,
+            MaximumOfflineAgeMinutes = policy.MaximumOfflineAgeMinutes,
+            AllowPartialPayment = canPartialPayment,
+            AllowProvisionalReceipt = policy.AllowProvisionalReceipt && (canCashSale || canCashReceipt),
+            AllowDayEndSubmissionWithPendingSync = canPendingDayEnd,
+            AllowedCommandTypes = allowedCommands,
+            AllowedPaymentMethods = paymentMethods
+        };
+        var snapshotJson = JsonSerializer.Serialize(snapshot, GrantJsonOptions);
+        var snapshotHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(snapshotJson)));
+
+        var previousGrants = await _db.MobilePosOfflineGrants.Where(item =>
+            item.TenantId == TenantId && item.MobilePosDeviceId == bootstrap.Device.Id &&
+            item.Status == MobilePosOfflineGrantStatus.Active).ToListAsync(cancellationToken);
+        foreach (var previous in previousGrants)
+        {
+            previous.Status = previous.ExpiresAtUtc <= now
+                ? MobilePosOfflineGrantStatus.Expired
+                : MobilePosOfflineGrantStatus.Revoked;
+            if (previous.Status == MobilePosOfflineGrantStatus.Revoked)
+            {
+                previous.RevokedAtUtc = now;
+                previous.RevokedByUserId = UserId;
+                previous.RevocationReason = "Superseded by a newly issued offline grant.";
+            }
+            StampUpdated(previous);
+        }
+
+        var grant = new MobilePosOfflineGrant
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            UserId = UserId,
+            MobilePosDeviceId = bootstrap.Device.Id,
+            MobilePosStoreId = bootstrap.Store.Id,
+            MobilePosTillId = bootstrap.Till.Id,
+            CashierTillSessionId = bootstrap.CurrentTillSessionId.Value,
+            MobilePosOfflinePolicyId = policy.Id,
+            IssuedAtUtc = now,
+            ExpiresAtUtc = expiresAt,
+            Status = MobilePosOfflineGrantStatus.Active,
+            RevocationEpoch = bootstrap.Device.RevocationEpoch,
+            PolicySnapshotJson = snapshotJson,
+            PolicySnapshotHash = snapshotHash,
+            CreatedAt = now,
+            CreatedBy = UserName,
+            CreatedById = UserId
+        };
+        _db.MobilePosOfflineGrants.Add(grant);
+
+        var token = _offlineGrantTokens.Sign(new MobilePosOfflineGrantTokenPayload(
+            MobilePosOfflineGrantTokenService.CurrentVersion,
+            grant.Id,
+            TenantId,
+            UserId,
+            grant.MobilePosDeviceId,
+            grant.MobilePosStoreId,
+            grant.MobilePosTillId,
+            grant.CashierTillSessionId,
+            grant.MobilePosOfflinePolicyId,
+            snapshotHash,
+            grant.RevocationEpoch,
+            now,
+            expiresAt));
+
+        await AddAuditAsync("MobilePOS.OfflineGrant.Issued", nameof(MobilePosOfflineGrant), grant.Id, null, new
+        {
+            grant.UserId,
+            grant.MobilePosDeviceId,
+            grant.MobilePosStoreId,
+            grant.MobilePosTillId,
+            grant.CashierTillSessionId,
+            grant.MobilePosOfflinePolicyId,
+            grant.IssuedAtUtc,
+            grant.ExpiresAtUtc,
+            grant.RevocationEpoch,
+            grant.PolicySnapshotHash,
+            allowedCommands,
+            paymentMethodIds = paymentMethods.Select(item => item.PaymentMethodId).ToArray(),
+            supersededGrantIds = previousGrants.Select(item => item.Id).ToArray()
+        });
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return new MobilePosOfflineGrantDto
+        {
+            Id = grant.Id,
+            Version = MobilePosOfflineGrantTokenService.CurrentVersion,
+            Token = token,
+            TenantId = TenantId,
+            UserId = UserId,
+            MobilePosDeviceId = grant.MobilePosDeviceId,
+            MobilePosStoreId = grant.MobilePosStoreId,
+            MobilePosTillId = grant.MobilePosTillId,
+            CashierTillSessionId = grant.CashierTillSessionId,
+            MobilePosOfflinePolicyId = grant.MobilePosOfflinePolicyId,
+            IssuedAtUtc = grant.IssuedAtUtc,
+            ExpiresAtUtc = grant.ExpiresAtUtc,
+            RevocationEpoch = grant.RevocationEpoch,
+            PolicySnapshotHash = grant.PolicySnapshotHash,
+            Policy = snapshot
+        };
+    }
+
     public async Task<MobilePosBootstrapDto> GetBootstrapAsync(
         string installationId,
         CancellationToken cancellationToken)
@@ -1071,6 +1252,9 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         if (values.Any(value => value == Guid.Empty))
             throw new InvalidOperationException("All required selections must be provided.");
     }
+
+    private static bool HasPermissions(IReadOnlySet<string> permissionSet, params string[] permissions)
+        => permissions.All(permissionSet.Contains);
 
     private static object StoreAuditSnapshot(MobilePosStore item) => new
     {

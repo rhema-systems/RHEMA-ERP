@@ -3,11 +3,15 @@ import * as Device from "expo-device";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ApiProblem, mobileApi } from "@/src/api/client";
 import { defaultServerProfile, validateServerProfile } from "@/src/config/environment";
+import { isOfflineGrantUsable } from "@/src/offline/grant";
 import {
+  clearOfflineGrant,
   clearTokens,
   getInstallationId,
+  loadOfflineGrant,
   loadServerProfile,
   loadTokens,
+  saveOfflineGrant,
   saveServerProfile,
   saveTokens,
 } from "@/src/storage/secure-session";
@@ -15,6 +19,7 @@ import type {
   LoginRequest,
   MobilePosBootstrap,
   MobilePosDevice,
+  MobilePosOfflineGrant,
   ServerProfile,
   UserInfo,
 } from "@/src/types/api";
@@ -33,11 +38,15 @@ interface SessionContextValue {
   profile: ServerProfile;
   user: UserInfo | null;
   bootstrap: MobilePosBootstrap | null;
+  offlineGrant: MobilePosOfflineGrant | null;
+  offlineGrantBusy: boolean;
+  offlineGrantError: ApiProblem | null;
   pendingDevice: MobilePosDevice | null;
   error: ApiProblem | null;
   signIn: (profile: ServerProfile, request: LoginRequest) => Promise<void>;
   submitMfa: (code: string) => Promise<void>;
   refreshBootstrap: () => Promise<void>;
+  requestOfflineGrant: () => Promise<void>;
   switchTenant: (tenantCode: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -75,6 +84,9 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
   const [profile, setProfile] = useState<ServerProfile>(defaultServerProfile);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [bootstrap, setBootstrap] = useState<MobilePosBootstrap | null>(null);
+  const [offlineGrant, setOfflineGrant] = useState<MobilePosOfflineGrant | null>(null);
+  const [offlineGrantBusy, setOfflineGrantBusy] = useState(false);
+  const [offlineGrantError, setOfflineGrantError] = useState<ApiProblem | null>(null);
   const [pendingDevice, setPendingDevice] = useState<MobilePosDevice | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
   const [pendingLogin, setPendingLogin] = useState<PendingLogin | null>(null);
@@ -83,14 +95,24 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
     const installationId = await getInstallationId();
     try {
       const result = await mobileApi.bootstrap(installationId);
+      const cachedGrant = await loadOfflineGrant();
+      if (cachedGrant && isOfflineGrantUsable(cachedGrant, result, currentUser.currentTenantId)) {
+        setOfflineGrant(cachedGrant);
+      } else {
+        await clearOfflineGrant();
+        setOfflineGrant(null);
+      }
       setBootstrap(result);
       setPendingDevice(null);
       setError(null);
+      setOfflineGrantError(null);
       setStatus("ready");
       return;
     } catch (caught) {
       const problem = asApiProblem(caught);
       if (!allowEnrollment || !mayRequestEnrollment(currentUser) || ![401, 403, 404].includes(problem.status)) {
+        await clearOfflineGrant();
+        setOfflineGrant(null);
         setError(problem);
         setStatus("blocked");
         return;
@@ -98,6 +120,8 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
     }
 
     try {
+      await clearOfflineGrant();
+      setOfflineGrant(null);
       const device = await mobileApi.requestEnrollment(await buildEnrollmentRequest());
       setPendingDevice(device);
       if (isActiveDevice(device)) {
@@ -105,13 +129,18 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
         setBootstrap(result);
         setPendingDevice(null);
         setError(null);
+        setOfflineGrantError(null);
         setStatus("ready");
       } else {
+        await clearOfflineGrant();
+        setOfflineGrant(null);
         setBootstrap(null);
         setError(null);
         setStatus("enrollmentPending");
       }
     } catch (caught) {
+      await clearOfflineGrant();
+      setOfflineGrant(null);
       setError(asApiProblem(caught));
       setStatus("blocked");
     }
@@ -143,12 +172,15 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
     setStatus("initializing");
     setError(null);
     try {
+      await clearOfflineGrant();
+      setOfflineGrant(null);
+      setOfflineGrantError(null);
       const checked = validateServerProfile(nextProfile);
       await saveServerProfile(checked);
       setProfile(checked);
       await completeLogin(request);
     } catch (caught) {
-      await clearTokens();
+      await Promise.all([clearTokens(), clearOfflineGrant()]);
       setUser(null);
       setError(asApiProblem(caught));
       setStatus("signedOut");
@@ -175,10 +207,51 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
     await resolveMobileAccess(user, true);
   }, [resolveMobileAccess, user]);
 
+  const requestOfflineGrant = useCallback(async () => {
+    if (!user || !bootstrap) {
+      throw new ApiProblem("Refresh your Mobile POS assignment before requesting offline authorization.", 409, "MOBILE_CONTEXT_REQUIRED");
+    }
+    if (!user.permissions.includes("MobilePOS.Offline.Use") || !user.permissions.includes("MobilePOS.Till.Operate")) {
+      throw new ApiProblem("Your assigned role does not authorize offline Mobile POS operation.", 403, "OFFLINE_PERMISSION_REQUIRED");
+    }
+    if (!bootstrap.currentTillSessionId) {
+      throw new ApiProblem("Open your assigned cashier till session before requesting offline authorization.", 409, "TILL_SESSION_REQUIRED");
+    }
+    if (!bootstrap.offlinePolicy) {
+      throw new ApiProblem("The assigned store does not have an active offline policy.", 409, "OFFLINE_POLICY_REQUIRED");
+    }
+
+    setOfflineGrantBusy(true);
+    setOfflineGrantError(null);
+    try {
+      const grant = await mobileApi.issueOfflineGrant(await getInstallationId());
+      if (!isOfflineGrantUsable(grant, bootstrap, user.currentTenantId)) {
+        await clearOfflineGrant();
+        setOfflineGrant(null);
+        throw new ApiProblem(
+          "The issued offline authorization does not match the current Mobile POS assignment. Refresh and try again.",
+          409,
+          "OFFLINE_GRANT_CONTEXT_MISMATCH",
+        );
+      }
+      await saveOfflineGrant(grant);
+      setOfflineGrant(grant);
+    } catch (caught) {
+      const problem = asApiProblem(caught);
+      setOfflineGrantError(problem);
+      throw problem;
+    } finally {
+      setOfflineGrantBusy(false);
+    }
+  }, [bootstrap, user]);
+
   const switchTenant = useCallback(async (tenantCode: string) => {
     setStatus("initializing");
     setError(null);
     try {
+      await clearOfflineGrant();
+      setOfflineGrant(null);
+      setOfflineGrantError(null);
       const response = await mobileApi.selectTenant(tenantCode);
       await saveTokens(response.token, response.refreshToken, response.expiresAt);
       setUser(response.user);
@@ -198,9 +271,11 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
     } catch {
       // Local credentials must still be removed when the session is already expired.
     } finally {
-      await clearTokens();
+      await Promise.all([clearTokens(), clearOfflineGrant()]);
       setUser(null);
       setBootstrap(null);
+      setOfflineGrant(null);
+      setOfflineGrantError(null);
       setPendingDevice(null);
       setPendingLogin(null);
       setError(null);
@@ -215,6 +290,7 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
         if (savedProfile) setProfile(validateServerProfile(savedProfile));
         const tokens = await loadTokens();
         if (!savedProfile || !tokens) {
+          await clearOfflineGrant();
           setStatus("signedOut");
           return;
         }
@@ -222,27 +298,47 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
         setUser(currentUser);
         await resolveMobileAccess(currentUser, true);
       } catch (caught) {
-        await clearTokens();
+        await Promise.all([clearTokens(), clearOfflineGrant()]);
         setUser(null);
+        setOfflineGrant(null);
         setError(asApiProblem(caught));
         setStatus("signedOut");
       }
     })();
   }, [resolveMobileAccess]);
 
+  useEffect(() => {
+    if (!offlineGrant) return undefined;
+    const remaining = Date.parse(offlineGrant.expiresAtUtc) - Date.now();
+    if (!Number.isFinite(remaining) || remaining <= 0) {
+      void clearOfflineGrant();
+      setOfflineGrant(null);
+      return undefined;
+    }
+    const timeout = setTimeout(() => {
+      void clearOfflineGrant();
+      setOfflineGrant(null);
+    }, Math.min(remaining + 1_000, 2_147_000_000));
+    return () => clearTimeout(timeout);
+  }, [offlineGrant]);
+
   const value = useMemo<SessionContextValue>(() => ({
     status,
     profile,
     user,
     bootstrap,
+    offlineGrant,
+    offlineGrantBusy,
+    offlineGrantError,
     pendingDevice,
     error,
     signIn,
     submitMfa,
     refreshBootstrap,
+    requestOfflineGrant,
     switchTenant,
     signOut,
-  }), [status, profile, user, bootstrap, pendingDevice, error, signIn, submitMfa, refreshBootstrap, switchTenant, signOut]);
+  }), [status, profile, user, bootstrap, offlineGrant, offlineGrantBusy, offlineGrantError, pendingDevice, error, signIn, submitMfa, refreshBootstrap, requestOfflineGrant, switchTenant, signOut]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

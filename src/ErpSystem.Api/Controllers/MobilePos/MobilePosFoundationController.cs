@@ -13,8 +13,15 @@ namespace ErpSystem.Api.Controllers.MobilePos;
 public sealed class MobilePosRuntimeController : ControllerBase
 {
     private readonly IMobilePosFoundationService _service;
+    private readonly IAuthorizationService _authorization;
 
-    public MobilePosRuntimeController(IMobilePosFoundationService service) => _service = service;
+    public MobilePosRuntimeController(
+        IMobilePosFoundationService service,
+        IAuthorizationService authorization)
+    {
+        _service = service;
+        _authorization = authorization;
+    }
 
     [HttpPost("devices/enrollment-requests")]
     [Authorize(Policy = MobilePosPermissions.EnrollDevice)]
@@ -36,6 +43,32 @@ public sealed class MobilePosRuntimeController : ControllerBase
         [FromBody] MobilePosHeartbeatDto dto,
         CancellationToken cancellationToken)
         => Ok(await _service.RecordHeartbeatAsync(dto, cancellationToken));
+
+    [HttpPost("offline-grants")]
+    [Authorize(Policy = MobilePosPermissions.UseOffline)]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    public async Task<ActionResult<MobilePosOfflineGrantDto>> IssueOfflineGrant(
+        [FromBody] MobilePosOfflineGrantRequestDto dto,
+        CancellationToken cancellationToken)
+    {
+        var candidatePermissions = new[]
+        {
+            MobilePosPermissions.CreateInvoice,
+            MobilePosPermissions.PostInvoice,
+            MobilePosPermissions.CollectPayment,
+            MobilePosPermissions.CreateReturn,
+            MobilePosPermissions.CreateReversal,
+            MobilePosPermissions.CloseTill
+        };
+        var authorizedPermissions = new List<string>();
+        foreach (var permission in candidatePermissions)
+        {
+            if ((await _authorization.AuthorizeAsync(User, permission)).Succeeded)
+                authorizedPermissions.Add(permission);
+        }
+
+        return Ok(await _service.IssueOfflineGrantAsync(dto, authorizedPermissions, cancellationToken));
+    }
 }
 
 [ApiController]

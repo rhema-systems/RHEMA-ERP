@@ -10,6 +10,7 @@ import type {
   LoginResponse,
   MobilePosBootstrap,
   MobilePosDevice,
+  MobilePosOfflineGrant,
   SelectTenantResponse,
   UserInfo,
 } from "@/src/types/api";
@@ -150,6 +151,10 @@ export const mobileApi = {
   },
   bootstrap: (installationId: string) => authorizedRequest<MobilePosBootstrap>(
     `/api/mobile-pos/v1/bootstrap?installationId=${encodeURIComponent(installationId)}`,
+  ),
+  issueOfflineGrant: (installationId: string) => authorizedRequest<MobilePosOfflineGrant>(
+    "/api/mobile-pos/v1/offline-grants",
+    { method: "POST", body: JSON.stringify({ installationId }) },
   ),
   requestEnrollment: (request: DeviceEnrollmentRequest) => authorizedRequest<MobilePosDevice>(
     "/api/mobile-pos/v1/devices/enrollment-requests",

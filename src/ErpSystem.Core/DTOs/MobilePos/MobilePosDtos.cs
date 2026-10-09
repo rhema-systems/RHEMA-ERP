@@ -236,6 +236,60 @@ public sealed class MobilePosHeartbeatDto
     public DateTime? LastSyncAtUtc { get; set; }
 }
 
+public sealed class MobilePosOfflineGrantRequestDto
+{
+    [Required, StringLength(200, MinimumLength = 16)]
+    public string InstallationId { get; set; } = string.Empty;
+}
+
+public sealed class MobilePosOfflinePaymentMethodSnapshotDto
+{
+    public Guid PaymentMethodId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+    public bool RequiresReference { get; set; }
+    public bool RequireExternalAuthorizationReference { get; set; }
+}
+
+public sealed class MobilePosOfflineGrantPolicySnapshotDto
+{
+    public Guid PolicyId { get; set; }
+    public string PolicyName { get; set; } = string.Empty;
+    public DateTime PolicyVersionUtc { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public Guid DefaultWalkInBusinessPartnerId { get; set; }
+    public Guid DefaultWalkInBusinessPartnerRoleId { get; set; }
+    public decimal? MaximumTransactionAmount { get; set; }
+    public decimal? MaximumAggregateAmount { get; set; }
+    public int? MaximumTransactionCount { get; set; }
+    public int MaximumOfflineAgeMinutes { get; set; }
+    public bool AllowPartialPayment { get; set; }
+    public bool AllowProvisionalReceipt { get; set; }
+    public bool AllowDayEndSubmissionWithPendingSync { get; set; }
+    public IReadOnlyList<string> AllowedCommandTypes { get; set; } = [];
+    public IReadOnlyList<MobilePosOfflinePaymentMethodSnapshotDto> AllowedPaymentMethods { get; set; } = [];
+}
+
+public sealed class MobilePosOfflineGrantDto
+{
+    public Guid Id { get; set; }
+    public int Version { get; set; }
+    public string Token { get; set; } = string.Empty;
+    public Guid TenantId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid MobilePosDeviceId { get; set; }
+    public Guid MobilePosStoreId { get; set; }
+    public Guid MobilePosTillId { get; set; }
+    public Guid CashierTillSessionId { get; set; }
+    public Guid MobilePosOfflinePolicyId { get; set; }
+    public DateTime IssuedAtUtc { get; set; }
+    public DateTime ExpiresAtUtc { get; set; }
+    public long RevocationEpoch { get; set; }
+    public string PolicySnapshotHash { get; set; } = string.Empty;
+    public MobilePosOfflineGrantPolicySnapshotDto Policy { get; set; } = new();
+}
+
 public sealed class MobilePosDeviceDto
 {
     public Guid Id { get; set; }

@@ -133,4 +133,22 @@ describe("Mobile POS API client", () => {
     expect(storage.saveTokens).toHaveBeenCalledTimes(1);
     expect(storage.tokens).toEqual({ accessToken: "new-access", refreshToken: "new-refresh" });
   });
+
+  it("requests an offline grant for the current installation with bearer authorization", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      id: "grant-1",
+      token: "signed-token",
+      policy: { allowedCommandTypes: ["CashSale"] },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await mobileApi.issueOfflineGrant("installation-123456");
+
+    expect(result.id).toBe("grant-1");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://erp.example.com/api/mobile-pos/v1/offline-grants");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer old-access");
+    expect(JSON.parse(String(init.body))).toEqual({ installationId: "installation-123456" });
+  });
 });
