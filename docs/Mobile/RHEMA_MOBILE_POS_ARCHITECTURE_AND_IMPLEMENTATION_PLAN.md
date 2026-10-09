@@ -660,6 +660,10 @@ Deliver this report, the implementation tracker, and the Finance coordination le
 ### Phase 5 - Offline
 
 - SQLite migrations, scoped cache, outbox, grant enforcement, idempotent push/pull, conflict and exception UI.
+- The implemented version-3 SQLite outbox persists only canonical command payloads and their hashes. Access/refresh tokens and the signed offline grant remain in Android SecureStore and are loaded only when a command is dispatched.
+- Cash-sale synchronization accepts one command at a time through `POST /api/mobile-pos/v1/sync/push`. The server recomputes the canonical payload hash, checks the envelope identity, validates the signed and persisted authorization at the recorded occurrence time, and then reuses the canonical atomic invoice/posting/payment mutation path.
+- The signed capability snapshot now requires both dynamic Mobile POS permissions and the canonical Finance invoice/posting/receipt permissions. It records whether discounts were authorized, so an expired but otherwise valid grant cannot gain privileges from a later role change.
+- Successful, rejected, and conflicting commands are explicit server decisions. Transport failures remain retryable under the same mutation ID; missing/mismatched secure grants and invalid responses require manual review rather than silent loss or duplicate posting.
 
 **Exit gate:** forced disconnect/retry/restart/upgrade tests cannot duplicate or lose financial work.
 

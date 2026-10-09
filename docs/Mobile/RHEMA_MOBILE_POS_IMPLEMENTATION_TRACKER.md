@@ -102,13 +102,13 @@
 
 | ID | Work item | Status |
 | --- | --- | --- |
-| MPOS-0501 | SQLite schema and migrations | In progress - versioned Expo SQLite migrations create scoped catalogue, approved-customer, tender, bootstrap/configuration, receipt, cursor, and outbox tables with WAL, foreign keys, and no tokens or signing secrets; Android install/upgrade persistence evidence remains |
+| MPOS-0501 | SQLite schema and migrations | In progress - versioned Expo SQLite migrations through version 3 create scoped catalogue, approved-customer, tender, bootstrap/configuration, receipt, cursor, and guarded outbox tables with WAL, foreign keys, and no tokens or signing secrets; Android install/upgrade persistence evidence remains |
 | MPOS-0502 | Scoped catalogue/customer/config cache | In progress - catalogue and approved-customer change feeds are isolated by tenant/user/device/store/till, cursor-resumable, transactionally applied, tombstone-aware, and locally searchable; bootstrap and current till payment-method projections are replaced transactionally; physical Android persistence and broader server pull evidence remain |
-| MPOS-0503 | Transactional outbox | Planned |
-| MPOS-0504 | Signed offline-grant enforcement | Planned |
-| MPOS-0505 | Idempotent sync push/pull | Planned |
-| MPOS-0506 | Retry/rejection/conflict state machine | Planned |
-| MPOS-0507 | Restart and APK-upgrade preservation | Planned |
+| MPOS-0503 | Transactional outbox | In progress - SQLite persists scope-bound draft/pending commands, canonical payload hashes, exclusive dispatch claims, attempt metadata, terminal server results, and guarded legal state transitions; visible device restart evidence remains |
+| MPOS-0504 | Signed offline-grant enforcement | In progress - every cash-sale push revalidates signature, persisted status, occurrence window, revocation epoch, assignment, snapshot hash, signed command/tender/discount permissions, Finance permissions, per-sale/count/aggregate limits, and cashier session; relational concurrency and live revocation evidence remain |
+| MPOS-0505 | Idempotent sync push/pull | In progress - single-command `/sync/push` validates the canonical SQLite payload hash and signed scope before using the existing mutation, invoice, posting, and payment boundary; exact replays remain idempotent and existing cursor feeds provide pull; full device disconnect/reconnect evidence remains |
+| MPOS-0506 | Retry/rejection/conflict state machine | In progress - the dispatcher maps explicit server Synced/Rejected/Conflict decisions, bounded retry of ambiguous transport failures, interrupted claims, secure-grant mismatch, and incomplete results into governed outbox states; operator exception UI remains |
+| MPOS-0507 | Restart and APK-upgrade preservation | In progress - versioned additive migrations and durable SQLite command/cache storage are implemented; install, process-kill, restart, and signed APK upgrade preservation evidence remains |
 
 ## Phase 6 - till and day-end
 
