@@ -1,9 +1,12 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using ErpSystem.Data.Repositories;
 using ErpSystem.Data.Repositories.Procurement;
@@ -11,11 +14,72 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Procurement;
 
 public sealed class BusinessPartnerLifecycleGovernanceTests
 {
+    [Fact]
+    public async Task SubmissionWithConfiguredWorkflowCreatesPendingInstanceAndCannotSelfApprove()
+    {
+        var tenantId = Guid.NewGuid();
+        var submitterId = Guid.NewGuid();
+        var workflowInstanceId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"business-partner-submission-{Guid.NewGuid():N}")
+                .Options);
+        var partner = new BusinessPartner
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, PartnerCode = "SUP-GOV-002",
+            PartnerName = "Workflow Governed Supplier", PartnerType = "Supplier",
+            RegistrationStatus = "Draft", ApprovalStatus = "Draft", IsActive = false
+        };
+        db.BusinessPartners.Add(partner);
+        await db.SaveChangesAsync();
+
+        var current = new Mock<ICurrentUserProvider>();
+        current.SetupGet(value => value.TenantId).Returns(tenantId);
+        current.SetupGet(value => value.UserId).Returns(submitterId);
+        current.SetupGet(value => value.IsAuthenticated).Returns(true);
+        var repository = new BusinessPartnerRepository(
+            db, current.Object, NullLogger<BusinessPartnerRepository>.Instance);
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(service => service.HasActiveApprovalInstanceAsync("BusinessPartner", partner.Id))
+            .ReturnsAsync(false);
+        workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("BusinessPartner"))
+            .ReturnsAsync(true);
+        workflow.Setup(service => service.StartApprovalWorkflowAsync("BusinessPartner", partner.Id))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = workflowInstanceId
+            });
+        var integration = new WorkflowIntegrationService(
+            workflow.Object, NullLogger<WorkflowIntegrationService>.Instance);
+        var adapters = new WorkflowStatusAdapterRegistry([new BusinessPartnerWorkflowStatusAdapter()]);
+        var service = new BusinessPartnerService(
+            repository,
+            Mock.Of<IBusinessPartnerContactRepository>(),
+            current.Object,
+            integration,
+            adapters,
+            Mock.Of<IPaymentTermRepository>(),
+            NullLogger<BusinessPartnerService>.Instance,
+            new UnitOfWork(db));
+
+        await service.SubmitPartnerForApprovalAsync(partner.Id, submitterId);
+
+        var persisted = await db.BusinessPartners.AsNoTracking().SingleAsync(value => value.Id == partner.Id);
+        persisted.RegistrationStatus.Should().Be("PendingApproval");
+        persisted.ApprovalStatus.Should().Be("Pending");
+        persisted.IsActive.Should().BeFalse();
+        persisted.ApprovedById.Should().BeNull();
+        workflow.Verify(service => service.StartApprovalWorkflowAsync("BusinessPartner", partner.Id), Times.Once);
+    }
+
     [Fact]
     public async Task OrdinaryUpdate_CannotActivatePendingPartner()
     {

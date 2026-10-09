@@ -55,6 +55,38 @@ public sealed class WorkflowEntitySummaryTests
     }
 
     [Fact]
+    public async Task EntityTypeRepositoryPrefersCanonicalBusinessPartnerCodeOverLegacyExactName()
+    {
+        await using var db = CreateDb();
+        var tenantId = Guid.NewGuid();
+        var canonical = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "BusinessPartner",
+            Name = "Business Partner",
+            IsActive = true
+        };
+        var legacy = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "BUSINESS_PARTNER",
+            Name = "BusinessPartner",
+            IsActive = true
+        };
+        db.WorkflowEntityTypes.AddRange(canonical, legacy);
+        await db.SaveChangesAsync();
+
+        var repository = new WorkflowEntityTypeRepository(db);
+
+        var result = await repository.GetByNameAsync("BusinessPartner", tenantId);
+
+        Assert.NotNull(result);
+        Assert.Equal(canonical.Id, result.Id);
+    }
+
+    [Fact]
     public async Task GetEntitySummaryUsesConfiguredCodeForEveryWorkflowServiceLookup()
     {
         await using var db = CreateDb();

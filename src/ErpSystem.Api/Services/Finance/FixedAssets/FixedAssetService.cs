@@ -1502,6 +1502,23 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         ArgumentNullException.ThrowIfNull(dto);
         if (_workflowService is null || _sourceBookAuthority is null)
             throw new InvalidOperationException("Direct capitalization requires governed workflow and source-book authority services.");
+
+        var executionStrategy = _context.Database.CreateExecutionStrategy();
+        var firstAttempt = true;
+        return await executionStrategy.ExecuteAsync(async () =>
+        {
+            if (!firstAttempt)
+                _context.ChangeTracker.Clear();
+            firstAttempt = false;
+            return await SubmitCapitalizationForApprovalCoreAsync(id, dto, cancellationToken);
+        });
+    }
+
+    private async Task<FixedAssetDto> SubmitCapitalizationForApprovalCoreAsync(
+        Guid id,
+        SubmitFixedAssetCapitalizationDto dto,
+        CancellationToken cancellationToken)
+    {
         await using var transaction = _context.Database.IsRelational()
             ? await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
             : null;
@@ -1626,8 +1643,6 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         cycle.DimensionEvidenceHash = await DirectCapitalizationDimensionEvidenceHashAsync(cycle.Id, cancellationToken);
         cycle.Status = "Submitted";
         await _context.SaveChangesAsync(cancellationToken);
-        if (transaction is not null)
-            await transaction.CommitAsync(cancellationToken);
 
         await RecordFixedAssetAuditAsync(
             FinanceAuditEvents.FinanceWorkflowSubmitted,
@@ -1647,6 +1662,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 snapshot.ExchangeRateId
             },
             comment: dto.Comments ?? "Fixed asset direct capitalization submitted for workflow approval.");
+
+        if (transaction is not null)
+            await transaction.CommitAsync(cancellationToken);
 
         return MapToDto(asset);
     }
