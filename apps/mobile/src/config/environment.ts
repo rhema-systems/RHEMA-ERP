@@ -2,10 +2,11 @@ import type { RuntimeEnvironment, ServerProfile } from "@/src/types/api";
 
 const configuredEnvironment = process.env.EXPO_PUBLIC_RHEMA_ENVIRONMENT;
 const configuredBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+const isDevelopment = typeof __DEV__ !== "undefined" && __DEV__;
 
 export const defaultServerProfile: ServerProfile = {
   environment: configuredEnvironment ?? "TEST",
-  apiBaseUrl: configuredBaseUrl ?? (__DEV__ ? "http://10.0.2.2:5000" : ""),
+  apiBaseUrl: configuredBaseUrl ?? (isDevelopment ? "http://10.0.2.2:5000" : ""),
 };
 
 export function validateServerProfile(input: ServerProfile): ServerProfile {

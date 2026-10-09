@@ -40,12 +40,32 @@ let refreshFlight: Promise<void> | null = null;
 
 async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
-  const payload = text ? (JSON.parse(text) as T & ProblemPayload) : undefined;
+  const headerCorrelationId = response.headers.get("x-correlation-id") ?? undefined;
+  let payload: (T & ProblemPayload) | undefined;
+  if (text) {
+    try {
+      payload = JSON.parse(text) as T & ProblemPayload;
+    } catch {
+      if (response.ok) {
+        throw new ApiProblem(
+          "The server returned an unreadable response. Try again and contact support if it continues.",
+          502,
+          "INVALID_SERVER_RESPONSE",
+          headerCorrelationId,
+        );
+      }
+      throw new ApiProblem(
+        `Request failed with HTTP ${response.status}.`,
+        response.status,
+        "NON_JSON_ERROR_RESPONSE",
+        headerCorrelationId,
+      );
+    }
+  }
   if (response.ok) return payload as T;
 
   const correlationId = payload?.extensions?.correlationId
-    ?? response.headers.get("x-correlation-id")
-    ?? undefined;
+    ?? headerCorrelationId;
   throw new ApiProblem(
     payload?.detail ?? payload?.message ?? payload?.title ?? `Request failed with HTTP ${response.status}.`,
     response.status,

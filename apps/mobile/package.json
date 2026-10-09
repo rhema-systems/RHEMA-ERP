@@ -8,6 +8,8 @@
     "android": "expo start --android",
     "prebuild:android": "expo prebuild --platform android --clean",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "doctor": "expo-doctor",
     "export:android": "expo export --platform android --output-dir dist/android"
   },
@@ -32,6 +34,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
-    "typescript": "~5.9.2"
+    "expo-doctor": "^1.20.4",
+    "typescript": "~5.9.2",
+    "vitest": "^3.2.4"
   }
 }

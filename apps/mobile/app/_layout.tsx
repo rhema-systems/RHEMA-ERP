@@ -3,11 +3,12 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { createSupportReference } from "@/src/diagnostics/support-reference";
 import { SessionProvider } from "@/src/session/session-context";
 import { colors } from "@/src/ui/theme";
 
 export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
-  const reference = `MOBILE-${Date.now().toString(36).toUpperCase()}`;
+  const reference = createSupportReference();
   if (__DEV__) console.error("RHEMA Mobile root failure", { reference, name: error.name, message: error.message });
 
   return (

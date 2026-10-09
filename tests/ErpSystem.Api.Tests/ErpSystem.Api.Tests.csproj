@@ -43,6 +43,7 @@
     <Compile Include="Services\Sms\MNotifySmsGatewayTests.cs" />
     <Compile Include="Services\ApplicationEnvironmentServiceTests.cs" />
     <Compile Include="Services\Identity\UserServiceTenantScopeTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosFoundationServiceTests.cs" />
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />

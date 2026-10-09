@@ -87,11 +87,12 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - All requested A-U architecture sections, management decisions, phase gates, data contracts, API proposals, migration plan, test plan, and blockers are present in the Phase 1 report.
 - Full migration-aware API build passed with 0 errors; the build preserved 89 EF models and compiled the new migration metadata.
 - Idempotent SQL generation from `20261008192833_AddPropertySalesOrderDepositLifecycle` to `20261009054618_AddMobilePosFoundation` passed. The 28,333-byte script contains nine `CREATE TABLE` statements and the expected stores, tills, devices, policies, and migration-history marker.
-- Six focused `MobilePosFoundationTests` passed, covering unique permission catalogue entries, database-backed permission policies without role names, runtime/admin controller policy coverage, tenant-scoped unique model indexes, and required walk-in customer foreign keys.
+- Ten focused Mobile POS API tests passed: six authorization/model tests plus four service integration tests covering rejection of an unapproved default customer, persistence of an approved store/customer mapping with audit evidence, replacement of an effective user-store assignment, and enrollment/approval/revocation/heartbeat behavior including offline-grant revocation.
 - Frontend TypeScript check passed. Focused ESLint passed for the Mobile POS page/service and changed route/navigation/auth files.
 - Frontend administration/access tests passed: 27 tests across the route guard, Settings registry, and navigation access helper.
 - Frontend production build passed. The generated app manifest contains `/administration/mobile-pos/page`.
-- Expo application TypeScript check passed; Expo Doctor passed 18/18 checks; Android bundle export passed.
+- Expo application TypeScript check passed. Eleven client tests passed across environment policy, sanitized support references, ProblemDetails and non-JSON response handling, and concurrent-401 single-flight refresh behavior.
+- Expo Doctor is installed as a reproducible development dependency and passed 18/18 checks. Android bundle export passed and generated the Android Hermes bundle and metadata under the ignored `apps/mobile/dist/android` output.
 
 ## Known failures and constraints
 
@@ -103,7 +104,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 
 ## Remaining work
 
-Complete the remaining Phase 2 acceptance evidence: focused API/service integration cases, environment and ProblemDetails contract tests, physical Android secure-storage/auth/enrollment flow, visible HQ browser verification after applying the migration in an authorized test database, and offline-grant signing/issuance. Then begin the Phase 3 canonical Finance orchestration. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
+Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migration in an authorized test database, relational concurrency coverage for effective assignments, and offline-grant signing/issuance. Then begin the Phase 3 canonical Finance orchestration. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
 
 ## Authorization boundaries
 
