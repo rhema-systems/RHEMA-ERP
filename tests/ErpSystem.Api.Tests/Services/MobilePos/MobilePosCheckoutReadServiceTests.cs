@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.MobilePos;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.MobilePos;
 using ErpSystem.Core.Entities.Inventory;
@@ -8,6 +9,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Moq;
@@ -73,6 +75,32 @@ public sealed class MobilePosCheckoutReadServiceTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task PreviewAsync_ShouldRejectDiscountWithoutDynamicPermission()
+    {
+        await using var fixture = await Fixture.CreateAsync(grantDiscountPermission: false);
+
+        var action = () => fixture.Service.PreviewAsync(new MobilePosSalePreviewRequestDto
+        {
+            InstallationId = "install-01",
+            Lines =
+            [
+                new MobilePosSalePreviewLineInputDto
+                {
+                    ClientLineId = Guid.NewGuid(),
+                    InventoryItemId = fixture.ItemId,
+                    Quantity = 1m,
+                    DiscountPercentage = 1m
+                }
+            ]
+        }, CancellationToken.None);
+
+        await action.Should().ThrowAsync<MobilePosCommandRejectedException>()
+            .Where(exception => exception.Code == "MOBILE_POS_DISCOUNT_NOT_AUTHORIZED");
+        fixture.Taxes.Verify(service => service.CalculateDocumentTaxesAsync(
+            It.IsAny<TaxDocumentCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(
@@ -95,7 +123,7 @@ public sealed class MobilePosCheckoutReadServiceTests
         public Guid ItemId { get; }
         public Guid PartnerId { get; }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool grantDiscountPermission = true)
         {
             var tenantId = Guid.NewGuid();
             var userId = Guid.NewGuid();
@@ -184,6 +212,31 @@ public sealed class MobilePosCheckoutReadServiceTests
                     ItemType = ItemType.Service,
                     Status = ItemStatus.Inactive
                 });
+            if (grantDiscountPermission)
+            {
+                var discountRole = new ApplicationRole("Configurable POS cashier")
+                {
+                    Id = Guid.NewGuid(),
+                    NormalizedName = "CONFIGURABLE POS CASHIER"
+                };
+                var discountPermission = new Permission
+                {
+                    Id = Guid.NewGuid(),
+                    Name = MobilePosPermissions.ApplyDiscount,
+                    DisplayName = "Apply Mobile POS Discount",
+                    Category = MobilePosPermissions.CategoryTransactions,
+                    IsSystemPermission = true
+                };
+                db.Roles.Add(discountRole);
+                db.Permissions.Add(discountPermission);
+                db.UserRoles.Add(new ApplicationUserRole { UserId = userId, RoleId = discountRole.Id });
+                db.RolePermissions.Add(new RolePermission
+                {
+                    RoleId = discountRole.Id,
+                    PermissionId = discountPermission.Id,
+                    GrantedBy = "Tests"
+                });
+            }
             await db.SaveChangesAsync();
 
             var currentUser = new Mock<ICurrentUserService>();

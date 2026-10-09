@@ -9,6 +9,7 @@ using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.MobilePos;
@@ -100,6 +101,11 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         CancellationToken cancellationToken)
     {
         ValidateRequest(request);
+        if (request.Lines.Any(line => line.DiscountPercentage > 0m)
+            && !await HasPermissionAsync(MobilePosPermissions.ApplyDiscount, cancellationToken))
+        {
+            throw Reject("MOBILE_POS_DISCOUNT_NOT_AUTHORIZED", "Your role is not authorized to apply Mobile POS discounts.");
+        }
         var tenantId = TenantId;
         var userId = UserId;
         var now = DateTime.UtcNow;
@@ -478,6 +484,16 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
 
     private static decimal RoundMoney(decimal value) =>
         decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+
+    private async Task<bool> HasPermissionAsync(string permission, CancellationToken cancellationToken)
+    {
+        if (_currentUser.IsInRole(Constants.Roles.SuperAdmin)) return true;
+
+        return await _db.UserRoles.AsNoTracking()
+            .Where(userRole => userRole.UserId == UserId)
+            .AnyAsync(userRole => userRole.Role.RolePermissions.Any(rolePermission =>
+                rolePermission.Permission.Name == permission), cancellationToken);
+    }
 
     private static string Required(string? value, int maximumLength, string label)
     {

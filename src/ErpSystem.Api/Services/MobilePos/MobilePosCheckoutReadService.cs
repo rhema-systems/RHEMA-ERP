@@ -9,6 +9,7 @@ using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.MobilePos;
@@ -138,6 +139,11 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
         if (!bootstrap.CurrentTillSessionId.HasValue)
             throw Reject("MOBILE_POS_TILL_SESSION_REQUIRED", "Open your assigned till session before previewing a sale.");
         ValidatePreviewRequest(request);
+        if (request.Lines.Any(line => line.DiscountPercentage > 0m)
+            && !await HasPermissionAsync(MobilePosPermissions.ApplyDiscount, cancellationToken))
+        {
+            throw Reject("MOBILE_POS_DISCOUNT_NOT_AUTHORIZED", "Your role is not authorized to apply Mobile POS discounts.");
+        }
 
         var tenantId = TenantId;
         var now = DateTime.UtcNow;
@@ -283,6 +289,17 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
 
     private static decimal RoundMoney(decimal value, int decimalPlaces) =>
         CurrencyMinorUnitPolicy.Round(value, decimalPlaces);
+
+    private async Task<bool> HasPermissionAsync(string permission, CancellationToken cancellationToken)
+    {
+        if (_currentUser.IsInRole(Constants.Roles.SuperAdmin)) return true;
+        if (!Guid.TryParse(_currentUser.UserId, out var userId) || userId == Guid.Empty) return false;
+
+        return await _db.UserRoles.AsNoTracking()
+            .Where(userRole => userRole.UserId == userId)
+            .AnyAsync(userRole => userRole.Role.RolePermissions.Any(rolePermission =>
+                rolePermission.Permission.Name == permission), cancellationToken);
+    }
 
     private static string Required(string? value, int maximumLength, string label)
     {

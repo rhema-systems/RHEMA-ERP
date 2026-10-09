@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.MobilePos;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.MobilePos;
@@ -11,6 +12,7 @@ using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Moq;
@@ -85,6 +87,23 @@ public sealed class MobilePosSaleServiceTests
         receipt.ErrorCode.Should().Be("MOBILE_POS_TOTALS_CHANGED");
     }
 
+    [Fact]
+    public async Task CompleteAsync_ShouldRejectDiscountWithoutDynamicPermissionBeforeCreatingInvoice()
+    {
+        await using var fixture = await Fixture.CreateAsync(grantDiscountPermission: false);
+        var request = fixture.ValidRequest();
+        request.Lines[0].DiscountPercentage = 5m;
+
+        var action = () => fixture.Service.CompleteAsync(request, CancellationToken.None);
+
+        await action.Should().ThrowAsync<MobilePosCommandRejectedException>()
+            .Where(exception => exception.Code == "MOBILE_POS_DISCOUNT_NOT_AUTHORIZED");
+        fixture.Invoices.Verify(service => service.CreateAsync(
+            It.IsAny<InvoiceCreateDto>(),
+            It.IsAny<FinancePostingProducerContext>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly Guid _itemId;
@@ -114,7 +133,7 @@ public sealed class MobilePosSaleServiceTests
         public Mock<IInvoiceService> Invoices { get; }
         public Mock<IPaymentService> Payments { get; }
 
-        public static async Task<Fixture> CreateAsync(decimal invoiceTotal = 100m)
+        public static async Task<Fixture> CreateAsync(decimal invoiceTotal = 100m, bool grantDiscountPermission = true)
         {
             var tenantId = Guid.NewGuid();
             var userId = Guid.NewGuid();
@@ -252,6 +271,31 @@ public sealed class MobilePosSaleServiceTests
                     Id = Guid.NewGuid(), TenantId = tenantId, MobilePosTillId = tillId,
                     PaymentMethodId = secondMethodId, PaymentMethod = secondMethod, AllowOnline = true
                 });
+            if (grantDiscountPermission)
+            {
+                var discountRole = new ApplicationRole("Configurable POS cashier")
+                {
+                    Id = Guid.NewGuid(),
+                    NormalizedName = "CONFIGURABLE POS CASHIER"
+                };
+                var discountPermission = new Permission
+                {
+                    Id = Guid.NewGuid(),
+                    Name = MobilePosPermissions.ApplyDiscount,
+                    DisplayName = "Apply Mobile POS Discount",
+                    Category = MobilePosPermissions.CategoryTransactions,
+                    IsSystemPermission = true
+                };
+                db.Roles.Add(discountRole);
+                db.Permissions.Add(discountPermission);
+                db.UserRoles.Add(new ApplicationUserRole { UserId = userId, RoleId = discountRole.Id });
+                db.RolePermissions.Add(new RolePermission
+                {
+                    RoleId = discountRole.Id,
+                    PermissionId = discountPermission.Id,
+                    GrantedBy = "Tests"
+                });
+            }
             await db.SaveChangesAsync();
 
             var currentUser = new Mock<ICurrentUserService>();

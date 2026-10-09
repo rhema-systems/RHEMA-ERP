@@ -31,6 +31,7 @@ public static class MobilePosPermissions
     public const string ViewCustomer = "MobilePOS.Customer.View";
     public const string PostInvoice = "MobilePOS.Invoice.Post";
     public const string CollectPayment = "MobilePOS.Payment.Collect";
+    public const string ApplyDiscount = "MobilePOS.Discount.Apply";
     public const string ReprintReceipt = "MobilePOS.Receipt.Reprint";
     public const string CreateReturn = "MobilePOS.Return.Create";
     public const string CreateReversal = "MobilePOS.Reversal.Create";
@@ -53,6 +54,7 @@ public static class MobilePosPermissions
         new(ViewCustomer, "View Mobile POS Customers", "Search approved customers and view their outstanding invoices in Mobile POS.", CategoryTransactions),
         new(PostInvoice, "Post Mobile POS Invoice", "Post a Mobile POS invoice where Finance policy permits immediate posting.", CategoryTransactions),
         new(CollectPayment, "Collect Mobile POS Payment", "Create and allocate customer receipts through Mobile POS.", CategoryTransactions),
+        new(ApplyDiscount, "Apply Mobile POS Discount", "Apply a line discount during Mobile POS checkout.", CategoryTransactions),
         new(ReprintReceipt, "Reprint Mobile POS Receipt", "Reprint an existing receipt with audit evidence.", CategoryTransactions),
         new(CreateReturn, "Create Mobile POS Return", "Initiate a governed Mobile POS return or credit workflow.", CategoryTransactions),
         new(CreateReversal, "Create Mobile POS Reversal", "Initiate a governed Mobile POS reversal.", CategoryTransactions),

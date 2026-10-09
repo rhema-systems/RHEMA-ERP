@@ -69,6 +69,7 @@ export default function SaleScreen() {
   const missingPreviewPermission = previewPermissions.find(permission => !permissions.includes(permission));
   const missingCompletionPermission = completionPermissions.find(permission => !permissions.includes(permission));
   const canSearchCustomers = permissions.includes("MobilePOS.Customer.View");
+  const canApplyDiscount = permissions.includes("MobilePOS.Discount.Apply");
   const canReprintReceipt = permissions.includes("MobilePOS.Receipt.Reprint");
 
   const [catalogueQuery, setCatalogueQuery] = useState("");
@@ -179,6 +180,15 @@ export default function SaleScreen() {
 
   const removeLine = (clientLineId: string) => {
     setCart(current => current.filter(line => line.clientLineId !== clientLineId));
+    invalidatePreview();
+  };
+
+  const changeDiscount = (clientLineId: string, rawValue: string) => {
+    const parsed = Number(rawValue);
+    const discountPercentage = Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 0;
+    setCart(current => current.map(line => line.clientLineId === clientLineId
+      ? { ...line, discountPercentage }
+      : line));
     invalidatePreview();
   };
 
@@ -449,7 +459,7 @@ export default function SaleScreen() {
       ))}
       {cart.map(line => (
         <View key={line.clientLineId} style={styles.cartLine}>
-          <View style={styles.grow}><Text style={styles.lineTitle}>{line.item.name}</Text><Text style={styles.meta}>{line.item.itemCode} · {money(line.item.unitPrice, line.item.currencyCode, 2)} each</Text></View>
+          <View style={styles.grow}><Text style={styles.lineTitle}>{line.item.name}</Text><Text style={styles.meta}>{line.item.itemCode} · {money(line.item.unitPrice, line.item.currencyCode, 2)} each</Text>{canApplyDiscount && <View style={styles.discountInputWrap}><Text style={styles.meta}>Discount %</Text><TextInput accessibilityLabel={`${line.item.name} discount percentage`} keyboardType="decimal-pad" maxLength={6} onChangeText={value => changeDiscount(line.clientLineId, value)} style={styles.discountInput} value={String(line.discountPercentage)} /></View>}</View>
           <View style={styles.quantityControl}>
             <Pressable accessibilityLabel={`Decrease ${line.item.name}`} onPress={() => changeQuantity(line.clientLineId, -1)} style={styles.quantityButton}><Ionicons name="remove" size={17} color={colors.blue} /></Pressable>
             <Text style={styles.quantity}>{line.quantity}</Text>
@@ -576,6 +586,8 @@ const styles = StyleSheet.create({
   resultRow: { minHeight: 66, marginTop: 8, flexDirection: "row", alignItems: "center", padding: 13, borderRadius: 13, backgroundColor: colors.white, borderWidth: 1, borderColor: "#EAECF0" },
   lineTitle: { color: colors.ink, fontSize: 13, fontWeight: "700" },
   cartLine: { marginTop: 8, flexDirection: "row", alignItems: "center", padding: 13, borderRadius: 14, backgroundColor: colors.white, borderWidth: 1, borderColor: "#EAECF0" },
+  discountInputWrap: { marginTop: 9, flexDirection: "row", alignItems: "center", gap: 8 },
+  discountInput: { width: 76, minHeight: 38, paddingHorizontal: 10, borderRadius: 9, borderWidth: 1, borderColor: colors.line, backgroundColor: "#F9FAFB", color: colors.ink, fontSize: 13, textAlign: "right" },
   quantityControl: { marginLeft: 8, flexDirection: "row", alignItems: "center" },
   quantityButton: { width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: colors.paleBlue },
   quantity: { minWidth: 28, color: colors.ink, fontSize: 13, fontWeight: "700", textAlign: "center" },
