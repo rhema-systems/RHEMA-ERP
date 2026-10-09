@@ -12,6 +12,11 @@ import type {
   MobilePosDevice,
   MobilePosOfflineGrant,
   MobilePosCustomerSearchResult,
+  MobilePosCatalogueItem,
+  MobilePosCompleteSaleRequest,
+  MobilePosSalePreview,
+  MobilePosSalePreviewRequest,
+  MobilePosSaleResult,
   OutstandingInvoice,
   SelectTenantResponse,
   UserInfo,
@@ -163,6 +168,17 @@ export const mobileApi = {
   ),
   getOutstandingInvoices: (installationId: string, customer: MobilePosCustomerSearchResult) => authorizedRequest<OutstandingInvoice[]>(
     `/api/mobile-pos/v1/customers/${encodeURIComponent(customer.businessPartnerId)}/outstanding-invoices?businessPartnerRoleId=${encodeURIComponent(customer.businessPartnerRoleId)}&installationId=${encodeURIComponent(installationId)}`,
+  ),
+  searchCatalogue: (installationId: string, search: string, limit = 30) => authorizedRequest<MobilePosCatalogueItem[]>(
+    `/api/mobile-pos/v1/catalogue/search?installationId=${encodeURIComponent(installationId)}&q=${encodeURIComponent(search)}&limit=${limit}`,
+  ),
+  previewSale: (request: MobilePosSalePreviewRequest) => authorizedRequest<MobilePosSalePreview>(
+    "/api/mobile-pos/v1/sales/preview",
+    { method: "POST", body: JSON.stringify(request) },
+  ),
+  completeSale: (request: MobilePosCompleteSaleRequest) => authorizedRequest<MobilePosSaleResult>(
+    "/api/mobile-pos/v1/sales",
+    { method: "POST", body: JSON.stringify(request) },
   ),
   requestEnrollment: (request: DeviceEnrollmentRequest) => authorizedRequest<MobilePosDevice>(
     "/api/mobile-pos/v1/devices/enrollment-requests",

@@ -16,17 +16,20 @@ public sealed class MobilePosRuntimeController : ControllerBase
     private readonly IMobilePosFoundationService _service;
     private readonly IAuthorizationService _authorization;
     private readonly IMobilePosFinanceReadService _financeReads;
+    private readonly IMobilePosCheckoutReadService _checkout;
     private readonly IMobilePosSaleService _sales;
 
     public MobilePosRuntimeController(
         IMobilePosFoundationService service,
         IAuthorizationService authorization,
         IMobilePosFinanceReadService financeReads,
+        IMobilePosCheckoutReadService checkout,
         IMobilePosSaleService sales)
     {
         _service = service;
         _authorization = authorization;
         _financeReads = financeReads;
+        _checkout = checkout;
         _sales = sales;
     }
 
@@ -96,6 +99,35 @@ public sealed class MobilePosRuntimeController : ControllerBase
         => Ok(await _financeReads.GetOutstandingInvoicesAsync(
             installationId, businessPartnerId, businessPartnerRoleId, cancellationToken));
 
+    [HttpGet("catalogue/search")]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    [Authorize(Policy = MobilePosPermissions.CreateInvoice)]
+    public async Task<ActionResult<IReadOnlyList<MobilePosCatalogueItemDto>>> SearchCatalogue(
+        [FromQuery] string installationId,
+        [FromQuery(Name = "q")] string? search,
+        [FromQuery] int limit = 30,
+        CancellationToken cancellationToken = default)
+        => Ok(await _checkout.SearchCatalogueAsync(
+            installationId, search, limit, cancellationToken));
+
+    [HttpPost("sales/preview")]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    [Authorize(Policy = MobilePosPermissions.CreateInvoice)]
+    [Authorize(Policy = FinancePermissions.CreateArInvoices)]
+    public async Task<ActionResult<MobilePosSalePreviewDto>> PreviewSale(
+        [FromBody] MobilePosSalePreviewRequestDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _checkout.PreviewAsync(dto, cancellationToken));
+        }
+        catch (MobilePosCommandRejectedException exception)
+        {
+            return RejectedSale(exception, "Mobile POS sale preview rejected");
+        }
+    }
+
     [HttpPost("sales")]
     [Authorize(Policy = MobilePosPermissions.OperateTill)]
     [Authorize(Policy = MobilePosPermissions.CreateInvoice)]
@@ -123,16 +155,23 @@ public sealed class MobilePosRuntimeController : ControllerBase
         }
         catch (MobilePosCommandRejectedException exception)
         {
-            var details = new ProblemDetails
-            {
-                Status = StatusCodes.Status400BadRequest,
-                Title = "Mobile POS sale rejected",
-                Detail = exception.Message
-            };
-            details.Extensions["code"] = exception.Code;
-            details.Extensions["replayed"] = exception.IsReplay;
-            return BadRequest(details);
+            return RejectedSale(exception, "Mobile POS sale rejected");
         }
+    }
+
+    private BadRequestObjectResult RejectedSale(
+        MobilePosCommandRejectedException exception,
+        string title)
+    {
+        var details = new ProblemDetails
+        {
+            Status = StatusCodes.Status400BadRequest,
+            Title = title,
+            Detail = exception.Message
+        };
+        details.Extensions["code"] = exception.Code;
+        details.Extensions["replayed"] = exception.IsReplay;
+        return BadRequest(details);
     }
 }
 

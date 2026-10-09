@@ -230,3 +230,127 @@ export interface DeviceEnrollmentRequest {
   printerAdapterKey?: string;
   scannerAdapterKey?: string;
 }
+
+export interface MobilePosCatalogueItem {
+  inventoryItemId: string;
+  itemCode: string;
+  name: string;
+  description?: string;
+  barcode?: string;
+  alternateBarcode?: string;
+  qrCode?: string;
+  itemType: string;
+  unitOfMeasureId?: string;
+  unitOfMeasureCode: string;
+  unitPrice: number;
+  currencyCode: string;
+  defaultTaxGroupId?: string;
+  availableQuantity?: number;
+  isAvailable: boolean;
+  changedAtUtc: string;
+}
+
+export interface MobilePosSalePreviewLineInput {
+  clientLineId: string;
+  inventoryItemId: string;
+  quantity: number;
+  discountPercentage: number;
+}
+
+export interface MobilePosSalePreviewRequest {
+  installationId: string;
+  businessPartnerId?: string;
+  businessPartnerRoleId?: string;
+  lines: MobilePosSalePreviewLineInput[];
+}
+
+export interface MobilePosSalePreviewLine {
+  clientLineId: string;
+  inventoryItemId: string;
+  itemCode: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  grossAmount: number;
+  discountPercentage: number;
+  discountAmount: number;
+  netAmount: number;
+  taxGroupId?: string;
+  taxTreatment: number;
+  taxAmount: number;
+  lineTotal: number;
+  unitOfMeasureId?: string;
+  unitOfMeasureCode: string;
+}
+
+export interface MobilePosSalePreview {
+  businessPartnerId: string;
+  businessPartnerRoleId: string;
+  customerCode: string;
+  customerName: string;
+  usedStoreDefaultCustomer: boolean;
+  currencyCode: string;
+  currencyDecimalPlaces: number;
+  subTotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  calculatedAtUtc: string;
+  lines: MobilePosSalePreviewLine[];
+}
+
+export interface MobilePosTenderInput {
+  paymentMethodId: string;
+  amount: number;
+  externalReference?: string;
+  liquidityAccountId?: string;
+  bankAccountId?: string;
+}
+
+export interface MobilePosCompleteSaleRequest {
+  installationId: string;
+  clientMutationId: string;
+  localReference: string;
+  businessPartnerId?: string;
+  businessPartnerRoleId?: string;
+  occurredAtUtc: string;
+  expectedSubTotal: number;
+  expectedTaxAmount: number;
+  expectedDiscountAmount: number;
+  expectedTotalAmount: number;
+  lines: Array<{
+    clientLineId: string;
+    inventoryItemId: string;
+    quantity: number;
+    unitPrice: number;
+    discountPercentage: number;
+    taxGroupId?: string;
+    taxTreatment: number;
+  }>;
+  tenders: MobilePosTenderInput[];
+}
+
+export interface MobilePosSaleTenderResult {
+  tenderId: string;
+  paymentMethodId: string;
+  amount: number;
+  customerPaymentId: string;
+  paymentNumber: string;
+  paymentStatus: string;
+}
+
+export interface MobilePosSaleResult {
+  saleId: string;
+  mutationReceiptId: string;
+  isReplay: boolean;
+  localReference: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  invoiceStatus: string;
+  currencyCode: string;
+  subTotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  tenders: MobilePosSaleTenderResult[];
+}

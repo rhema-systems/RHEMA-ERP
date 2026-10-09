@@ -173,4 +173,51 @@ describe("Mobile POS API client", () => {
       "https://erp.example.com/api/mobile-pos/v1/customers/partner-1/outstanding-invoices?businessPartnerRoleId=role-1&installationId=installation%2Fcustomer%201",
     );
   });
+
+  it("uses the governed catalogue, preview, and completion endpoints", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse({ lines: [], tenders: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const previewRequest = {
+      installationId: "install/01",
+      lines: [{ clientLineId: "line-1", inventoryItemId: "item-1", quantity: 2, discountPercentage: 0 }],
+    };
+
+    await mobileApi.searchCatalogue("install/01", "A&B", 12);
+    await mobileApi.previewSale(previewRequest);
+    await mobileApi.completeSale({
+      installationId: "install/01",
+      clientMutationId: "mutation-1",
+      localReference: "POS-1",
+      occurredAtUtc: "2026-10-09T10:00:00.000Z",
+      expectedSubTotal: 20,
+      expectedTaxAmount: 3,
+      expectedDiscountAmount: 0,
+      expectedTotalAmount: 23,
+      lines: [{
+        clientLineId: "line-1",
+        inventoryItemId: "item-1",
+        quantity: 2,
+        unitPrice: 10,
+        discountPercentage: 0,
+        taxTreatment: 1,
+      }],
+      tenders: [{ paymentMethodId: "cash-1", amount: 23 }],
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/catalogue/search?installationId=install%2F01&q=A%26B&limit=12",
+    );
+    const [, previewInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(fetchMock.mock.calls[1]?.[0].toString()).toBe("https://erp.example.com/api/mobile-pos/v1/sales/preview");
+    expect(previewInit.method).toBe("POST");
+    expect(JSON.parse(String(previewInit.body))).toEqual(previewRequest);
+    const [, completeInit] = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+    expect(fetchMock.mock.calls[2]?.[0].toString()).toBe("https://erp.example.com/api/mobile-pos/v1/sales");
+    expect(completeInit.method).toBe("POST");
+    expect(JSON.parse(String(completeInit.body))).toMatchObject({
+      clientMutationId: "mutation-1",
+      expectedTotalAmount: 23,
+      tenders: [{ paymentMethodId: "cash-1", amount: 23 }],
+    });
+  });
 });

@@ -449,3 +449,78 @@ public sealed class MobilePosSaleTenderResultDto
     public string PaymentNumber { get; set; } = string.Empty;
     public string PaymentStatus { get; set; } = string.Empty;
 }
+
+public sealed class MobilePosCatalogueItemDto
+{
+    public Guid InventoryItemId { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? Barcode { get; set; }
+    public string? AlternateBarcode { get; set; }
+    public string? QrCode { get; set; }
+    public string ItemType { get; set; } = string.Empty;
+    public Guid? UnitOfMeasureId { get; set; }
+    public string UnitOfMeasureCode { get; set; } = string.Empty;
+    public decimal UnitPrice { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public Guid? DefaultTaxGroupId { get; set; }
+    public decimal? AvailableQuantity { get; set; }
+    public bool IsAvailable { get; set; }
+    public DateTime ChangedAtUtc { get; set; }
+}
+
+public sealed class MobilePosSalePreviewRequestDto
+{
+    [Required, MaxLength(200)]
+    public string InstallationId { get; set; } = string.Empty;
+
+    public Guid? BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public List<MobilePosSalePreviewLineInputDto> Lines { get; set; } = [];
+}
+
+public sealed class MobilePosSalePreviewLineInputDto
+{
+    public Guid ClientLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal DiscountPercentage { get; set; }
+}
+
+public sealed class MobilePosSalePreviewDto
+{
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public string CustomerCode { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public bool UsedStoreDefaultCustomer { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public int CurrencyDecimalPlaces { get; set; }
+    public decimal SubTotal { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal TotalAmount { get; set; }
+    public DateTime CalculatedAtUtc { get; set; }
+    public IReadOnlyList<MobilePosSalePreviewLineDto> Lines { get; set; } = [];
+}
+
+public sealed class MobilePosSalePreviewLineDto
+{
+    public Guid ClientLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal GrossAmount { get; set; }
+    public decimal DiscountPercentage { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal NetAmount { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public TaxTreatment TaxTreatment { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal LineTotal { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    public string UnitOfMeasureCode { get; set; } = string.Empty;
+}

@@ -93,6 +93,30 @@ export default function HomeScreen() {
             <Text style={styles.infoText}>Used automatically for walk-in sales. Search and choose another approved customer when required.</Text>
           </View>
 
+          {session.bootstrap.currentTillSessionId
+            && session.user?.permissions.includes("MobilePOS.Till.Operate")
+            && session.user.permissions.includes("MobilePOS.Invoice.Create")
+            && session.user.permissions.includes("Finance.AR.Invoices.Create") ? (
+            <Link href="/sale" asChild>
+              <Pressable accessibilityRole="button" style={styles.saleButton}>
+                <View style={styles.saleIcon}><Ionicons name="cart-outline" size={23} color={colors.white} /></View>
+                <View style={styles.featureMain}>
+                  <Text style={styles.saleTitle}>Start a sale</Text>
+                  <Text style={styles.saleText}>Search the governed catalogue and calculate the total with RHEMA Finance.</Text>
+                </View>
+                <Ionicons name="arrow-forward" size={20} color={colors.white} />
+              </Pressable>
+            </Link>
+          ) : (
+            <View style={[styles.featureButton, styles.buttonDisabled]}>
+              <View style={styles.featureIcon}><Ionicons name="cart-outline" size={22} color={colors.blue} /></View>
+              <View style={styles.featureMain}>
+                <Text style={styles.featureTitle}>Start a sale</Text>
+                <Text style={styles.featureText}>{session.bootstrap.currentTillSessionId ? "Your role is missing a required Mobile POS or Finance invoice permission." : "Open your assigned cashier till session first."}</Text>
+              </View>
+            </View>
+          )}
+
           {session.user?.permissions.includes("MobilePOS.Customer.View") ? (
             <Link href="/customers" asChild>
               <Pressable accessibilityRole="button" style={styles.featureButton}>
@@ -284,6 +308,10 @@ const styles = StyleSheet.create({
   grantButtonText: { color: colors.white, fontSize: 13, fontWeight: "700" },
   buttonDisabled: { opacity: 0.45 },
   featureButton: { marginTop: 12, minHeight: 76, padding: 14, flexDirection: "row", alignItems: "center", borderRadius: 16, backgroundColor: colors.white, borderWidth: 1, borderColor: "#EAECF0" },
+  saleButton: { marginTop: 12, minHeight: 82, padding: 14, flexDirection: "row", alignItems: "center", borderRadius: 16, backgroundColor: colors.blue },
+  saleIcon: { width: 44, height: 44, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.16)" },
+  saleTitle: { color: colors.white, fontSize: 15, fontWeight: "700" },
+  saleText: { marginTop: 4, color: "#DCE6FF", fontSize: 12, lineHeight: 17 },
   featureIcon: { width: 44, height: 44, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: colors.paleBlue },
   featureMain: { flex: 1, marginLeft: 12, marginRight: 8 },
   featureTitle: { color: colors.ink, fontSize: 14, fontWeight: "700" },
