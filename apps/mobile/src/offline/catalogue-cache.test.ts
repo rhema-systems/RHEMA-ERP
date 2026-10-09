@@ -20,9 +20,9 @@ const item: MobilePosCatalogueItem = {
 
 describe("offline database foundation", () => {
   it("defines the durable scoped cache, outbox, receipt, and cursor tables", () => {
-    expect(OFFLINE_DATABASE_VERSION).toBe(1);
+    expect(OFFLINE_DATABASE_VERSION).toBe(2);
     const sql = offlineDatabaseMigrations.map(migration => migration.sql).join("\n");
-    for (const table of ["cache_context", "catalogue_item_cache", "customer_cache", "payment_method_cache", "receipt_cache", "sync_cursor", "outbox_message"]) {
+    for (const table of ["cache_context", "catalogue_item_cache", "customer_cache", "payment_method_cache", "configuration_cache", "receipt_cache", "sync_cursor", "outbox_message"]) {
       expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
     expect(sql).not.toMatch(/access_token|refresh_token|signing_secret/i);

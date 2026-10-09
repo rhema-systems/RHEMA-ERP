@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.MobilePos;
+using ErpSystem.Api.Controllers.MobilePos;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.MobilePos;
 using ErpSystem.Core.Entities.Procurement;
@@ -6,8 +7,10 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 using Moq;
 using Xunit;
 
@@ -16,6 +19,19 @@ namespace ErpSystem.Api.Tests.Services.MobilePos;
 public sealed class MobilePosFinanceReadServiceTests
 {
     private const string InstallationId = "installation-finance-read";
+
+    [Fact]
+    public void CustomerChanges_ShouldRequireOfflineAndCustomerPermissions()
+    {
+        var policies = typeof(MobilePosRuntimeController)
+            .GetMethod(nameof(MobilePosRuntimeController.GetCustomerChanges))!
+            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .ToArray();
+
+        policies.Should().BeEquivalentTo(MobilePosPermissions.UseOffline, MobilePosPermissions.ViewCustomer);
+    }
 
     [Fact]
     public async Task SearchCustomersAsync_ShouldReturnDefaultOrMatchingApprovedTransactionReadyCustomersOnly()
@@ -37,6 +53,24 @@ public sealed class MobilePosFinanceReadServiceTests
         searched.Should().ContainSingle(item =>
             item.BusinessPartnerId == selectedCustomer.Partner.Id && !item.IsDefaultWalkInCustomer);
         searched.Should().OnlyContain(item => item.Name == "Beta Trading");
+    }
+
+    [Fact]
+    public async Task GetCustomerChangesAsync_ShouldReturnEligibleUpsertsAndEligibilityTombstones()
+    {
+        await using var fixture = Fixture.Create();
+        var approved = fixture.SeedCustomer("CUST-001", "Approved Customer", approved: true, withProfile: true);
+        fixture.SeedCustomer("CUST-002", "Pending Customer", approved: false, withProfile: true);
+        fixture.SetDefaultCustomer(approved.Partner.Id, approved.Role.Id);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.GetCustomerChangesAsync(
+            InstallationId, DateTime.UtcNow.AddHours(-1), null, 50, CancellationToken.None);
+
+        result.HasMore.Should().BeFalse();
+        result.Upserts.Should().ContainSingle(item =>
+            item.BusinessPartnerRoleId == approved.Role.Id && item.IsDefaultWalkInCustomer);
+        result.TombstoneBusinessPartnerRoleIds.Should().ContainSingle();
     }
 
     [Fact]

@@ -254,6 +254,28 @@ public sealed class MobilePosCustomerSearchResultDto
     public bool IsDefaultWalkInCustomer { get; set; }
 }
 
+public sealed class MobilePosCustomerCacheItemDto
+{
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public bool IsDefaultWalkInCustomer { get; set; }
+    public DateTime ChangedAtUtc { get; set; }
+}
+
+public sealed class MobilePosCustomerChangePageDto
+{
+    public DateTime SnapshotAtUtc { get; set; }
+    public string? NextCursor { get; set; }
+    public bool HasMore { get; set; }
+    public IReadOnlyList<MobilePosCustomerCacheItemDto> Upserts { get; set; } = [];
+    public IReadOnlyList<Guid> TombstoneBusinessPartnerRoleIds { get; set; } = [];
+}
+
 public sealed class MobilePosBankAccountOptionDto
 {
     public Guid BankAccountId { get; set; }

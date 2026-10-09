@@ -11,8 +11,6 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
-using System.Text;
-using System.Text.Json;
 
 namespace ErpSystem.Api.Services.MobilePos;
 
@@ -81,13 +79,12 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
             Required(installationId, 200, "installation ID"), cancellationToken);
         var tenantId = TenantId;
         var take = Math.Clamp(limit, 1, 500);
-        var state = string.IsNullOrWhiteSpace(cursor)
-            ? NewCatalogueCursor(sinceUtc)
-            : DecodeCatalogueCursor(cursor);
-
         var store = await _db.MobilePosStores.AsNoTracking().SingleOrDefaultAsync(item =>
             item.TenantId == tenantId && item.Id == bootstrap.Store.Id && !item.IsDeleted,
             cancellationToken) ?? throw Reject("MOBILE_POS_STORE_NOT_FOUND", "The assigned Mobile POS store was not found.");
+        var state = string.IsNullOrWhiteSpace(cursor)
+            ? MobilePosChangeCursorCodec.Create(tenantId, store.Id, sinceUtc)
+            : MobilePosChangeCursorCodec.Decode(cursor, tenantId, store.Id);
 
         var itemMarkers = _db.InventoryItems.AsNoTracking()
             .Where(item => item.TenantId == tenantId)
@@ -166,7 +163,7 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
             SnapshotAtUtc = state.SnapshotAtUtc,
             HasMore = hasMore,
             NextCursor = hasMore
-                ? EncodeCatalogueCursor(state with { Offset = state.Offset + selectedMarkers.Length })
+                ? MobilePosChangeCursorCodec.Encode(state with { Offset = state.Offset + selectedMarkers.Length })
                 : null,
             Upserts = upserts,
             TombstoneInventoryItemIds = tombstones
@@ -460,46 +457,6 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
             || (store.WarehouseId.HasValue && available > 0m),
         ChangedAtUtc = changedAtUtc
     };
-
-    private static CatalogueCursor NewCatalogueCursor(DateTime? sinceUtc)
-    {
-        var since = sinceUtc?.ToUniversalTime() ?? DateTime.UnixEpoch;
-        var snapshot = DateTime.UtcNow;
-        if (since > snapshot)
-            throw Reject("MOBILE_POS_CATALOGUE_CURSOR_INVALID", "The catalogue watermark cannot be in the future.");
-        return new CatalogueCursor(since, snapshot, 0);
-    }
-
-    private static string EncodeCatalogueCursor(CatalogueCursor cursor)
-    {
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(cursor));
-        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    }
-
-    private static CatalogueCursor DecodeCatalogueCursor(string value)
-    {
-        try
-        {
-            var base64 = value.Trim().Replace('-', '+').Replace('_', '/');
-            base64 = base64.PadRight(base64.Length + ((4 - base64.Length % 4) % 4), '=');
-            var cursor = JsonSerializer.Deserialize<CatalogueCursor>(Convert.FromBase64String(base64));
-            if (cursor == null || cursor.Offset < 0 || cursor.Offset > 1_000_000
-                || cursor.SinceUtc.Kind != DateTimeKind.Utc
-                || cursor.SnapshotAtUtc.Kind != DateTimeKind.Utc
-                || cursor.SinceUtc > cursor.SnapshotAtUtc
-                || cursor.SnapshotAtUtc > DateTime.UtcNow.AddMinutes(1))
-            {
-                throw new InvalidOperationException();
-            }
-            return cursor;
-        }
-        catch (Exception exception) when (exception is FormatException or JsonException or InvalidOperationException)
-        {
-            throw Reject("MOBILE_POS_CATALOGUE_CURSOR_INVALID", "The catalogue change cursor is invalid or expired.");
-        }
-    }
-
-    private sealed record CatalogueCursor(DateTime SinceUtc, DateTime SnapshotAtUtc, int Offset);
 
     private static string MaskAccountNumber(string accountNumber)
     {

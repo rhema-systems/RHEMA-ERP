@@ -265,4 +265,25 @@ describe("Mobile POS API client", () => {
       "https://erp.example.com/api/mobile-pos/v1/catalogue/changes?installationId=install%2F01&sinceUtc=2026-10-08T10%3A00%3A00.000Z&cursor=page%2B%2F%3D&limit=125",
     );
   });
+
+  it("encodes approved-customer watermark and continuation cursor requests", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse({
+      snapshotAtUtc: "2026-10-09T11:00:00.000Z",
+      hasMore: false,
+      upserts: [],
+      tombstoneBusinessPartnerRoleIds: [],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mobileApi.getCustomerChanges(
+      "install/01",
+      "2026-10-08T11:00:00.000Z",
+      "customer-page+/=",
+      75,
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/customers/changes?installationId=install%2F01&sinceUtc=2026-10-08T11%3A00%3A00.000Z&cursor=customer-page%2B%2F%3D&limit=75",
+    );
+  });
 });

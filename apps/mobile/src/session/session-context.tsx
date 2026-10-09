@@ -4,7 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { ApiProblem, mobileApi } from "@/src/api/client";
 import { defaultServerProfile, validateServerProfile } from "@/src/config/environment";
 import { isOfflineGrantUsable } from "@/src/offline/grant";
-import { synchronizeSessionCatalogue } from "@/src/offline/catalogue-runtime";
+import { synchronizeSessionReferenceData } from "@/src/offline/catalogue-runtime";
 import {
   clearOfflineGrant,
   clearTokens,
@@ -109,9 +109,8 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
       setOfflineGrantError(null);
       setStatus("ready");
       if (currentUser.permissions.includes("MobilePOS.Offline.Use")
-        && currentUser.permissions.includes("MobilePOS.Till.Operate")
-        && currentUser.permissions.includes("MobilePOS.Invoice.Create")) {
-        void synchronizeSessionCatalogue(currentUser, result, installationId).catch(() => {
+        && currentUser.permissions.includes("MobilePOS.Till.Operate")) {
+        void synchronizeSessionReferenceData(currentUser, result, installationId).catch(() => {
           // A failed warm-up must not block online use. Grant issuance retries synchronously.
         });
       }
@@ -140,9 +139,8 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
         setOfflineGrantError(null);
         setStatus("ready");
         if (currentUser.permissions.includes("MobilePOS.Offline.Use")
-          && currentUser.permissions.includes("MobilePOS.Till.Operate")
-          && currentUser.permissions.includes("MobilePOS.Invoice.Create")) {
-          void synchronizeSessionCatalogue(currentUser, result, installationId).catch(() => {
+          && currentUser.permissions.includes("MobilePOS.Till.Operate")) {
+          void synchronizeSessionReferenceData(currentUser, result, installationId).catch(() => {
             // A failed warm-up must not block online use. Grant issuance retries synchronously.
           });
         }
@@ -249,7 +247,7 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
           "OFFLINE_GRANT_CONTEXT_MISMATCH",
         );
       }
-      await synchronizeSessionCatalogue(user, bootstrap, await getInstallationId());
+      await synchronizeSessionReferenceData(user, bootstrap, await getInstallationId());
       await saveOfflineGrant(grant);
       setOfflineGrant(grant);
     } catch (caught) {

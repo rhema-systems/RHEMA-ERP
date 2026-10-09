@@ -92,6 +92,18 @@ public sealed class MobilePosRuntimeController : ControllerBase
         CancellationToken cancellationToken = default)
         => Ok(await _financeReads.SearchCustomersAsync(installationId, q, limit, cancellationToken));
 
+    [HttpGet("customers/changes")]
+    [Authorize(Policy = MobilePosPermissions.UseOffline)]
+    [Authorize(Policy = MobilePosPermissions.ViewCustomer)]
+    public async Task<ActionResult<MobilePosCustomerChangePageDto>> GetCustomerChanges(
+        [FromQuery] string installationId,
+        [FromQuery] DateTime? sinceUtc,
+        [FromQuery] string? cursor,
+        [FromQuery] int limit = 250,
+        CancellationToken cancellationToken = default)
+        => Ok(await _financeReads.GetCustomerChangesAsync(
+            installationId, sinceUtc, cursor, limit, cancellationToken));
+
     [HttpGet("customers/{businessPartnerId:guid}/outstanding-invoices")]
     [Authorize(Policy = MobilePosPermissions.ViewCustomer)]
     public async Task<ActionResult<IReadOnlyList<OutstandingInvoiceDto>>> GetOutstandingInvoices(

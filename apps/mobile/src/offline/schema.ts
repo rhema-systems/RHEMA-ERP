@@ -4,7 +4,7 @@ export interface OfflineDatabaseMigration {
   sql: string;
 }
 
-export const OFFLINE_DATABASE_VERSION = 1;
+export const OFFLINE_DATABASE_VERSION = 2;
 
 export const offlineDatabaseMigrations: OfflineDatabaseMigration[] = [
   {
@@ -106,6 +106,20 @@ export const offlineDatabaseMigrations: OfflineDatabaseMigration[] = [
       );
       CREATE INDEX IF NOT EXISTS ix_outbox_message_dispatch
         ON outbox_message(scope_key, state, retry_after_utc, created_at_utc);
+    `,
+  },
+  {
+    version: 2,
+    name: "mobile_pos_configuration_cache",
+    sql: `
+      CREATE TABLE IF NOT EXISTS configuration_cache (
+        scope_key TEXT NOT NULL,
+        configuration_key TEXT NOT NULL,
+        changed_at_utc TEXT NOT NULL,
+        projection_json TEXT NOT NULL,
+        PRIMARY KEY (scope_key, configuration_key),
+        FOREIGN KEY (scope_key) REFERENCES cache_context(scope_key) ON DELETE CASCADE
+      );
     `,
   },
 ];

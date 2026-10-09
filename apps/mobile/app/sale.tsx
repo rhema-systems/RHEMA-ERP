@@ -15,7 +15,7 @@ import { ApiProblem, mobileApi } from "@/src/api/client";
 import { BarcodeScannerModal } from "@/components/barcode-scanner-modal";
 import { BankAccountPickerModal } from "@/components/bank-account-picker-modal";
 import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
-import { searchSessionCatalogue } from "@/src/offline/catalogue-runtime";
+import { searchSessionCatalogue, searchSessionCustomers } from "@/src/offline/catalogue-runtime";
 import type { BarcodeScan } from "@/src/scanning/barcode";
 import { buildCompleteSaleRequest, sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
 import { useSession } from "@/src/session/session-context";
@@ -93,6 +93,7 @@ export default function SaleScreen() {
   const [error, setError] = useState<ApiProblem | null>(null);
   const [outputMessage, setOutputMessage] = useState<string | null>(null);
   const [catalogueNotice, setCatalogueNotice] = useState<string | null>(null);
+  const [customerNotice, setCustomerNotice] = useState<string | null>(null);
 
   const onlineMethods = useMemo(
     () => bootstrap?.till.paymentMethods.filter(method => method.allowOnline) ?? [],
@@ -153,10 +154,24 @@ export default function SaleScreen() {
     if (term.length < 2) return setError(problem("Enter at least two characters to search approved customers."));
     setBusy("customer");
     setError(null);
+    setCustomerNotice(null);
     try {
       setCustomerResults(await mobileApi.searchCustomers(await getInstallationId(), term));
     } catch (caught) {
-      setError(asProblem(caught));
+      const problem = asProblem(caught);
+      if (problem.status > 0 || !session.user) {
+        setError(problem);
+      } else {
+        try {
+          const cached = await searchSessionCustomers(session.user, bootstrap, term);
+          setCustomerResults(cached);
+          setCustomerNotice(cached.length > 0
+            ? "Network unavailable. Showing approved customers saved on this device."
+            : "Network unavailable and no saved approved customer matched the search.");
+        } catch (cacheError) {
+          setError(asProblem(cacheError));
+        }
+      }
     } finally {
       setBusy(null);
     }
@@ -477,6 +492,7 @@ export default function SaleScreen() {
       {canSearchCustomers && (
         <>
           <SearchBar label="Find another approved customer" value={customerQuery} onChangeText={setCustomerQuery} onSearch={() => void searchCustomers()} busy={busy === "customer"} />
+          {customerNotice && <View style={styles.offlineNotice}><Ionicons name="cloud-offline-outline" size={18} color={colors.blue} /><Text style={styles.offlineNoticeText}>{customerNotice}</Text></View>}
           {customerResults.map(item => <ResultRow key={item.businessPartnerRoleId} title={item.name} detail={item.code} onPress={() => chooseCustomer(item)} />)}
         </>
       )}

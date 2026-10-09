@@ -12,6 +12,7 @@ import type {
   MobilePosDevice,
   MobilePosOfflineGrant,
   MobilePosCustomerSearchResult,
+  MobilePosCustomerChangePage,
   MobilePosCatalogueItem,
   MobilePosCatalogueChangePage,
   MobilePosBankAccountOption,
@@ -170,6 +171,15 @@ export const mobileApi = {
   searchCustomers: (installationId: string, search: string, limit = 20) => authorizedRequest<MobilePosCustomerSearchResult[]>(
     `/api/mobile-pos/v1/customers/search?installationId=${encodeURIComponent(installationId)}&q=${encodeURIComponent(search)}&limit=${limit}`,
   ),
+  getCustomerChanges: (installationId: string, sinceUtc?: string, cursor?: string, limit = 250) => {
+    const parameters = [
+      `installationId=${encodeURIComponent(installationId)}`,
+      ...(sinceUtc ? [`sinceUtc=${encodeURIComponent(sinceUtc)}`] : []),
+      ...(cursor ? [`cursor=${encodeURIComponent(cursor)}`] : []),
+      `limit=${limit}`,
+    ];
+    return authorizedRequest<MobilePosCustomerChangePage>(`/api/mobile-pos/v1/customers/changes?${parameters.join("&")}`);
+  },
   getOutstandingInvoices: (installationId: string, customer: MobilePosCustomerSearchResult) => authorizedRequest<OutstandingInvoice[]>(
     `/api/mobile-pos/v1/customers/${encodeURIComponent(customer.businessPartnerId)}/outstanding-invoices?businessPartnerRoleId=${encodeURIComponent(customer.businessPartnerRoleId)}&installationId=${encodeURIComponent(installationId)}`,
   ),

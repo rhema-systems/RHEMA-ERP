@@ -209,6 +209,19 @@ export interface MobilePosCustomerSearchResult {
   phone?: string;
   currencyCode: string;
   isDefaultWalkInCustomer: boolean;
+  changedAtUtc?: string;
+}
+
+export interface MobilePosCustomerCacheItem extends MobilePosCustomerSearchResult {
+  changedAtUtc: string;
+}
+
+export interface MobilePosCustomerChangePage {
+  snapshotAtUtc: string;
+  nextCursor?: string;
+  hasMore: boolean;
+  upserts: MobilePosCustomerCacheItem[];
+  tombstoneBusinessPartnerRoleIds: string[];
 }
 
 export interface OutstandingInvoice {
