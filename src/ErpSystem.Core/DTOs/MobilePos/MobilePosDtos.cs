@@ -376,3 +376,76 @@ public sealed class MobilePosAdministrationReferencesDto
     public IReadOnlyList<MobilePosReferenceOptionDto> Users { get; set; } = [];
     public IReadOnlyList<MobilePosDimensionReferenceDto> Dimensions { get; set; } = [];
 }
+
+public sealed class MobilePosCompleteSaleRequestDto
+{
+    [Required, MaxLength(200)]
+    public string InstallationId { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string ClientMutationId { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string LocalReference { get; set; } = string.Empty;
+
+    public Guid? BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public DateTime? OccurredAtUtc { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExpectedSubTotal { get; set; }
+    public decimal ExpectedTaxAmount { get; set; }
+    public decimal ExpectedDiscountAmount { get; set; }
+    public decimal ExpectedTotalAmount { get; set; }
+    public List<MobilePosSaleLineInputDto> Lines { get; set; } = [];
+    public List<MobilePosTenderInputDto> Tenders { get; set; } = [];
+}
+
+public sealed class MobilePosSaleLineInputDto
+{
+    public Guid ClientLineId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal DiscountPercentage { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
+}
+
+public sealed class MobilePosTenderInputDto
+{
+    public Guid PaymentMethodId { get; set; }
+    public decimal Amount { get; set; }
+
+    [MaxLength(150)]
+    public string? ExternalReference { get; set; }
+
+    public Guid? LiquidityAccountId { get; set; }
+    public Guid? BankAccountId { get; set; }
+}
+
+public sealed class MobilePosSaleResultDto
+{
+    public Guid SaleId { get; set; }
+    public Guid MutationReceiptId { get; set; }
+    public bool IsReplay { get; set; }
+    public string LocalReference { get; set; } = string.Empty;
+    public Guid InvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public string InvoiceStatus { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal SubTotal { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal TotalAmount { get; set; }
+    public IReadOnlyList<MobilePosSaleTenderResultDto> Tenders { get; set; } = [];
+}
+
+public sealed class MobilePosSaleTenderResultDto
+{
+    public Guid TenderId { get; set; }
+    public Guid PaymentMethodId { get; set; }
+    public decimal Amount { get; set; }
+    public Guid CustomerPaymentId { get; set; }
+    public string PaymentNumber { get; set; } = string.Empty;
+    public string PaymentStatus { get; set; } = string.Empty;
+}

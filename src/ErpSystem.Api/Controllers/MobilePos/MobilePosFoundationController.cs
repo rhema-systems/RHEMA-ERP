@@ -16,15 +16,18 @@ public sealed class MobilePosRuntimeController : ControllerBase
     private readonly IMobilePosFoundationService _service;
     private readonly IAuthorizationService _authorization;
     private readonly IMobilePosFinanceReadService _financeReads;
+    private readonly IMobilePosSaleService _sales;
 
     public MobilePosRuntimeController(
         IMobilePosFoundationService service,
         IAuthorizationService authorization,
-        IMobilePosFinanceReadService financeReads)
+        IMobilePosFinanceReadService financeReads,
+        IMobilePosSaleService sales)
     {
         _service = service;
         _authorization = authorization;
         _financeReads = financeReads;
+        _sales = sales;
     }
 
     [HttpPost("devices/enrollment-requests")]
@@ -92,6 +95,45 @@ public sealed class MobilePosRuntimeController : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await _financeReads.GetOutstandingInvoicesAsync(
             installationId, businessPartnerId, businessPartnerRoleId, cancellationToken));
+
+    [HttpPost("sales")]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    [Authorize(Policy = MobilePosPermissions.CreateInvoice)]
+    [Authorize(Policy = MobilePosPermissions.PostInvoice)]
+    [Authorize(Policy = MobilePosPermissions.CollectPayment)]
+    [Authorize(Policy = FinancePermissions.CreateArInvoices)]
+    [Authorize(Policy = FinancePermissions.ApprovePostArInvoices)]
+    [Authorize(Policy = FinancePermissions.ReceiveCustomerPayments)]
+    public async Task<ActionResult<MobilePosSaleResultDto>> CompleteSale(
+        [FromBody] MobilePosCompleteSaleRequestDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _sales.CompleteAsync(dto, cancellationToken));
+        }
+        catch (MobilePosMutationConflictException exception)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Mobile POS request conflict",
+                Detail = exception.Message
+            });
+        }
+        catch (MobilePosCommandRejectedException exception)
+        {
+            var details = new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Mobile POS sale rejected",
+                Detail = exception.Message
+            };
+            details.Extensions["code"] = exception.Code;
+            details.Extensions["replayed"] = exception.IsReplay;
+            return BadRequest(details);
+        }
+    }
 }
 
 [ApiController]

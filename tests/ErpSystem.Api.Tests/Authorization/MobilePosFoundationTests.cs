@@ -100,6 +100,25 @@ public sealed class MobilePosFoundationTests
     }
 
     [Fact]
+    public void CompleteSaleEndpoint_ShouldRequireTillMobileAndUnderlyingFinancePermissions()
+    {
+        var action = typeof(MobilePosRuntimeController).GetMethod(nameof(MobilePosRuntimeController.CompleteSale));
+
+        action.Should().NotBeNull();
+        action!.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .Should().BeEquivalentTo(
+                MobilePosPermissions.OperateTill,
+                MobilePosPermissions.CreateInvoice,
+                MobilePosPermissions.PostInvoice,
+                MobilePosPermissions.CollectPayment,
+                FinancePermissions.CreateArInvoices,
+                FinancePermissions.ApprovePostArInvoices,
+                FinancePermissions.ReceiveCustomerPayments);
+    }
+
+    [Fact]
     public void AdministrationController_ShouldProtectEveryActionWithAMobilePosPermission()
     {
         var actions = typeof(MobilePosAdministrationController).GetMethods()

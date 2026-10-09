@@ -1015,6 +1015,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosFoundationService, ErpSystem.Api.Services.MobilePos.MobilePosFoundationService>();
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosFinanceReadService, ErpSystem.Api.Services.MobilePos.MobilePosFinanceReadService>();
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosMutationExecutionService, ErpSystem.Api.Services.MobilePos.MobilePosMutationExecutionService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosSaleService, ErpSystem.Api.Services.MobilePos.MobilePosSaleService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReportExportService, ErpSystem.Api.Services.Finance.Reporting.FinanceReportExportService>();
             // FR-RP-010 deliberately extends the shared report/template model.
             // The processor is scoped because each scheduler pass owns one EF

@@ -80,9 +80,9 @@
 | MPOS-0301 | Certified Mobile POS Finance dimension routes | In progress - distinct compiled invoice and customer-payment routes, external producer contracts, Mobile POS module-lock identity, AR invoice/payment route guards, approval support, settlement dimension mapping, and focused contract tests are implemented; live database producer-readiness evidence remains |
 | MPOS-0302 | Approved-customer search and default customer resolution | In progress - tenant/store/device-scoped API and mobile screen implemented; eligible customers require an effective Customer role, approved/active registration, approved Business Partner status, and an effective approved AR profile; blank search resolves only the mapped store default; service tests pass; live SQL/API/device evidence remains |
 | MPOS-0303 | Outstanding-invoice lookup | In progress - selected eligible customers use the canonical `IPaymentService` outstanding-invoice query through a `MobilePOS.Customer.View` protected endpoint; mobile balance view and focused tests pass; live AR/API evidence remains |
-| MPOS-0304 | Invoice preview/create/lifecycle adapter | Planned |
-| MPOS-0305 | Customer receipt and allocation adapter | Planned |
-| MPOS-0306 | Server idempotency registry | In progress - server-computed command fingerprints, tenant/device/client-mutation uniqueness, atomic relational transaction locking, exact completed/rejected replay, mismatch conflicts, and focused tests implemented; live SQL concurrency and write-endpoint orchestration evidence remains |
+| MPOS-0304 | Invoice preview/create/lifecycle adapter | In progress - the online sale endpoint revalidates the assigned device/store/till/session/customer, current item prices, tax inputs, and canonical totals, then creates and posts through `IInvoiceService` with the certified Mobile POS producer; preview/mobile UI and live Finance evidence remain |
+| MPOS-0305 | Customer receipt and allocation adapter | In progress - each online tender creates one canonical `CustomerPayment` through `IPaymentService`, allocates it directly to the sale invoice, defaults cash to the till liquidity account, and enforces till tender/reference rules; receipt projection, collections, and live Finance evidence remain |
+| MPOS-0306 | Server idempotency registry | In progress - server-computed command fingerprints, tenant/device/client-mutation uniqueness, atomic relational transaction locking, exact completed/rejected sale replay, mismatch conflicts, and focused tests implemented; live SQL concurrency evidence remains |
 | MPOS-0307 | Canonical receipt projection | Planned |
 | MPOS-0308 | AR/GL/liquidity/audit/reconciliation tests | Planned |
 
@@ -94,7 +94,7 @@
 | MPOS-0402 | Camera/manual/keyboard-wedge scanner boundary | Planned |
 | MPOS-0403 | Cart, pricing preview, tax display, discounts | Planned |
 | MPOS-0404 | Tender UI and metadata rules | Planned |
-| MPOS-0405 | Atomic split-tender orchestration | Planned |
+| MPOS-0405 | Atomic split-tender orchestration | In progress - one public online command composes the canonical invoice, posting, multiple allocated canonical payments, and Mobile POS source envelopes inside the mutation transaction; exact replay and rejection tests pass, while SQL failure-injection and live accounting reconciliation evidence remain |
 | MPOS-0406 | Receipt screen, persistence, reprint audit | Planned |
 | MPOS-0407 | PDF/system/digital printing fallback | Planned |
 
