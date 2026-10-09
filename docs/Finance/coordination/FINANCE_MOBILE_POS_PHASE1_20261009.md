@@ -4,7 +4,7 @@
 
 Audit the committed Flash ERP Android mobile application and the current RHEMA ERP Finance, AR, payment, till, security, tenant, location, and offline capabilities. Produce an implementation-ready architecture and phased delivery plan for the RHEMA Field POS and Revenue Collection mobile application. The plan must incorporate the management policies recorded in `C:\Users\USER\Desktop\Mobile app.docx`, including per-store default walk-in customers.
 
-The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. The Phase 3 read slice adds governed approved-customer search, automatic store default-customer resolution, and canonical outstanding-invoice lookup. The Phase 3 Finance-route milestone adds distinct compiled invoice and customer-payment producer routes, external-producer contracts, module-lock identity, and canonical AR guard/settlement support. The transaction foundation adds persisted sale, line, tender, and mutation-receipt source envelopes plus server-side idempotent command execution. The online-sale milestone composes one validated invoice and one allocated canonical CustomerPayment per split tender inside that transaction boundary. The current checkout milestone adds governed catalogue search, canonical server preview, and a mobile cart and split-tender flow that calls the atomic command. It does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
+The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. The Phase 3 read slice adds governed approved-customer search, automatic store default-customer resolution, and canonical outstanding-invoice lookup. The Phase 3 Finance-route milestone adds distinct compiled invoice and customer-payment producer routes, external-producer contracts, module-lock identity, and canonical AR guard/settlement support. The transaction foundation adds persisted sale, line, tender, and mutation-receipt source envelopes plus server-side idempotent command execution. The online-sale milestone composes one validated invoice and one allocated canonical CustomerPayment per split tender inside that transaction boundary. The current checkout milestone adds governed catalogue search, canonical server preview, a mobile cart and split-tender flow that calls the atomic command, a canonical receipt projection, and permission-gated idempotent reprint auditing. It does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
 
 ## Branch and worktree
 
@@ -12,6 +12,8 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Worktree: `.worktrees/mobile-pos-phase1`
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
+- Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
+- Current branch head before the receipt checkpoint: `6e0a9491ef2258da66fc20672e2c664c7a6fcaa1`
 - Pull request: not created
 
 ## Source baselines
@@ -67,6 +69,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `c8c9c8e1869` - Phase 3 persisted sale/line/tender source envelopes, server-side mutation idempotency execution, migration, tests, and tracker evidence.
 - `f4d64bf0abf` - Phase 3 public online sale command, canonical invoice/posting and split-payment allocation orchestration, validation, authorization, tests, and tracker evidence.
 - `939e0190b38` - Phase 4 governed catalogue search, canonical sale preview, native cart and split-tender checkout, API/client tests, and tracker evidence.
+- `31399b06bd9` - Canonical Mobile POS receipt projection, assigned-store access boundary, permission-gated idempotent reprint audit, mobile receipt UI, and focused tests.
 
 ## Phase 2 application foundation
 
@@ -111,7 +114,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The command creates and posts the invoice through the canonical `IInvoiceService` Mobile POS producer. The server compares the canonical subtotal, tax, discount, and total with the client-confirmed values before any payment is created.
 - Every split tender creates one canonical `CustomerPayment` through `IPaymentService` and allocates it directly to the invoice. Cash defaults to the till liquidity account; non-cash destination metadata remains subject to the canonical payment service.
 - The Mobile POS sale, immutable lines, tender-to-payment links, canonical invoice link, and completed mutation result are persisted only after all canonical Finance calls succeed. Exact retries replay the stored result without repeating invoice or payment commands; explicit rejections are also replayed.
-- This is the backend online-write slice. Canonical receipt projection, SQL failure injection, and live accounting reconciliation remain outside this checkpoint.
+- This is the backend online-write slice. The canonical receipt projection described below now consumes its immutable source snapshot; SQL failure injection and live accounting reconciliation remain outstanding.
 
 ## Phase 4 online checkout
 
@@ -119,8 +122,16 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Added `POST /api/mobile-pos/v1/sales/preview` behind the Mobile POS and canonical AR invoice permissions. It resolves the store default or selected approved customer, validates currency and items, applies governed line discounts, and delegates tax calculation to `ITaxCalculationEngine` without persisting a sale.
 - Added the native mobile sale route with approved-customer override, governed catalogue search, cart quantity controls, canonical server preview, multiple till-mapped tenders, required-reference checks, exact tender-total reconciliation, and atomic completion.
 - Completion derives commercial fields from the latest server preview and retains one client mutation ID/local reference across network retries. A changed cart, customer, preview, or tender set invalidates that pending identity.
-- The success state displays the canonical invoice and payment identifiers returned by the server. Durable receipt projection, printer output, and reprint audit remain separate work.
+- The success state displays the canonical invoice and payment identifiers returned by the server and then loads the canonical receipt projection described below. Printer output remains separate work.
 - Bank-account selection for payment methods that require a bank account is deliberately blocked with an explicit message until the governed account lookup/selection contract exists.
+
+## Phase 3 canonical receipt and Phase 4 receipt/reprint slice
+
+- Added `GET /api/mobile-pos/v1/receipts/{saleId}` behind dynamic `MobilePOS.Access`. The service revalidates the current device and effective assignment, limits the receipt to the assigned store, and accepts only a completed sale with a canonical invoice and completed canonical payment links for every tender.
+- The receipt is projected from the immutable Mobile POS sale, line, and tender snapshots together with canonical invoice and CustomerPayment identifiers. It includes tenant, store, location, till, session, device, cashier, customer, lines, totals, split tenders, safe external references, and a verification reference without exposing bank, liquidity-account, or internal posting details.
+- Added `POST /api/mobile-pos/v1/receipts/{saleId}/reprint-events` behind both `MobilePOS.Access` and `MobilePOS.Receipt.Reprint`. It appends a tenant-scoped central `AuditLog` event keyed by device and client event ID. Exact retries return the same audit event and copy number.
+- Reprinting never calls the invoice or payment services and therefore cannot create, repost, or reallocate Finance documents. No new migration was required because the existing immutable sale snapshot and append-only idempotent audit store satisfy this slice.
+- The mobile success screen renders the canonical receipt, split-tender payment numbers, and a numbered `REPRINT` mark. The reprint action is hidden without the dynamic permission and explains that another copy only records audit evidence.
 
 ## Migrations and application state
 
@@ -155,6 +166,9 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Frontend administration/access tests passed: 27 tests across the route guard, Settings registry, and navigation access helper.
 - Frontend production build passed. The generated app manifest contains `/administration/mobile-pos/page`.
 - Expo application TypeScript check passed. Twenty-eight client tests passed across environment policy, sanitized support references, ProblemDetails and non-JSON response handling, concurrent-401 single-flight refresh behavior, customer/outstanding-invoice request encoding, catalogue/preview/completion contracts, split-tender calculation/completion mapping, offline-grant API shape, expiry, assignment/policy/default-customer/revocation binding, and remaining-time calculation.
+- Thirty-two focused Mobile POS API tests passed after the canonical receipt and audited-reprint slice. Added coverage proves the complete receipt projection, split-tender payment identifiers, cross-store denial, idempotent reprint audit, unchanged canonical sale state, and dynamic access/reprint authorization.
+- The Expo TypeScript check and all 28 mobile tests passed after the receipt API client and receipt/reprint UI were added.
+- The API Release compilation completed with zero errors for the receipt service/controller/DTO/DI changes. Existing repository warnings and ImageSharp advisories remained warnings.
 - Expo Doctor is installed as a reproducible development dependency and passed 18/18 checks. Android bundle export passed and generated the Android Hermes bundle and metadata under the ignored `apps/mobile/dist/android` output.
 
 ## Known failures and constraints
@@ -167,7 +181,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 
 ## Remaining work
 
-Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, and mobile checkout paths. Next, add the offline catalogue change feed/cache, scanner boundary, governed discount controls, bank-account selection for eligible payment methods, canonical receipt projection, SQL Server concurrency/failure-injection coverage, and end-to-end Finance reconciliation evidence. Offline grant consumption and aggregate-limit enforcement remain in Phase 5. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
+Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, receipt, and mobile checkout paths. Next, add the offline catalogue change feed/cache, scanner boundary, governed discount controls, bank-account selection for eligible payment methods, PDF/system/digital receipt fallback, SQL Server concurrency/failure-injection coverage, and end-to-end Finance reconciliation evidence. Offline grant consumption and aggregate-limit enforcement remain in Phase 5. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
 
 ## Authorization boundaries
 
