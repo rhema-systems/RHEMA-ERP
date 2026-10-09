@@ -60,6 +60,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `fb707967413` - Phase 1 architecture report, implementation tracker, and initial coordination ledger.
 - `6df8433f81d` - Phase 1 documentation checkpoint before Phase 2 implementation.
 - `6d981a51448` - Phase 2 Mobile POS application, governance foundation, HQ administration UI, migration, and focused tests.
+- `cd98aa003c4` - Phase 2 client contract hardening, reproducible mobile validation, and store/device service integration tests.
 
 ## Phase 2 application foundation
 
