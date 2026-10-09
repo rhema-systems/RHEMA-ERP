@@ -44,6 +44,8 @@ Resolve the UAT `PROFILE_EFFECTIVE_PERIOD_OVERLAP` failure when approving a late
 ## Migrations
 
 - None. The legacy database column is retained for compatibility/history but becomes non-authoritative and non-writable through ordinary Business Partner maintenance.
+- Local UAT environment recovery on 09 Oct 2026: with explicit user authorization, backed up and upgraded `RHEMA-AKWASI\EXPRESS22 / RHEMAERP_BOOKV2_UAT_20260922` from 148 to 156 recorded migrations. These were existing repository migrations, not migrations introduced by this workstream.
+- Verified checksum backup: `C:\Program Files\Microsoft SQL Server\MSSQL16.EXPRESS22\MSSQL\Backup\RHEMAERP_BOOKV2_UAT_20260922_pre_8_migrations_20261009_122334.bak`.
 
 ## Verification
 
@@ -53,6 +55,10 @@ Resolve the UAT `PROFILE_EFFECTIVE_PERIOD_OVERLAP` failure when approving a late
 - PASS: focused customer-register backend filter — 6 passed (`SubledgerSettlementReadModelTranslationTests` plus `CanonicalCustomerProfileReadTests`).
 - PASS: targeted ESLint for `frontend/src/app/finance/ar/customers/page.tsx`.
 - PASS: `git diff --check`.
+- PASS: BOOKV2 post-migration checks retained 48 users (including one active `admin`) and 13 business partners; migration history reached `20261007191000_SeedCrmAndSalesPermissionCatalogues`; representative new columns/nullability checks passed.
+- PASS: restarted local API from this worktree on port 5050; `/health/live` and the database/startup readiness components are healthy.
+- ENVIRONMENT: aggregate `/health/ready` remains HTTP 503 only because the separately configured `file-virus-scanner` readiness check is unhealthy; database and startup checks are healthy.
+- EXISTING DATA WARNING: startup reconciliation logged tenant-mismatch failures for orphaned exchange-rate workflows and one recurring-journal workflow. The API remained running; no repair of those records was authorized or attempted.
 - EXPECTED/UNRELATED: broader `BusinessPartnerPostingDefaultsTests` filter produced 42 passes and one existing `PostingOptionsExposeOnlyCurrentTenantActiveCatalogueMetadata` null-reference failure in `BusinessPartnerService.GetPostingOptionsAsync`.
 - ENVIRONMENT/Baseline: frontend `tsc --noEmit` stops at `src/lib/phone-number.ts(7,8)` because the shared installed dependency tree cannot resolve `libphonenumber-js/max`; no changed file is implicated.
 - Existing package audit warnings: `SixLabors.ImageSharp 3.1.11` has published moderate/high advisories.
@@ -63,8 +69,10 @@ Resolve the UAT `PROFILE_EFFECTIVE_PERIOD_OVERLAP` failure when approving a late
 - Push the customer-register follow-up commit to pull request #384 after user authorization.
 - Deploy only after merge through the normal deployment process, then retry approval of the submitted version-2 AR profile.
 - After updating the local API process, verify that the Customer Register returns rows or a genuine empty result rather than HTTP 400.
+- Complete browser UAT against `http://localhost:3000` and API `http://localhost:5050`, including login and Customer Register loading.
 
 ## Authorization boundaries
 
 - Push and pull-request creation were authorized and completed on 08 Oct 2026.
-- Merge, deployment, production/UAT database mutation, and remote-server changes remain unauthorized.
+- Backup plus application of the eight already-pending repository migrations to the named local BOOKV2 UAT database was authorized and completed on 09 Oct 2026.
+- Merge, deployment, any further database mutation, and remote-server changes remain unauthorized.
