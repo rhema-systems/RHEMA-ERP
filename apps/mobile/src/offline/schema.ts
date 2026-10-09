@@ -4,7 +4,7 @@ export interface OfflineDatabaseMigration {
   sql: string;
 }
 
-export const OFFLINE_DATABASE_VERSION = 2;
+export const OFFLINE_DATABASE_VERSION = 3;
 
 export const offlineDatabaseMigrations: OfflineDatabaseMigration[] = [
   {
@@ -120,6 +120,31 @@ export const offlineDatabaseMigrations: OfflineDatabaseMigration[] = [
         PRIMARY KEY (scope_key, configuration_key),
         FOREIGN KEY (scope_key) REFERENCES cache_context(scope_key) ON DELETE CASCADE
       );
+    `,
+  },
+  {
+    version: 3,
+    name: "mobile_pos_outbox_state_guards",
+    sql: `
+      CREATE TRIGGER IF NOT EXISTS outbox_state_insert_guard
+      BEFORE INSERT ON outbox_message
+      WHEN NEW.state NOT IN ('DraftLocal', 'Pending')
+      BEGIN
+        SELECT RAISE(ABORT, 'Invalid initial Mobile POS outbox state');
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS outbox_state_transition_guard
+      BEFORE UPDATE OF state ON outbox_message
+      WHEN OLD.state <> NEW.state AND NOT (
+        (OLD.state = 'DraftLocal' AND NEW.state = 'Pending') OR
+        (OLD.state = 'Pending' AND NEW.state = 'Syncing') OR
+        (OLD.state = 'Syncing' AND NEW.state IN ('Pending', 'Synced', 'Rejected', 'Conflict', 'ManualReview')) OR
+        (OLD.state = 'Conflict' AND NEW.state = 'ManualReview') OR
+        (OLD.state = 'ManualReview' AND NEW.state = 'Pending')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'Invalid Mobile POS outbox state transition');
+      END;
     `,
   },
 ];
