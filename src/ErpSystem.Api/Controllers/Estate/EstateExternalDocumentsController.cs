@@ -582,9 +582,34 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                         .FirstOrDefault(),
                     StringComparer.OrdinalIgnoreCase);
 
+        var propertyReferences = properties
+            .SelectMany(asset => new[]
+            {
+                asset.AssetCode,
+                asset.ProjectUnitCode,
+                asset.AgreementReference
+            })
+            .Where(reference => !string.IsNullOrWhiteSpace(reference))
+            .Select(reference => reference!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var linkedSalesInvoiceIds = propertyReferences.Count == 0
+            ? []
+            : await _db.SalesOrders
+                .AsNoTracking()
+                .Where(order => order.TenantId == tenantId
+                    && !order.IsDeleted
+                    && order.InvoiceId.HasValue
+                    && order.PropertyReference != null
+                    && customerIds.Contains(order.BusinessPartnerId)
+                    && propertyReferences.Contains(order.PropertyReference))
+                .Select(order => order.InvoiceId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
         var invoices = await _db.Invoices
             .AsNoTracking()
-            .ForCustomerProperties(tenantId, customerIds)
+            .ForCustomerProperties(tenantId, customerIds, linkedSalesInvoiceIds)
             .OrderByDescending(invoice => invoice.InvoiceDate)
             .Select(invoice => new
             {
