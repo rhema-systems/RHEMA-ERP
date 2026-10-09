@@ -17,10 +17,12 @@ import {
   PenLine,
   RefreshCw,
   Save,
+  Search,
   Send,
   ShieldCheck,
   Settings2,
   Undo2,
+  X,
   XCircle,
 } from 'lucide-react';
 
@@ -74,6 +76,24 @@ import {
 
 const ENTITY_TYPE = 'EstatePropertyManagementListingApplication';
 const REQUESTS_PER_PAGE = 10;
+const QUEUE_STAGE_OPTIONS = [
+  'Intake and validate property request',
+  'Commercial and availability review',
+  'Management decision',
+  'Approved transaction handoff',
+  'Customer update and close',
+];
+const QUEUE_STATUS_OPTIONS = [
+  'Open',
+  'Completed',
+  'Rejected',
+  'Cancelled',
+  'Canceled',
+  'Closed',
+  'Archived',
+  'Clarification required',
+];
+const QUEUE_REQUEST_TYPE_OPTIONS = ['Sale', 'Rent', 'Lease'];
 const SALE_CLOSEOUT_COMPLETED_QUEUE_KEY =
   'property-management.sale-closeout-completed-case-ids';
 
@@ -587,8 +607,16 @@ export function ListingApplicationWorkspace() {
   const registerOnly = !routeCaseId && !requestedCaseId;
   const [cases, setCases] = React.useState<ProcedureCaseSummary[]>([]);
   const [queuePage, setQueuePage] = React.useState(1);
+  const [queuePageSize, setQueuePageSize] = React.useState(REQUESTS_PER_PAGE);
   const [caseTotalCount, setCaseTotalCount] = React.useState(0);
   const [caseTotalPages, setCaseTotalPages] = React.useState(1);
+  const [queueSearch, setQueueSearch] = React.useState('');
+  const [queueStatusFilter, setQueueStatusFilter] = React.useState('all');
+  const [queueStageFilter, setQueueStageFilter] = React.useState('all');
+  const [queueRequestTypeFilter, setQueueRequestTypeFilter] =
+    React.useState('all');
+  const [queueWorkflowModeFilter, setQueueWorkflowModeFilter] =
+    React.useState('all');
   const [selectedCase, setSelectedCase] =
     React.useState<ProcedureCaseDetail | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -694,7 +722,15 @@ export function ListingApplicationWorkspace() {
         'PropertyManagement',
         ENTITY_TYPE,
         queuePage,
-        REQUESTS_PER_PAGE
+        queuePageSize,
+        false,
+        {
+          search: queueSearch.trim() || undefined,
+          status: queueStatusFilter,
+          stage: queueStageFilter,
+          requestType: queueRequestTypeFilter,
+          workflowMode: queueWorkflowModeFilter,
+        }
       );
       const data = page.items;
       setCases(data);
@@ -714,6 +750,12 @@ export function ListingApplicationWorkspace() {
     detailOnly,
     rememberSaleOwnershipCompletion,
     queuePage,
+    queuePageSize,
+    queueRequestTypeFilter,
+    queueSearch,
+    queueStageFilter,
+    queueStatusFilter,
+    queueWorkflowModeFilter,
     registerOnly,
     targetCaseId,
   ]);
@@ -721,6 +763,17 @@ export function ListingApplicationWorkspace() {
   React.useEffect(() => {
     void loadCases();
   }, [loadCases]);
+
+  React.useEffect(() => {
+    setQueuePage(1);
+  }, [
+    queuePageSize,
+    queueRequestTypeFilter,
+    queueSearch,
+    queueStageFilter,
+    queueStatusFilter,
+    queueWorkflowModeFilter,
+  ]);
 
   React.useEffect(() => {
     setSaleCloseoutChecklist({
@@ -2044,11 +2097,130 @@ export function ListingApplicationWorkspace() {
                   </Badge>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 lg:grid-cols-[minmax(16rem,1.4fr)_repeat(4,minmax(9rem,1fr))_auto] lg:items-end">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Search
+                    </label>
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={queueSearch}
+                        onChange={(event) => setQueueSearch(event.target.value)}
+                        className="pl-9"
+                        placeholder="Reference, customer, property"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Status
+                    </label>
+                    <Select
+                      value={queueStatusFilter}
+                      onValueChange={setQueueStatusFilter}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="All statuses" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All statuses</SelectItem>
+                        {QUEUE_STATUS_OPTIONS.map((status) => (
+                          <SelectItem key={status} value={status}>
+                            {status}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Stage
+                    </label>
+                    <Select
+                      value={queueStageFilter}
+                      onValueChange={setQueueStageFilter}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="All stages" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All stages</SelectItem>
+                        {QUEUE_STAGE_OPTIONS.map((stage) => (
+                          <SelectItem key={stage} value={stage}>
+                            {stage}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Request
+                    </label>
+                    <Select
+                      value={queueRequestTypeFilter}
+                      onValueChange={setQueueRequestTypeFilter}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="All requests" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All requests</SelectItem>
+                        {QUEUE_REQUEST_TYPE_OPTIONS.map((requestType) => (
+                          <SelectItem key={requestType} value={requestType}>
+                            {requestType}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Workflow
+                    </label>
+                    <Select
+                      value={queueWorkflowModeFilter}
+                      onValueChange={setQueueWorkflowModeFilter}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="All workflow modes" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All modes</SelectItem>
+                        <SelectItem value="configured">Configured</SelectItem>
+                        <SelectItem value="manual">Manual</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() => {
+                      setQueueSearch('');
+                      setQueueStatusFilter('all');
+                      setQueueStageFilter('all');
+                      setQueueRequestTypeFilter('all');
+                      setQueueWorkflowModeFilter('all');
+                    }}
+                    disabled={
+                      !queueSearch &&
+                      queueStatusFilter === 'all' &&
+                      queueStageFilter === 'all' &&
+                      queueRequestTypeFilter === 'all' &&
+                      queueWorkflowModeFilter === 'all'
+                    }
+                  >
+                    <X className="h-4 w-4" />
+                    Clear
+                  </Button>
+                </div>
                 {cases.length === 0 ? (
                   <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                    Customer bids and rental requests will appear here after
-                    they are submitted from a published listing.
+                    No customer bids or rental requests match the current
+                    filters.
                   </p>
                 ) : (
                   <div className="overflow-x-auto">
@@ -2125,13 +2297,17 @@ export function ListingApplicationWorkspace() {
                     </table>
                   </div>
                 )}
-                {caseTotalCount > REQUESTS_PER_PAGE ? (
+                {caseTotalCount > 0 ? (
                   <Pagination
                     currentPage={queuePage}
                     totalPages={caseTotalPages}
                     totalItems={caseTotalCount}
-                    pageSize={REQUESTS_PER_PAGE}
+                    pageSize={queuePageSize}
                     onPageChange={setQueuePage}
+                    onPageSizeChange={(nextPageSize) => {
+                      setQueuePageSize(nextPageSize);
+                      setQueuePage(1);
+                    }}
                   />
                 ) : null}
               </CardContent>

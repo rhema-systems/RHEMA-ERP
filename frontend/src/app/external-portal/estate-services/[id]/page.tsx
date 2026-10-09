@@ -26,6 +26,7 @@ function fieldValue(request: ExternalEstateServiceRequest, key: string) {
 const PRIMARY_FIELD_GROUPS: Array<{ label: string; keys: string[] }> = [
   { label: 'Request type', keys: ['procedureType', 'requestType', 'category'] },
   { label: 'Requester name', keys: ['requester', 'applicantName', 'customerName'] },
+  { label: 'Customer account', keys: ['customerBusinessPartnerReference', 'customerAccountReference', 'sourceReference'] },
   { label: 'Requester contact', keys: ['contactReference', 'contact', 'phoneNumber', 'emailAddress'] },
   { label: 'Property / unit / plot', keys: ['propertyUnit', 'propertyNumber', 'plotNumber', 'unitNumber', 'housePlotShopNumber'] },
   { label: 'Location', keys: ['location', 'locationDetail', 'propertyLocation'] },

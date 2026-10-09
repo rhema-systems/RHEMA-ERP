@@ -20,6 +20,9 @@ public sealed record ProcedureCaseSummaryDto(
     public string? OrganizationLevelName { get; init; }
     public Guid? OrganizationUnitId { get; init; }
     public string? OrganizationUnitName { get; init; }
+    public string? SubmittedByName { get; init; }
+    public DateTime SubmittedAt { get; init; }
+    public IDictionary<string, string?>? FieldValues { get; init; }
 }
 
 public sealed record ProcedureCaseDetailDto(
@@ -50,6 +53,8 @@ public sealed record ProcedureCaseDetailDto(
     public string? OrganizationLevelName { get; init; }
     public Guid? OrganizationUnitId { get; init; }
     public string? OrganizationUnitName { get; init; }
+    public string? SubmittedByName { get; init; }
+    public DateTime SubmittedAt { get; init; }
 }
 
 public sealed record ProcedureCaseFieldDto(

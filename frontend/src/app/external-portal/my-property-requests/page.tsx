@@ -692,6 +692,14 @@ export function PropertyRequestsView({
                     </div>
                   </div>
                   <div>
+                    <span className="text-slate-400">Customer account</span>
+                    <div className="mt-1 font-medium text-slate-700">
+                      {fieldValue(request, 'customerBusinessPartnerReference') ||
+                        fieldValue(request, 'customerAccountReference') ||
+                        'Not recorded'}
+                    </div>
+                  </div>
+                  <div>
                     <span className="text-slate-400">Agreement</span>
                     <div className="mt-1 font-medium text-slate-700">
                       {fieldValue(request, 'finalSignedAgreementReference') ||
@@ -805,10 +813,11 @@ export function PropertyRequestsView({
                       <ClipboardList className="h-4 w-4" />
                       {fieldValue(request, 'requestType').toLowerCase().includes('lease') ? 'Lease' : 'Purchase'} balance
                     </div>
-                    <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+                    <div className="mt-3 grid gap-3 text-sm sm:grid-cols-4">
                       <div><span className="text-slate-500">Estate balance</span><div className="mt-1 font-medium">{formatMoney(fieldValue(request, 'estateRemainingAmount') || '0', fieldValue(request, 'currency') || 'GHS')}</div></div>
                       <div><span className="text-slate-500">Invoice</span><div className="mt-1 font-medium">{fieldValue(request, 'saleInvoiceReference') || (Number(fieldValue(request, 'estateRemainingAmount')) > 0 ? 'Awaiting Finance invoice' : 'No Estate invoice required')}</div></div>
                       <div><span className="text-slate-500">Payment</span><div className="mt-1 font-medium">{fieldValue(request, 'salePaymentStatus') || 'Awaiting Finance'}</div></div>
+                      <div><span className="text-slate-500">Sales payment reference</span><div className="mt-1 font-medium">{fieldValue(request, 'salesPaymentReferences') || fieldValue(request, 'salesPaymentReference') || 'No Sales receipt recorded'}</div></div>
                     </div>
                     <Link href="/external-portal/my-properties?tab=bills" className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-blue-700 hover:underline">View bills and receipts <ArrowLeft className="h-4 w-4 rotate-180" /></Link>
                   </div>
@@ -855,12 +864,12 @@ export function PropertyRequestsView({
                   <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
                     <div className="flex items-center gap-2 font-medium text-slate-900">
                       <Upload className="h-4 w-4" />
-                      Supporting documents
+                      Customer-submitted documents
                     </div>
                     <p className="mt-1 text-sm text-slate-600">
                       {canUploadIntakeDocuments(request)
                         ? 'Upload any required application document that is still missing.'
-                        : 'Document upload closes once the first internal stage is routed forward.'}
+                        : 'Document intake is closed for this stage.'}
                     </p>
                     <div className="mt-3 space-y-3">
                       {request.documents.map((document) => (
@@ -874,7 +883,9 @@ export function PropertyRequestsView({
                                 {document.name}{document.isMandatory ? ' *' : ''}
                               </p>
                               <p className="mt-1 text-xs text-slate-500">
-                                {document.fileName || 'File not attached'}
+                                {[document.fileName || 'File not attached', document.sourceLabel || document.providedBy]
+                                  .filter(Boolean)
+                                  .join(' · ')}
                               </p>
                             </div>
                             {document.fileName ? (

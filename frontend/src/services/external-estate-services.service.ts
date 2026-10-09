@@ -35,6 +35,8 @@ export interface ExternalEstateRequestDocument {
   providedBy: string;
   isMandatory: boolean;
   fileName?: string | null;
+  uploadedAt?: string | null;
+  sourceLabel?: string | null;
 }
 
 export interface ExternalEstateRequestsPage {

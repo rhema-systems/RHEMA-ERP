@@ -266,12 +266,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return Ok(new { success = true, data = Array.Empty<object>() });
         }
 
-        var portalCustomerIds = await PortalCustomers(tenantId, userId.Value)
-            .Select(customer => customer.Id)
-            .ToListAsync(cancellationToken);
-        var portalCustomerReferences = portalCustomerIds
-            .Select(customerId => customerId.ToString())
-            .ToList();
+        var portalCustomerReferences = await PortalCustomerReferencesAsync(tenantId, userId.Value, cancellationToken);
 
         var query = _db.ProcedureCases
             .AsNoTracking()
@@ -284,13 +279,17 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     || (item.SourceDepartment == "External Portal - Estate Listings"
                         && item.EntityType == "EstatePropertyManagementListingApplication"
                         && item.Fields.Any(field => !field.IsDeleted
-                            && field.Key == "sourceReference"
+                            && (field.Key == "sourceReference"
+                                || field.Key == "customerAccountReference"
+                                || field.Key == "customerBusinessPartnerReference")
                             && field.Value != null
                             && portalCustomerReferences.Contains(field.Value)))
                     || (item.SourceDepartment == "Sales - Estate Enquiry"
                         && item.EntityType == "EstatePropertyManagementListingApplication"
                         && item.Fields.Any(field => !field.IsDeleted
-                            && field.Key == "sourceReference"
+                            && (field.Key == "sourceReference"
+                                || field.Key == "customerAccountReference"
+                                || field.Key == "customerBusinessPartnerReference")
                             && field.Value != null
                             && portalCustomerReferences.Contains(field.Value)))));
 
@@ -350,52 +349,29 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                             && propertyReferences.Contains(parcel.ChildFixedAssetReference))))
                 .ToListAsync(cancellationToken);
 
-        var requests = cases
-            .Select(item =>
+        var requests = new List<object>();
+        foreach (var item in cases)
+        {
+            var fieldValues = BuildExternalRequestFieldValues(item);
+            var listingReference = fieldValues.GetValueOrDefault("listingReference");
+            var propertyUnit = fieldValues.GetValueOrDefault("propertyUnit");
+            var asset = managedAssets.FirstOrDefault(candidate =>
+                string.Equals(candidate.AssetCode, listingReference, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(candidate.AssetCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(candidate.ProjectUnitCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
+                || candidate.Demarcations.Any(parcel => !parcel.IsDeleted
+                    && (string.Equals(parcel.ChildFixedAssetReference, listingReference, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(parcel.ChildFixedAssetReference, propertyUnit, StringComparison.OrdinalIgnoreCase))));
+            if (asset?.RightOfEntryDate is { } actualPossessionDate)
             {
-                var fieldValues = item.Fields.ToDictionary(
-                    field => field.Key,
-                    field => field.Value,
-                    StringComparer.OrdinalIgnoreCase);
-                var listingReference = fieldValues.GetValueOrDefault("listingReference");
-                var propertyUnit = fieldValues.GetValueOrDefault("propertyUnit");
-                var asset = managedAssets.FirstOrDefault(candidate =>
-                    string.Equals(candidate.AssetCode, listingReference, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(candidate.AssetCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(candidate.ProjectUnitCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
-                    || candidate.Demarcations.Any(parcel => !parcel.IsDeleted
-                        && (string.Equals(parcel.ChildFixedAssetReference, listingReference, StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(parcel.ChildFixedAssetReference, propertyUnit, StringComparison.OrdinalIgnoreCase))));
-                if (asset?.RightOfEntryDate is { } actualPossessionDate)
-                {
-                    fieldValues["actualPossessionDate"] = actualPossessionDate.ToString("yyyy-MM-dd");
-                }
+                fieldValues["actualPossessionDate"] = actualPossessionDate.ToString("yyyy-MM-dd");
+            }
 
-                return new
-                {
-                    item.Id,
-                    item.Module,
-                    item.EntityType,
-                    item.Title,
-                    item.ReferenceNumber,
-                    item.ApplicantName,
-                    item.SourceDepartment,
-                    item.Status,
-                    item.CurrentStageIndex,
-                    item.CurrentStageName,
-                    item.CurrentAssignedRole,
-                    CustomerIntakeUploadClosed = HasFirstInternalStageBeenRoutedForward(item),
-                    FieldValues = fieldValues,
-                    Documents = item.Documents
-                        .Where(document => string.Equals(document.ProvidedBy, "Customer", StringComparison.OrdinalIgnoreCase))
-                        .OrderBy(document => document.CreatedAt)
-                        .Select(ToExternalDocumentDto)
-                        .ToList(),
-                    item.CreatedAt,
-                    item.UpdatedAt
-                };
-            })
-            .ToList();
+            var saleContext = await LoadExternalRequestSaleContextAsync(item.TenantId, fieldValues, cancellationToken);
+            await EnrichExternalRequestFieldValuesAsync(item.TenantId, fieldValues, saleContext, cancellationToken);
+            var documents = await BuildExternalRequestDocumentsAsync(item, fieldValues, saleContext, cancellationToken);
+            requests.Add(ToExternalRequestDto(item, fieldValues, documents));
+        }
 
         if (!usePaging)
         {
@@ -436,7 +412,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         return procedureCase is null
             ? NotFound(new { success = false, message = "Estate service request was not found." })
-            : Ok(new { success = true, data = ToExternalRequestDto(procedureCase) });
+            : Ok(new { success = true, data = await BuildExternalRequestDtoAsync(procedureCase, cancellationToken) });
     }
 
     [HttpPost("/api/estate/external/requests/{requestId:guid}/customer-intake-documents/{documentId:guid}/upload")]
@@ -480,7 +456,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             var procedureCase = await LoadOwnedExternalListingCaseAsync(tenantId, userId.Value, requestId, cancellationToken);
             return procedureCase is null
                 ? NotFound(new { success = false, message = "Property request was not found." })
-                : Ok(new { success = true, data = ToExternalRequestDto(procedureCase) });
+                : Ok(new { success = true, data = await BuildExternalRequestDtoAsync(procedureCase, cancellationToken) });
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -1208,7 +1184,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             message = accepted
                 ? "Your acceptance has been recorded. Upload the signed agreement when it is ready."
                 : "Your rejection has been recorded.",
-            data = ToExternalRequestDto(procedureCase)
+            data = await BuildExternalRequestDtoAsync(procedureCase, cancellationToken)
         });
     }
 
@@ -1262,7 +1238,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             success = true,
             message = "The property request was withdrawn.",
-            data = ToExternalRequestDto(procedureCase)
+            data = await BuildExternalRequestDtoAsync(procedureCase, cancellationToken)
         });
     }
 
@@ -1355,7 +1331,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             "estate.property.application-clarification-response",
             cancellationToken);
 
-        return Ok(new { success = true, data = ToExternalRequestDto(procedureCase) });
+        return Ok(new { success = true, data = await BuildExternalRequestDtoAsync(procedureCase, cancellationToken) });
     }
 
     [HttpGet("/api/estate/external/requests/{requestId:guid}/agreement")]
@@ -1609,7 +1585,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             success = true,
             message = "Signed agreement submitted. Internal signature and approval can now continue if a workflow is assigned.",
-            data = ToExternalRequestDto(procedureCase)
+            data = await BuildExternalRequestDtoAsync(procedureCase, cancellationToken)
         });
     }
 
@@ -3960,12 +3936,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         Guid requestId,
         CancellationToken cancellationToken)
     {
-        var portalCustomerIds = await PortalCustomers(tenantId, userId)
-            .Select(customer => customer.Id)
-            .ToListAsync(cancellationToken);
-        var portalCustomerReferences = portalCustomerIds
-            .Select(customerId => customerId.ToString())
-            .ToList();
+        var portalCustomerReferences = await PortalCustomerReferencesAsync(tenantId, userId, cancellationToken);
 
         var procedureCase = await _db.ProcedureCases
             .Include(item => item.Fields.Where(field => !field.IsDeleted))
@@ -3989,12 +3960,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         Guid requestId,
         CancellationToken cancellationToken)
     {
-        var portalCustomerIds = await PortalCustomers(tenantId, userId)
-            .Select(customer => customer.Id)
-            .ToListAsync(cancellationToken);
-        var portalCustomerReferences = portalCustomerIds
-            .Select(customerId => customerId.ToString())
-            .ToList();
+        var portalCustomerReferences = await PortalCustomerReferencesAsync(tenantId, userId, cancellationToken);
 
         var procedureCase = await _db.ProcedureCases
             .AsNoTracking()
@@ -4040,12 +4006,31 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         return (procedureCase.SourceDepartment == "External Portal - Estate Listings"
                 || procedureCase.SourceDepartment == "Sales - Estate Enquiry")
             && procedureCase.Fields.Any(field => !field.IsDeleted
-                && field.Key == "sourceReference"
+                && IsPortalCustomerReferenceField(field.Key)
                 && field.Value is not null
-                && portalCustomerReferences.Contains(field.Value));
+                && portalCustomerReferences.Contains(field.Value.Trim(), StringComparer.OrdinalIgnoreCase));
     }
 
-    private static object ToExternalRequestDto(ProcedureCase procedureCase)
+    private static bool IsPortalCustomerReferenceField(string? key)
+        => string.Equals(key, "sourceReference", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(key, "customerAccountReference", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(key, "customerBusinessPartnerReference", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<object> BuildExternalRequestDtoAsync(
+        ProcedureCase procedureCase,
+        CancellationToken cancellationToken)
+    {
+        var fieldValues = BuildExternalRequestFieldValues(procedureCase);
+        var saleContext = await LoadExternalRequestSaleContextAsync(procedureCase.TenantId, fieldValues, cancellationToken);
+        await EnrichExternalRequestFieldValuesAsync(procedureCase.TenantId, fieldValues, saleContext, cancellationToken);
+        var documents = await BuildExternalRequestDocumentsAsync(procedureCase, fieldValues, saleContext, cancellationToken);
+        return ToExternalRequestDto(procedureCase, fieldValues, documents);
+    }
+
+    private static object ToExternalRequestDto(
+        ProcedureCase procedureCase,
+        IReadOnlyDictionary<string, string?> fieldValues,
+        IReadOnlyCollection<ExternalRequestDocumentDto> documents)
         => new
         {
             procedureCase.Id,
@@ -4060,37 +4045,276 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             procedureCase.CurrentStageName,
             procedureCase.CurrentAssignedRole,
             CustomerIntakeUploadClosed = HasFirstInternalStageBeenRoutedForward(procedureCase),
-            Documents = procedureCase.Documents
-                .Where(document => !document.IsDeleted
-                    && string.Equals(document.ProvidedBy, "Customer", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(document => document.CreatedAt)
-                .Select(ToExternalDocumentDto)
-                .ToList(),
-            FieldValues = procedureCase.Fields
-                .Where(field => !field.IsDeleted)
-                .ToDictionary(
-                    field => field.Key,
-                    field => field.Value,
-                    StringComparer.OrdinalIgnoreCase),
+            Documents = documents,
+            FieldValues = fieldValues,
             procedureCase.CreatedAt,
             procedureCase.UpdatedAt
         };
+
+    private static Dictionary<string, string?> BuildExternalRequestFieldValues(ProcedureCase procedureCase)
+        => procedureCase.Fields
+            .Where(field => !field.IsDeleted)
+            .GroupBy(field => field.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(field => field.UpdatedAt ?? field.CreatedAt)
+                    .Select(field => field.Value)
+                    .FirstOrDefault(),
+                StringComparer.OrdinalIgnoreCase);
+
+    private async Task EnrichExternalRequestFieldValuesAsync(
+        Guid tenantId,
+        IDictionary<string, string?> fieldValues,
+        ExternalRequestSaleContext saleContext,
+        CancellationToken cancellationToken)
+    {
+        if (fieldValues.TryGetValue("sourceReference", out var sourceReference)
+            && Guid.TryParse(sourceReference, out var businessPartnerId))
+        {
+            var customer = await _db.BusinessPartners
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.Id == businessPartnerId)
+                .Select(item => new
+                {
+                    item.CustomerAccountNumber,
+                    item.PartnerName
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+            var accountReference = customer?.CustomerAccountNumber?.Trim();
+            if (!string.IsNullOrWhiteSpace(accountReference))
+            {
+                fieldValues["sourceReference"] = accountReference;
+                fieldValues["customerBusinessPartnerReference"] = accountReference;
+                if (!fieldValues.TryGetValue("customerAccountReference", out var customerAccount)
+                    || string.IsNullOrWhiteSpace(customerAccount))
+                {
+                    fieldValues["customerAccountReference"] = accountReference;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(customer?.PartnerName)
+                && (!fieldValues.TryGetValue("customerName", out var customerName)
+                    || string.IsNullOrWhiteSpace(customerName)))
+            {
+                fieldValues["customerName"] = customer.PartnerName;
+            }
+        }
+
+        var salePaymentReferences = saleContext.Receipts
+            .Select(receipt => string.IsNullOrWhiteSpace(receipt.TransactionReference)
+                ? receipt.PaymentNumber
+                : receipt.TransactionReference)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (salePaymentReferences.Count == 0)
+        {
+            return;
+        }
+
+        var joinedReferences = string.Join(", ", salePaymentReferences);
+        fieldValues["salesPaymentReferences"] = joinedReferences;
+        if (!fieldValues.TryGetValue("salesPaymentReference", out var currentReference)
+            || string.IsNullOrWhiteSpace(currentReference))
+        {
+            fieldValues["salesPaymentReference"] = joinedReferences;
+        }
+    }
+
+    private async Task<ExternalRequestSaleContext> LoadExternalRequestSaleContextAsync(
+        Guid tenantId,
+        IReadOnlyDictionary<string, string?> fieldValues,
+        CancellationToken cancellationToken)
+    {
+        var sourceRecordIds = new HashSet<Guid>();
+        if (!fieldValues.TryGetValue("salesOpportunityId", out var opportunityValue)
+            || !Guid.TryParse(opportunityValue, out var opportunityId))
+        {
+            return new ExternalRequestSaleContext([], []);
+        }
+
+        sourceRecordIds.Add(opportunityId);
+        var orders = await _db.SalesOrders
+            .AsNoTracking()
+            .Where(order => order.TenantId == tenantId
+                && !order.IsDeleted
+                && order.OpportunityId == opportunityId)
+            .Select(order => new
+            {
+                order.Id,
+                order.InvoiceId
+            })
+            .ToListAsync(cancellationToken);
+        foreach (var order in orders)
+        {
+            sourceRecordIds.Add(order.Id);
+            if (order.InvoiceId.HasValue)
+            {
+                sourceRecordIds.Add(order.InvoiceId.Value);
+            }
+        }
+
+        var invoiceIds = orders
+            .Where(order => order.InvoiceId.HasValue)
+            .Select(order => order.InvoiceId!.Value)
+            .Distinct()
+            .ToList();
+        if (invoiceIds.Count == 0)
+        {
+            return new ExternalRequestSaleContext(sourceRecordIds.ToList(), []);
+        }
+
+        var receipts = await _db.Set<PaymentAllocation>()
+            .AsNoTracking()
+            .Where(allocation => allocation.TenantId == tenantId
+                && !allocation.IsDeleted
+                && !allocation.IsReversal
+                && invoiceIds.Contains(allocation.InvoiceId)
+                && !allocation.CustomerPayment.IsDeleted
+                && allocation.CustomerPayment.ReversedAt == null
+                && allocation.CustomerPayment.Status != "Cancelled"
+                && allocation.CustomerPayment.Status != "Bounced")
+            .OrderByDescending(allocation => allocation.CustomerPayment.PaymentDate)
+            .ThenByDescending(allocation => allocation.AllocationDate)
+            .Select(allocation => new ExternalInvoiceReceiptDto(
+                allocation.CustomerPaymentId,
+                allocation.CustomerPayment.PaymentNumber,
+                allocation.CustomerPayment.PaymentDate,
+                allocation.PaymentCurrencyAmount > 0
+                    ? allocation.PaymentCurrencyAmount
+                    : allocation.AllocatedAmount,
+                allocation.PaymentCurrencyCode,
+                allocation.CustomerPayment.PaymentMethod,
+                allocation.CustomerPayment.TransactionReference,
+                allocation.CustomerPayment.Status))
+            .ToListAsync(cancellationToken);
+        foreach (var receipt in receipts)
+        {
+            sourceRecordIds.Add(receipt.CustomerPaymentId);
+        }
+
+        return new ExternalRequestSaleContext(sourceRecordIds.ToList(), receipts);
+    }
+
+    private async Task<List<ExternalRequestDocumentDto>> BuildExternalRequestDocumentsAsync(
+        ProcedureCase procedureCase,
+        IReadOnlyDictionary<string, string?> fieldValues,
+        ExternalRequestSaleContext saleContext,
+        CancellationToken cancellationToken)
+    {
+        var documents = procedureCase.Documents
+            .Where(document => !document.IsDeleted
+                && string.Equals(document.ProvidedBy, "Customer", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(document => document.CreatedAt)
+            .Select(ToExternalDocumentDto)
+            .ToList();
+
+        if (Guid.TryParse(fieldValues.GetValueOrDefault("ehcTicketId"), out var ticketId))
+        {
+            var ticketAttachments = await _db.EhcTicketAttachments
+                .AsNoTracking()
+                .Where(attachment => attachment.TenantId == procedureCase.TenantId
+                    && !attachment.IsDeleted
+                    && !attachment.IsInternal
+                    && attachment.TicketId == ticketId)
+                .OrderBy(attachment => attachment.CreatedAt)
+                .Select(attachment => new ExternalRequestDocumentDto(
+                    attachment.Id,
+                    "Sales enquiry attachment",
+                    "Sales",
+                    "Sales",
+                    false,
+                    attachment.FileName,
+                    attachment.CreatedAt,
+                    "Sales enquiry"))
+                .ToListAsync(cancellationToken);
+            documents.AddRange(ticketAttachments);
+        }
+
+        if (saleContext.SourceRecordIds.Count > 0)
+        {
+            var sourceRecordIds = saleContext.SourceRecordIds.ToList();
+            var salesDocuments = await _db.CentralDocumentRecords
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(record => record.Versions.Where(version => !version.IsDeleted))
+                .Where(record => record.TenantId == procedureCase.TenantId
+                    && !record.IsDeleted
+                    && record.SourceRecordId.HasValue
+                    && sourceRecordIds.Contains(record.SourceRecordId.Value)
+                    && (record.SourceModule == "Sales" || record.SourceModule == "Finance"))
+                .OrderByDescending(record => record.PublishedAt ?? record.UpdatedAt ?? record.CreatedAt)
+                .Take(50)
+                .ToListAsync(cancellationToken);
+            documents.AddRange(salesDocuments.Select(record =>
+            {
+                var version = SelectExternalDocumentVersion(record);
+                return new ExternalRequestDocumentDto(
+                    record.Id,
+                    string.IsNullOrWhiteSpace(record.Title) ? "Sales document" : record.Title,
+                    "Sales",
+                    "Sales",
+                    false,
+                    version?.FileName ?? record.DocumentReference,
+                    record.PublishedAt ?? record.UpdatedAt ?? record.CreatedAt,
+                    record.SourceLabel);
+            }));
+        }
+
+        documents.AddRange(saleContext.Receipts.Select(receipt => new ExternalRequestDocumentDto(
+            receipt.CustomerPaymentId,
+            $"Sales receipt {receipt.PaymentNumber}",
+            "Sales",
+            "Sales",
+            false,
+            string.IsNullOrWhiteSpace(receipt.TransactionReference)
+                ? receipt.PaymentNumber
+                : $"{receipt.PaymentNumber} - {receipt.TransactionReference}",
+            receipt.PaymentDate,
+            "Sales receipt")));
+
+        return documents
+            .GroupBy(document => document.Id)
+            .Select(group => group
+                .OrderByDescending(document => document.UploadedAt)
+                .First())
+            .OrderBy(document => document.RequiredFrom)
+            .ThenBy(document => document.Name)
+            .ToList();
+    }
 
     private static bool HasFirstInternalStageBeenRoutedForward(ProcedureCase procedureCase)
         => string.Equals(procedureCase.SourceDepartment, "External Portal - Estate Listings", StringComparison.OrdinalIgnoreCase)
             && string.Equals(procedureCase.EntityType, "EstatePropertyManagementListingApplication", StringComparison.OrdinalIgnoreCase)
             && procedureCase.CurrentStageIndex > 0;
 
-    private static object ToExternalDocumentDto(ProcedureCaseDocument document)
-        => new
-        {
+    private static ExternalRequestDocumentDto ToExternalDocumentDto(ProcedureCaseDocument document)
+        => new(
             document.Id,
             document.Name,
             document.RequiredFrom,
             document.ProvidedBy,
             document.IsMandatory,
-            document.FileName
-        };
+            document.FileName,
+            document.UploadedAt,
+            "Customer submission");
+
+    private sealed record ExternalRequestSaleContext(
+        IReadOnlyCollection<Guid> SourceRecordIds,
+        IReadOnlyCollection<ExternalInvoiceReceiptDto> Receipts);
+
+    private sealed record ExternalRequestDocumentDto(
+        Guid Id,
+        string Name,
+        string? RequiredFrom,
+        string ProvidedBy,
+        bool IsMandatory,
+        string? FileName,
+        DateTime? UploadedAt,
+        string? SourceLabel);
 
     private sealed record ExternalInvoiceReceiptDto(
         Guid CustomerPaymentId,
@@ -4558,6 +4782,31 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                         && link.IsActive
                         && link.UserId == userId
                         && link.BusinessPartnerId == item.Id)));
+
+    private async Task<List<string>> PortalCustomerReferencesAsync(
+        Guid tenantId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var customers = await PortalCustomers(tenantId, userId)
+            .Select(customer => new
+            {
+                customer.Id,
+                customer.CustomerAccountNumber
+            })
+            .ToListAsync(cancellationToken);
+
+        return customers
+            .SelectMany(customer => new[]
+            {
+                customer.Id.ToString(),
+                customer.CustomerAccountNumber
+            })
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     private Task<BusinessPartner?> FindPortalCustomerAsync(
         Guid tenantId,
