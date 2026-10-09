@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { ApiProblem, mobileApi } from "@/src/api/client";
 import { BarcodeScannerModal } from "@/components/barcode-scanner-modal";
+import { BankAccountPickerModal } from "@/components/bank-account-picker-modal";
 import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
 import type { BarcodeScan } from "@/src/scanning/barcode";
 import { buildCompleteSaleRequest, sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
@@ -20,6 +21,7 @@ import { useSession } from "@/src/session/session-context";
 import { getInstallationId } from "@/src/storage/secure-session";
 import type {
   MobilePosCatalogueItem,
+  MobilePosBankAccountOption,
   MobilePosCustomerSearchResult,
   MobilePosPaymentMethod,
   MobilePosReceipt,
@@ -81,10 +83,12 @@ export default function SaleScreen() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [preview, setPreview] = useState<MobilePosSalePreview | null>(null);
   const [tenders, setTenders] = useState<TenderDraft[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<MobilePosBankAccountOption[]>([]);
+  const [bankAccountTenderId, setBankAccountTenderId] = useState<string | null>(null);
   const [pendingIdentity, setPendingIdentity] = useState<PendingIdentity | null>(null);
   const [result, setResult] = useState<MobilePosSaleResult | null>(null);
   const [receipt, setReceipt] = useState<MobilePosReceipt | null>(null);
-  const [busy, setBusy] = useState<"catalogue" | "customer" | "preview" | "complete" | "reprint" | "print" | "share" | null>(null);
+  const [busy, setBusy] = useState<"catalogue" | "customer" | "bankAccounts" | "preview" | "complete" | "reprint" | "print" | "share" | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
   const [outputMessage, setOutputMessage] = useState<string | null>(null);
 
@@ -242,6 +246,22 @@ export default function SaleScreen() {
     setPendingIdentity(null);
   };
 
+  const openBankAccountPicker = async (paymentMethodId: string) => {
+    setBusy("bankAccounts");
+    setError(null);
+    try {
+      const accounts = bankAccounts.length > 0
+        ? bankAccounts
+        : await mobileApi.getEligibleBankAccounts(await getInstallationId());
+      setBankAccounts(accounts);
+      setBankAccountTenderId(paymentMethodId);
+    } catch (caught) {
+      setError(asProblem(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const completeSale = async () => {
     if (!preview) return;
     if (missingCompletionPermission) return setError(problem(`Your role is missing ${missingCompletionPermission}.`));
@@ -249,7 +269,7 @@ export default function SaleScreen() {
     for (const tender of tenders) {
       const method = onlineMethods.find(item => item.paymentMethodId === tender.paymentMethodId);
       if (!method) return setError(problem("A selected tender is no longer available for this till."));
-      if (method.requiresBankAccount) return setError(problem(`${method.name} requires a bank account selection that is not available in this checkout yet.`));
+      if (method.requiresBankAccount && !tender.bankAccountId) return setError(problem(`${method.name} requires a bank account selection.`));
       if ((method.requiresReference || method.requireExternalAuthorizationReference) && !tender.externalReference.trim()) {
         return setError(problem(`${method.name} requires the provider or transaction reference.`));
       }
@@ -448,6 +468,16 @@ export default function SaleScreen() {
       <SectionTitle number="2" title="Items" />
       <SearchBar label="Item name, code or barcode" value={catalogueQuery} onChangeText={setCatalogueQuery} onSearch={() => void runCatalogueSearch(catalogueQuery)} onScan={() => setScannerOpen(true)} busy={busy === "catalogue"} />
       <BarcodeScannerModal visible={scannerOpen} onClose={() => setScannerOpen(false)} onScan={acceptBarcodeScan} />
+      <BankAccountPickerModal
+        accounts={bankAccounts}
+        onClose={() => setBankAccountTenderId(null)}
+        onSelect={account => {
+          if (bankAccountTenderId) updateTender(bankAccountTenderId, { bankAccountId: account.bankAccountId });
+          setBankAccountTenderId(null);
+        }}
+        selectedId={bankAccountTenderId ? tenders.find(tender => tender.paymentMethodId === bankAccountTenderId)?.bankAccountId : undefined}
+        visible={bankAccountTenderId !== null}
+      />
       {catalogueResults.map(item => (
         <ResultRow
           key={item.inventoryItemId}
@@ -494,7 +524,24 @@ export default function SaleScreen() {
                 <View style={styles.rowBetween}><View><Text style={styles.lineTitle}>{method.name}</Text><Text style={styles.meta}>{method.type}</Text></View>{tenders.length > 1 && <Pressable onPress={() => removeTender(method.paymentMethodId)}><Text style={styles.removeText}>Remove</Text></Pressable>}</View>
                 <TextInput accessibilityLabel={`${method.name} amount`} keyboardType="decimal-pad" onChangeText={value => updateTender(method.paymentMethodId, { amountText: value })} placeholder="Amount" placeholderTextColor={colors.muted} style={styles.input} value={tender.amountText} />
                 {needsReference && <TextInput accessibilityLabel={`${method.name} reference`} autoCapitalize="characters" onChangeText={value => updateTender(method.paymentMethodId, { externalReference: value })} placeholder="Provider or transaction reference" placeholderTextColor={colors.muted} style={styles.input} value={tender.externalReference} />}
-                {method.requiresBankAccount && <Text style={styles.bankWarning}>Bank account selection is required and is not yet available in this checkout.</Text>}
+                {method.requiresBankAccount && (() => {
+                  const selected = bankAccounts.find(account => account.bankAccountId === tender.bankAccountId);
+                  return (
+                    <Pressable
+                      accessibilityLabel={`Select bank account for ${method.name}`}
+                      disabled={busy !== null}
+                      onPress={() => void openBankAccountPicker(method.paymentMethodId)}
+                      style={[styles.bankSelector, busy !== null && styles.disabled]}
+                    >
+                      <Ionicons color={selected ? colors.success : colors.blue} name="business-outline" size={18} />
+                      <View style={styles.grow}>
+                        <Text style={styles.bankSelectorTitle}>{selected?.accountName ?? "Select bank account"}</Text>
+                        <Text style={styles.bankSelectorMeta}>{selected ? `${selected.bankName} · ${selected.maskedAccountNumber}` : "Required for this payment method"}</Text>
+                      </View>
+                      {busy === "bankAccounts" ? <ActivityIndicator color={colors.blue} size="small" /> : <Ionicons color={colors.muted} name="chevron-forward" size={18} />}
+                    </Pressable>
+                  );
+                })()}
               </View>
             );
           })}
@@ -608,7 +655,9 @@ const styles = StyleSheet.create({
   tenderCard: { marginBottom: 9, padding: 14, borderRadius: 14, backgroundColor: colors.white, borderWidth: 1, borderColor: "#EAECF0" },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   removeText: { color: colors.danger, fontSize: 11, fontWeight: "700" },
-  bankWarning: { marginTop: 9, color: colors.warning, fontSize: 11, lineHeight: 16 },
+  bankSelector: { minHeight: 58, marginTop: 9, paddingHorizontal: 12, flexDirection: "row", gap: 10, alignItems: "center", borderRadius: 11, borderWidth: 1, borderColor: "#B2CCFF", backgroundColor: colors.paleBlue },
+  bankSelectorTitle: { color: colors.ink, fontSize: 12, fontWeight: "700" },
+  bankSelectorMeta: { marginTop: 2, color: colors.muted, fontSize: 10 },
   methodWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   methodButton: { minHeight: 38, paddingHorizontal: 11, flexDirection: "row", gap: 5, alignItems: "center", borderRadius: 10, borderWidth: 1, borderColor: "#B2CCFF", backgroundColor: colors.white },
   methodButtonText: { color: colors.blue, fontSize: 11, fontWeight: "700" },

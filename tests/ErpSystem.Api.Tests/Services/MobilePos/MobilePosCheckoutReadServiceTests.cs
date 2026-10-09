@@ -101,6 +101,20 @@ public sealed class MobilePosCheckoutReadServiceTests
             It.IsAny<TaxDocumentCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task GetEligibleBankAccountsAsync_ShouldReturnOnlyScopedActiveMappedStoreCurrencyAccounts()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var results = await fixture.Service.GetEligibleBankAccountsAsync(
+            "install-01", CancellationToken.None);
+
+        results.Should().ContainSingle();
+        results[0].BankAccountId.Should().Be(fixture.BankAccountId);
+        results[0].MaskedAccountNumber.Should().Be("**** 7890");
+        results[0].CurrencyCode.Should().Be("GHS");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(
@@ -108,13 +122,15 @@ public sealed class MobilePosCheckoutReadServiceTests
             MobilePosCheckoutReadService service,
             Mock<ITaxCalculationEngine> taxes,
             Guid itemId,
-            Guid partnerId)
+            Guid partnerId,
+            Guid bankAccountId)
         {
             Db = db;
             Service = service;
             Taxes = taxes;
             ItemId = itemId;
             PartnerId = partnerId;
+            BankAccountId = bankAccountId;
         }
 
         public ApplicationDbContext Db { get; }
@@ -122,6 +138,7 @@ public sealed class MobilePosCheckoutReadServiceTests
         public Mock<ITaxCalculationEngine> Taxes { get; }
         public Guid ItemId { get; }
         public Guid PartnerId { get; }
+        public Guid BankAccountId { get; }
 
         public static async Task<Fixture> CreateAsync(bool grantDiscountPermission = true)
         {
@@ -134,6 +151,7 @@ public sealed class MobilePosCheckoutReadServiceTests
             var partnerId = Guid.NewGuid();
             var roleId = Guid.NewGuid();
             var itemId = Guid.NewGuid();
+            var bankAccountId = Guid.NewGuid();
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase($"mobile-pos-checkout-read-{Guid.NewGuid():N}")
                 .Options;
@@ -212,6 +230,31 @@ public sealed class MobilePosCheckoutReadServiceTests
                     ItemType = ItemType.Service,
                     Status = ItemStatus.Inactive
                 });
+            db.BankAccounts.AddRange(
+                new ErpSystem.Core.Entities.Finance.BankAccount
+                {
+                    Id = bankAccountId, TenantId = tenantId, AccountNumber = "01234567890",
+                    AccountName = "Main collections", BankName = "Ghana Bank", Currency = "GHS",
+                    GLAccountId = Guid.NewGuid(), IsActive = true
+                },
+                new ErpSystem.Core.Entities.Finance.BankAccount
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountNumber = "1111",
+                    AccountName = "Inactive", BankName = "Ghana Bank", Currency = "GHS",
+                    GLAccountId = Guid.NewGuid(), IsActive = false
+                },
+                new ErpSystem.Core.Entities.Finance.BankAccount
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountNumber = "2222",
+                    AccountName = "Wrong currency", BankName = "Ghana Bank", Currency = "USD",
+                    GLAccountId = Guid.NewGuid(), IsActive = true
+                },
+                new ErpSystem.Core.Entities.Finance.BankAccount
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountNumber = "3333",
+                    AccountName = "Unmapped", BankName = "Ghana Bank", Currency = "GHS",
+                    IsActive = true
+                });
             if (grantDiscountPermission)
             {
                 var discountRole = new ApplicationRole("Configurable POS cashier")
@@ -284,9 +327,13 @@ public sealed class MobilePosCheckoutReadServiceTests
                         }
                     ]
                 });
+            var financeAccess = new Mock<IFinanceAccessScopeService>();
+            financeAccess.Setup(service => service.GetPermittedBankAccountIdsAsync(
+                    FinanceAccessLevel.Operate, It.IsAny<CancellationToken>()))
+                .ReturnsAsync([bankAccountId]);
             var service = new MobilePosCheckoutReadService(
-                db, currentUser.Object, foundation.Object, taxes.Object);
-            return new Fixture(db, service, taxes, itemId, partnerId);
+                db, currentUser.Object, foundation.Object, taxes.Object, financeAccess.Object);
+            return new Fixture(db, service, taxes, itemId, partnerId, bankAccountId);
         }
 
         public ValueTask DisposeAsync() => Db.DisposeAsync();

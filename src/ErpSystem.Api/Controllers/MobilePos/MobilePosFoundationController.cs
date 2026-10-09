@@ -113,6 +113,15 @@ public sealed class MobilePosRuntimeController : ControllerBase
         => Ok(await _checkout.SearchCatalogueAsync(
             installationId, search, limit, cancellationToken));
 
+    [HttpGet("bank-accounts")]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    [Authorize(Policy = MobilePosPermissions.CollectPayment)]
+    [Authorize(Policy = FinancePermissions.ReceiveCustomerPayments)]
+    public async Task<ActionResult<IReadOnlyList<MobilePosBankAccountOptionDto>>> GetEligibleBankAccounts(
+        [FromQuery] string installationId,
+        CancellationToken cancellationToken)
+        => Ok(await _checkout.GetEligibleBankAccountsAsync(installationId, cancellationToken));
+
     [HttpPost("sales/preview")]
     [Authorize(Policy = MobilePosPermissions.OperateTill)]
     [Authorize(Policy = MobilePosPermissions.CreateInvoice)]

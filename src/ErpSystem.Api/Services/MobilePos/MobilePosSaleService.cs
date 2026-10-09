@@ -43,6 +43,7 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
     private readonly IMobilePosMutationExecutionService _mutations;
     private readonly IInvoiceService _invoices;
     private readonly IPaymentService _payments;
+    private readonly IFinanceAccessScopeService _financeAccessScope;
 
     public MobilePosSaleService(
         ApplicationDbContext db,
@@ -50,7 +51,8 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         IMobilePosFoundationService foundation,
         IMobilePosMutationExecutionService mutations,
         IInvoiceService invoices,
-        IPaymentService payments)
+        IPaymentService payments,
+        IFinanceAccessScopeService financeAccessScope)
     {
         _db = db;
         _currentUser = currentUser;
@@ -58,6 +60,7 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         _mutations = mutations;
         _invoices = invoices;
         _payments = payments;
+        _financeAccessScope = financeAccessScope;
     }
 
     private Guid TenantId => _currentUser.TenantId is { } id && id != Guid.Empty
@@ -155,6 +158,13 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         {
             throw Reject("MOBILE_POS_TILL_SESSION_CHANGED", "The till session is no longer open for this operator and till.");
         }
+
+        var allowedTenders = await _db.MobilePosTillPaymentMethods.AsNoTracking()
+            .Where(mapping => mapping.TenantId == tenantId && mapping.MobilePosTillId == till.Id
+                && mapping.AllowOnline && !mapping.IsDeleted && mapping.PaymentMethod.IsActive)
+            .Include(mapping => mapping.PaymentMethod)
+            .ToDictionaryAsync(mapping => mapping.PaymentMethodId, cancellationToken);
+        await ValidateTendersAsync(request.Tenders, allowedTenders, store.CurrencyCode, cancellationToken);
 
         var selectedPartnerId = request.BusinessPartnerId ?? store.DefaultWalkInBusinessPartnerId;
         var selectedRoleId = request.BusinessPartnerRoleId ?? store.DefaultWalkInBusinessPartnerRoleId;
@@ -260,15 +270,6 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         if (tenderTotal != RoundMoney(invoice.TotalAmount))
             throw Reject("MOBILE_POS_TENDER_TOTAL_MISMATCH", "Tender amounts must equal the canonical invoice total.");
 
-        var allowedTenders = await _db.MobilePosTillPaymentMethods.AsNoTracking()
-            .Where(mapping => mapping.TenantId == tenantId && mapping.MobilePosTillId == till.Id
-                && mapping.AllowOnline && !mapping.IsDeleted)
-            .Include(mapping => mapping.PaymentMethod)
-            .ToDictionaryAsync(mapping => mapping.PaymentMethodId, cancellationToken);
-        var requestedMethodIds = request.Tenders.Select(tender => tender.PaymentMethodId).Distinct().ToArray();
-        if (requestedMethodIds.Any(id => !allowedTenders.ContainsKey(id)))
-            throw Reject("MOBILE_POS_TENDER_NOT_ALLOWED", "One or more tender methods are not enabled for online use at this till.");
-
         var postedInvoice = await _invoices.PostAsync(invoice.Id, InvoiceProducer, cancellationToken);
         var paymentResults = new List<CustomerPaymentDto>(request.Tenders.Count);
         for (var index = 0; index < request.Tenders.Count; index++)
@@ -276,9 +277,6 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
             var tender = request.Tenders[index];
             var mapping = allowedTenders[tender.PaymentMethodId];
             var reference = Clean(tender.ExternalReference);
-            if (mapping.RequireExternalAuthorizationReference && reference is null)
-                throw Reject("MOBILE_POS_TENDER_REFERENCE_REQUIRED", $"{mapping.PaymentMethod.Name} requires an external authorization reference.");
-
             var liquidityAccountId = tender.LiquidityAccountId;
             if (!liquidityAccountId.HasValue && mapping.PaymentMethod.Type == PaymentMethodType.Cash)
                 liquidityAccountId = till.LiquidityAccountId;
@@ -427,6 +425,62 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
             paymentResults.Select(payment => payment.Id).ToArray());
     }
 
+    private async Task ValidateTendersAsync(
+        IReadOnlyList<MobilePosTenderInputDto> tenders,
+        IReadOnlyDictionary<Guid, MobilePosTillPaymentMethod> allowedTenders,
+        string currencyCode,
+        CancellationToken cancellationToken)
+    {
+        var requestedMethodIds = tenders.Select(tender => tender.PaymentMethodId).Distinct().ToArray();
+        if (requestedMethodIds.Any(id => !allowedTenders.ContainsKey(id)))
+            throw Reject("MOBILE_POS_TENDER_NOT_ALLOWED", "One or more tender methods are not active and enabled for online use at this till.");
+
+        foreach (var tender in tenders)
+        {
+            var mapping = allowedTenders[tender.PaymentMethodId];
+            var method = mapping.PaymentMethod;
+            var reference = Clean(tender.ExternalReference);
+            if ((method.RequiresReference || mapping.RequireExternalAuthorizationReference) && reference is null)
+                throw Reject("MOBILE_POS_TENDER_REFERENCE_REQUIRED", $"{method.Name} requires a provider or transaction reference.");
+            if (method.RequiresBankAccount && !tender.BankAccountId.HasValue)
+                throw Reject("MOBILE_POS_TENDER_BANK_ACCOUNT_REQUIRED", $"{method.Name} requires a bank account.");
+            if (!method.RequiresBankAccount && tender.BankAccountId.HasValue)
+                throw Reject("MOBILE_POS_TENDER_BANK_ACCOUNT_NOT_ALLOWED", $"{method.Name} does not accept a bank account selection.");
+            if (tender.BankAccountId.HasValue && tender.LiquidityAccountId.HasValue)
+                throw Reject("MOBILE_POS_TENDER_DESTINATION_INVALID", "A tender cannot select both a bank account and a liquidity account.");
+        }
+
+        var bankAccountIds = tenders
+            .Where(tender => tender.BankAccountId.HasValue)
+            .Select(tender => tender.BankAccountId!.Value)
+            .Distinct()
+            .ToArray();
+        if (bankAccountIds.Length == 0) return;
+
+        var permittedIds = await _financeAccessScope.GetPermittedBankAccountIdsAsync(
+            FinanceAccessLevel.Operate, cancellationToken);
+        var eligibleQuery = _db.BankAccounts.AsNoTracking().Where(account =>
+            account.TenantId == TenantId
+            && bankAccountIds.Contains(account.Id)
+            && account.IsActive
+            && !account.IsDeleted
+            && account.GLAccountId.HasValue
+            && account.Currency == currencyCode);
+        if (permittedIds != null)
+        {
+            var permittedBankIds = permittedIds.ToArray();
+            eligibleQuery = eligibleQuery.Where(account => permittedBankIds.Contains(account.Id));
+        }
+
+        var eligibleIds = await eligibleQuery.Select(account => account.Id).ToArrayAsync(cancellationToken);
+        if (eligibleIds.Length != bankAccountIds.Length)
+        {
+            throw Reject(
+                "MOBILE_POS_TENDER_BANK_ACCOUNT_INELIGIBLE",
+                "One or more selected bank accounts are inactive, outside your Finance scope, use another currency, or lack a GL account mapping.");
+        }
+    }
+
     private static void ValidateRequest(MobilePosCompleteSaleRequestDto request)
     {
         _ = Required(request.ClientMutationId, 100, "client mutation ID");
@@ -444,7 +498,8 @@ public sealed class MobilePosSaleService : IMobilePosSaleService
         {
             throw Reject("MOBILE_POS_LINE_INVALID", "Every sale line needs a unique line ID, an item, positive quantity, non-negative price, and a discount from 0 to 100 percent.");
         }
-        if (request.Tenders.Any(tender => tender.PaymentMethodId == Guid.Empty || tender.Amount <= 0m))
+        if (request.Tenders.Any(tender => tender.PaymentMethodId == Guid.Empty || tender.Amount <= 0m)
+            || request.Tenders.Select(tender => tender.PaymentMethodId).Distinct().Count() != request.Tenders.Count)
             throw Reject("MOBILE_POS_TENDER_INVALID", "Every tender needs a payment method and a positive amount.");
         if (request.Tenders.Any(tender => Clean(tender.ExternalReference)?.Length > 150))
             throw Reject("MOBILE_POS_TENDER_REFERENCE_INVALID", "Tender authorization references cannot exceed 150 characters.");

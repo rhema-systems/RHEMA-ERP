@@ -104,6 +104,14 @@ export interface MobilePosPaymentMethod {
   displayOrder: number;
 }
 
+export interface MobilePosBankAccountOption {
+  bankAccountId: string;
+  accountName: string;
+  bankName: string;
+  maskedAccountNumber: string;
+  currencyCode: string;
+}
+
 export interface MobilePosTill {
   id: string;
   mobilePosStoreId: string;

@@ -13,6 +13,7 @@ import type {
   MobilePosOfflineGrant,
   MobilePosCustomerSearchResult,
   MobilePosCatalogueItem,
+  MobilePosBankAccountOption,
   MobilePosCompleteSaleRequest,
   MobilePosSalePreview,
   MobilePosSalePreviewRequest,
@@ -173,6 +174,9 @@ export const mobileApi = {
   ),
   searchCatalogue: (installationId: string, search: string, limit = 30) => authorizedRequest<MobilePosCatalogueItem[]>(
     `/api/mobile-pos/v1/catalogue/search?installationId=${encodeURIComponent(installationId)}&q=${encodeURIComponent(search)}&limit=${limit}`,
+  ),
+  getEligibleBankAccounts: (installationId: string) => authorizedRequest<MobilePosBankAccountOption[]>(
+    `/api/mobile-pos/v1/bank-accounts?installationId=${encodeURIComponent(installationId)}`,
   ),
   previewSale: (request: MobilePosSalePreviewRequest) => authorizedRequest<MobilePosSalePreview>(
     "/api/mobile-pos/v1/sales/preview",

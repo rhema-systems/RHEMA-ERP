@@ -53,7 +53,7 @@ describe("Mobile POS checkout helpers", () => {
       preview,
       tenders: [
         { paymentMethodId: "cash", amountText: "5.70", externalReference: "" },
-        { paymentMethodId: "card", amountText: "15", externalReference: " AUTH-001 " },
+        { paymentMethodId: "card", amountText: "15", externalReference: " AUTH-001 ", bankAccountId: "bank-1" },
       ],
     });
 
@@ -66,7 +66,7 @@ describe("Mobile POS checkout helpers", () => {
       lines: [{ inventoryItemId: "item-1", unitPrice: 10, discountPercentage: 10, taxGroupId: "tax-1" }],
       tenders: [
         { paymentMethodId: "cash", amount: 5.7, externalReference: undefined },
-        { paymentMethodId: "card", amount: 15, externalReference: "AUTH-001" },
+        { paymentMethodId: "card", amount: 15, externalReference: "AUTH-001", bankAccountId: "bank-1" },
       ],
     });
   });

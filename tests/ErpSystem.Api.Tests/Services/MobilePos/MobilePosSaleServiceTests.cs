@@ -104,11 +104,42 @@ public sealed class MobilePosSaleServiceTests
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task CompleteAsync_ShouldRequireAnEligibleBankAccountBeforeCreatingInvoice()
+    {
+        await using var fixture = await Fixture.CreateAsync(firstMethodRequiresBankAccount: true);
+        var request = fixture.ValidRequest();
+        request.Tenders[0].BankAccountId = null;
+
+        var action = () => fixture.Service.CompleteAsync(request, CancellationToken.None);
+
+        await action.Should().ThrowAsync<MobilePosCommandRejectedException>()
+            .Where(exception => exception.Code == "MOBILE_POS_TENDER_BANK_ACCOUNT_REQUIRED");
+        fixture.Invoices.Verify(service => service.CreateAsync(
+            It.IsAny<InvoiceCreateDto>(),
+            It.IsAny<FinancePostingProducerContext>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ShouldPassEligibleSelectedBankAccountToCanonicalPayment()
+    {
+        await using var fixture = await Fixture.CreateAsync(firstMethodRequiresBankAccount: true);
+
+        await fixture.Service.CompleteAsync(fixture.ValidRequest(), CancellationToken.None);
+
+        fixture.Payments.Verify(service => service.CreateAsync(
+            It.Is<PaymentCreateDto>(payment => payment.BankAccountId == fixture.BankAccountId),
+            It.IsAny<FinancePostingProducerContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly Guid _itemId;
         private readonly Guid _firstMethodId;
         private readonly Guid _secondMethodId;
+        private readonly bool _firstMethodRequiresBankAccount;
 
         private Fixture(
             ApplicationDbContext db,
@@ -117,7 +148,9 @@ public sealed class MobilePosSaleServiceTests
             Mock<IPaymentService> payments,
             Guid itemId,
             Guid firstMethodId,
-            Guid secondMethodId)
+            Guid secondMethodId,
+            Guid bankAccountId,
+            bool firstMethodRequiresBankAccount)
         {
             Db = db;
             Service = service;
@@ -126,14 +159,20 @@ public sealed class MobilePosSaleServiceTests
             _itemId = itemId;
             _firstMethodId = firstMethodId;
             _secondMethodId = secondMethodId;
+            BankAccountId = bankAccountId;
+            _firstMethodRequiresBankAccount = firstMethodRequiresBankAccount;
         }
 
         public ApplicationDbContext Db { get; }
         public MobilePosSaleService Service { get; }
         public Mock<IInvoiceService> Invoices { get; }
         public Mock<IPaymentService> Payments { get; }
+        public Guid BankAccountId { get; }
 
-        public static async Task<Fixture> CreateAsync(decimal invoiceTotal = 100m, bool grantDiscountPermission = true)
+        public static async Task<Fixture> CreateAsync(
+            decimal invoiceTotal = 100m,
+            bool grantDiscountPermission = true,
+            bool firstMethodRequiresBankAccount = false)
         {
             var tenantId = Guid.NewGuid();
             var userId = Guid.NewGuid();
@@ -148,6 +187,7 @@ public sealed class MobilePosSaleServiceTests
             var salesAccountId = Guid.NewGuid();
             var firstMethodId = Guid.NewGuid();
             var secondMethodId = Guid.NewGuid();
+            var bankAccountId = Guid.NewGuid();
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase($"mobile-pos-sale-{Guid.NewGuid():N}")
                 .Options;
@@ -257,7 +297,26 @@ public sealed class MobilePosSaleServiceTests
                 ItemType = ItemType.Service,
                 Status = ItemStatus.Active
             });
-            var firstMethod = PaymentMethod(firstMethodId, tenantId, "CASH", "Cash");
+            var firstMethod = PaymentMethod(firstMethodId, tenantId,
+                firstMethodRequiresBankAccount ? "BANK" : "CASH",
+                firstMethodRequiresBankAccount ? "Bank Transfer" : "Cash");
+            if (firstMethodRequiresBankAccount)
+            {
+                firstMethod.Type = PaymentMethodType.BankTransfer;
+                firstMethod.RequiresBankAccount = true;
+                firstMethod.RequiresReference = true;
+                db.BankAccounts.Add(new BankAccount
+                {
+                    Id = bankAccountId,
+                    TenantId = tenantId,
+                    AccountNumber = "0123456789",
+                    AccountName = "Main collections",
+                    BankName = "Ghana Bank",
+                    Currency = "GHS",
+                    GLAccountId = Guid.NewGuid(),
+                    IsActive = true
+                });
+            }
             var secondMethod = PaymentMethod(secondMethodId, tenantId, "CASH2", "Cash 2");
             db.PaymentMethods.AddRange(firstMethod, secondMethod);
             db.MobilePosTillPaymentMethods.AddRange(
@@ -389,9 +448,15 @@ public sealed class MobilePosSaleServiceTests
                 });
             var mutations = new MobilePosMutationExecutionService(
                 db, new UnitOfWork(db), currentUser.Object);
+            var financeAccess = new Mock<IFinanceAccessScopeService>();
+            financeAccess.Setup(service => service.GetPermittedBankAccountIdsAsync(
+                    FinanceAccessLevel.Operate, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((IReadOnlyCollection<Guid>?)null);
             var service = new MobilePosSaleService(
-                db, currentUser.Object, foundation.Object, mutations, invoices.Object, payments.Object);
-            return new Fixture(db, service, invoices, payments, itemId, firstMethodId, secondMethodId);
+                db, currentUser.Object, foundation.Object, mutations, invoices.Object, payments.Object,
+                financeAccess.Object);
+            return new Fixture(db, service, invoices, payments, itemId, firstMethodId, secondMethodId,
+                bankAccountId, firstMethodRequiresBankAccount);
         }
 
         public MobilePosCompleteSaleRequestDto ValidRequest() => new()
@@ -415,7 +480,13 @@ public sealed class MobilePosSaleServiceTests
             ],
             Tenders =
             [
-                new MobilePosTenderInputDto { PaymentMethodId = _firstMethodId, Amount = 60m },
+                new MobilePosTenderInputDto
+                {
+                    PaymentMethodId = _firstMethodId,
+                    Amount = 60m,
+                    BankAccountId = _firstMethodRequiresBankAccount ? BankAccountId : null,
+                    ExternalReference = _firstMethodRequiresBankAccount ? "BANK-REF-001" : null
+                },
                 new MobilePosTenderInputDto { PaymentMethodId = _secondMethodId, Amount = 40m }
             ]
         };
@@ -427,7 +498,8 @@ public sealed class MobilePosSaleServiceTests
             Code = code,
             Name = name,
             Type = PaymentMethodType.Cash,
-            IsActive = true
+            IsActive = true,
+            RequiresBankAccount = false
         };
 
         public ValueTask DisposeAsync() => Db.DisposeAsync();

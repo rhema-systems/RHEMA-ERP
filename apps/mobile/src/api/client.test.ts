@@ -183,6 +183,7 @@ describe("Mobile POS API client", () => {
     };
 
     await mobileApi.searchCatalogue("install/01", "A&B", 12);
+    await mobileApi.getEligibleBankAccounts("install/01");
     await mobileApi.previewSale(previewRequest);
     await mobileApi.completeSale({
       installationId: "install/01",
@@ -213,23 +214,26 @@ describe("Mobile POS API client", () => {
     expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
       "https://erp.example.com/api/mobile-pos/v1/catalogue/search?installationId=install%2F01&q=A%26B&limit=12",
     );
-    const [, previewInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
-    expect(fetchMock.mock.calls[1]?.[0].toString()).toBe("https://erp.example.com/api/mobile-pos/v1/sales/preview");
+    expect(fetchMock.mock.calls[1]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/bank-accounts?installationId=install%2F01",
+    );
+    const [, previewInit] = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+    expect(fetchMock.mock.calls[2]?.[0].toString()).toBe("https://erp.example.com/api/mobile-pos/v1/sales/preview");
     expect(previewInit.method).toBe("POST");
     expect(JSON.parse(String(previewInit.body))).toEqual(previewRequest);
-    const [, completeInit] = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
-    expect(fetchMock.mock.calls[2]?.[0].toString()).toBe("https://erp.example.com/api/mobile-pos/v1/sales");
+    const [, completeInit] = fetchMock.mock.calls[3] as unknown as [string, RequestInit];
+    expect(fetchMock.mock.calls[3]?.[0].toString()).toBe("https://erp.example.com/api/mobile-pos/v1/sales");
     expect(completeInit.method).toBe("POST");
     expect(JSON.parse(String(completeInit.body))).toMatchObject({
       clientMutationId: "mutation-1",
       expectedTotalAmount: 23,
       tenders: [{ paymentMethodId: "cash-1", amount: 23 }],
     });
-    expect(fetchMock.mock.calls[3]?.[0].toString()).toBe(
+    expect(fetchMock.mock.calls[4]?.[0].toString()).toBe(
       "https://erp.example.com/api/mobile-pos/v1/receipts/sale%2F1?installationId=install%2F01",
     );
-    const [, reprintInit] = fetchMock.mock.calls[4] as unknown as [string, RequestInit];
-    expect(fetchMock.mock.calls[4]?.[0].toString()).toBe(
+    const [, reprintInit] = fetchMock.mock.calls[5] as unknown as [string, RequestInit];
+    expect(fetchMock.mock.calls[5]?.[0].toString()).toBe(
       "https://erp.example.com/api/mobile-pos/v1/receipts/sale%2F1/reprint-events",
     );
     expect(reprintInit.method).toBe("POST");

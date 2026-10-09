@@ -8,6 +8,7 @@ export interface TenderDraft {
   paymentMethodId: string;
   amountText: string;
   externalReference: string;
+  bankAccountId?: string;
 }
 
 export function parseMoney(value: string): number | null {
@@ -38,6 +39,7 @@ export function buildCompleteSaleRequest(input: {
       paymentMethodId: tender.paymentMethodId,
       amount: roundMoney(amount, input.preview.currencyDecimalPlaces),
       externalReference: tender.externalReference.trim() || undefined,
+      bankAccountId: tender.bankAccountId,
     };
   });
 

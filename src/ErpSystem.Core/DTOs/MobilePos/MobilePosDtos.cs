@@ -254,6 +254,15 @@ public sealed class MobilePosCustomerSearchResultDto
     public bool IsDefaultWalkInCustomer { get; set; }
 }
 
+public sealed class MobilePosBankAccountOptionDto
+{
+    public Guid BankAccountId { get; set; }
+    public string AccountName { get; set; } = string.Empty;
+    public string BankName { get; set; } = string.Empty;
+    public string MaskedAccountNumber { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = string.Empty;
+}
+
 public sealed class MobilePosOfflinePaymentMethodSnapshotDto
 {
     public Guid PaymentMethodId { get; set; }

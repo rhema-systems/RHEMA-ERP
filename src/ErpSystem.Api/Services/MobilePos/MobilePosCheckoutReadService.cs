@@ -22,6 +22,10 @@ public interface IMobilePosCheckoutReadService
         int limit,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<MobilePosBankAccountOptionDto>> GetEligibleBankAccountsAsync(
+        string installationId,
+        CancellationToken cancellationToken);
+
     Task<MobilePosSalePreviewDto> PreviewAsync(
         MobilePosSalePreviewRequestDto request,
         CancellationToken cancellationToken);
@@ -37,22 +41,71 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
     private readonly ICurrentUserService _currentUser;
     private readonly IMobilePosFoundationService _foundation;
     private readonly ITaxCalculationEngine _taxes;
+    private readonly IFinanceAccessScopeService _financeAccessScope;
 
     public MobilePosCheckoutReadService(
         ApplicationDbContext db,
         ICurrentUserService currentUser,
         IMobilePosFoundationService foundation,
-        ITaxCalculationEngine taxes)
+        ITaxCalculationEngine taxes,
+        IFinanceAccessScopeService financeAccessScope)
     {
         _db = db;
         _currentUser = currentUser;
         _foundation = foundation;
         _taxes = taxes;
+        _financeAccessScope = financeAccessScope;
     }
 
     private Guid TenantId => _currentUser.TenantId is { } id && id != Guid.Empty
         ? id
         : throw new UnauthorizedAccessException("A current tenant is required for Mobile POS.");
+
+    public async Task<IReadOnlyList<MobilePosBankAccountOptionDto>> GetEligibleBankAccountsAsync(
+        string installationId,
+        CancellationToken cancellationToken)
+    {
+        var bootstrap = await _foundation.GetBootstrapAsync(
+            Required(installationId, 200, "installation ID"), cancellationToken);
+        var tenantId = TenantId;
+        var permittedIds = await _financeAccessScope.GetPermittedBankAccountIdsAsync(
+            FinanceAccessLevel.Operate, cancellationToken);
+
+        var query = _db.BankAccounts.AsNoTracking().Where(account =>
+            account.TenantId == tenantId
+            && account.IsActive
+            && !account.IsDeleted
+            && account.GLAccountId.HasValue
+            && account.Currency == bootstrap.Store.CurrencyCode);
+        if (permittedIds != null)
+        {
+            var permittedBankAccountIds = permittedIds.ToArray();
+            query = query.Where(account => permittedBankAccountIds.Contains(account.Id));
+        }
+
+        var accounts = await query
+            .OrderBy(account => account.BankName)
+            .ThenBy(account => account.AccountName)
+            .ThenBy(account => account.AccountNumber)
+            .Select(account => new
+            {
+                account.Id,
+                account.AccountName,
+                account.BankName,
+                account.AccountNumber,
+                account.Currency
+            })
+            .ToListAsync(cancellationToken);
+
+        return accounts.Select(account => new MobilePosBankAccountOptionDto
+        {
+            BankAccountId = account.Id,
+            AccountName = account.AccountName,
+            BankName = account.BankName,
+            MaskedAccountNumber = MaskAccountNumber(account.AccountNumber),
+            CurrencyCode = account.Currency
+        }).ToArray();
+    }
 
     public async Task<IReadOnlyList<MobilePosCatalogueItemDto>> SearchCatalogueAsync(
         string installationId,
@@ -289,6 +342,14 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
 
     private static decimal RoundMoney(decimal value, int decimalPlaces) =>
         CurrencyMinorUnitPolicy.Round(value, decimalPlaces);
+
+    private static string MaskAccountNumber(string accountNumber)
+    {
+        var normalized = accountNumber.Trim();
+        if (normalized.Length == 0) return "****";
+        var visible = normalized.Length <= 4 ? normalized : normalized[^4..];
+        return $"**** {visible}";
+    }
 
     private async Task<bool> HasPermissionAsync(string permission, CancellationToken cancellationToken)
     {
