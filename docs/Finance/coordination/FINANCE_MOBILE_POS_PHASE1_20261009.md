@@ -64,6 +64,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `52eda8a8f2b` - Signed offline-grant issuance, permission/policy filtering, secure mobile grant lifecycle, dashboard controls, and focused acceptance tests.
 - `a3bf60b22b9` - Phase 3 approved-customer/default resolution, canonical outstanding-invoice reads, mobile balance UI, authorization, tests, and tracker updates.
 - `457fa545294` - Phase 3 compiled Mobile POS invoice/payment Finance routes, external contracts, module-lock identity, canonical AR guards, tests, and coordination evidence.
+- `c8c9c8e1869` - Phase 3 persisted sale/line/tender source envelopes, server-side mutation idempotency execution, migration, tests, and tracker evidence.
 
 ## Phase 2 application foundation
 
