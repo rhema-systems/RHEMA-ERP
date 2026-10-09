@@ -25,6 +25,7 @@ import {
   type ExternalPropertyPortfolio,
 } from '@/services/external-estate-services.service';
 
+const PROPERTY_LISTING_SOURCE = 'External Portal - Estate Listings';
 const SALES_PROPERTY_HANDOFF_SOURCE = 'Sales - Estate Enquiry';
 const MY_PROPERTIES_TABS = new Set([
   'properties',
@@ -88,6 +89,13 @@ function requestField(request: ExternalEstateServiceRequest, key: string) {
   return request.fieldValues?.[key] || '';
 }
 
+function isPropertyListingRequest(request: ExternalEstateServiceRequest) {
+  return (
+    request.sourceDepartment === PROPERTY_LISTING_SOURCE ||
+    request.sourceDepartment === SALES_PROPERTY_HANDOFF_SOURCE
+  );
+}
+
 export default function MyPropertiesPage() {
   const { toast } = useToast();
   const [portfolio, setPortfolio] = useState<ExternalPropertyPortfolio | null>(null);
@@ -115,12 +123,7 @@ export default function MyPropertiesPage() {
           externalEstateServicesService.getMyRequests(),
         ]);
         setPortfolio(portfolioResult);
-        setRequests(
-          requestResult.filter(
-            (request) =>
-              request.sourceDepartment === SALES_PROPERTY_HANDOFF_SOURCE
-          )
-        );
+        setRequests(requestResult.filter(isPropertyListingRequest));
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load your properties.');
       } finally {
