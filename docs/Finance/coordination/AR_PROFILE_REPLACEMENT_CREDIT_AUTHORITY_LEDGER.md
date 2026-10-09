@@ -10,6 +10,7 @@ Resolve the UAT `PROFILE_EFFECTIVE_PERIOD_OVERLAP` failure when approving a late
 - Worktree: `.w/ar-profile-replacement-credit-authority`
 - Exact base: `dd6fb224a1eaa7512087ed3bf0dd767d490c0f12` (`origin/master`)
 - Implementation commit: `3077f18d0` — Fix AR profile replacement and credit authority
+- Customer Register follow-up commit: `208d300bb` — Fix AR customer register query translation
 - Pull request: [#384](https://github.com/rhema-systems/RHEMA-ERP/pull/384) — open against `master`
 
 ## Authorized scope
