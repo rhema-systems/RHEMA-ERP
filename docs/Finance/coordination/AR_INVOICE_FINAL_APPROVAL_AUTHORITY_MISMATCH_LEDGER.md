@@ -7,16 +7,19 @@ Diagnose and remediate the `SOURCE_BOOK_AUTHORITY_POSTING_MISMATCH` raised when 
 ## Scope and authorization
 
 - Repository investigation, a narrow source fix, focused tests, and Finance coordination-ledger updates are authorized.
-- VPS/database mutation, manual authority edits, and workflow mutation are outside this worktree's authorization.
-- Remote investigation is read-only.
+- The user authorized committing, pushing, merging the focused PR, and triggering the guarded GitHub Actions VPS deployment on 2026-10-09.
+- Manual database authority edits and business-workflow mutation remain outside authorization.
 
 ## Repository state
 
 - Worktree: `.worktrees/ar-invoice-producer-authority`
-- Branch: `codex/ar-invoice-producer-authority`
+- Implementation branch: `codex/ar-invoice-producer-authority`
+- Publication checkpoint branch: `codex/ar-invoice-authority-publication`
 - Exact base: `db1ac67ca3c` (`origin/master` on 2026-10-09)
 - Prior merged fix/test commits contained by the base: `311c3469823` and `bd753c15e3b` (PR #381).
 - Verified implementation/test commit: `4334e1b2faf` (`fix(finance): preserve AR producer origin on approval`).
+- Ledger implementation checkpoint: `1511ead16be` (`docs(finance): record AR producer authority remediation`).
+- PR #391 merged both commits to `master` as `f01aec28d49` on 2026-10-09.
 - The primary checkout and the mobile POS worktree were not modified.
 
 ## Deployment and incident evidence
@@ -66,13 +69,14 @@ Diagnose and remediate the `SOURCE_BOOK_AUTHORITY_POSTING_MISMATCH` raised when 
 ## Migrations and application status
 
 - Migrations added/applied: none.
-- VPS deployment/database changes: none.
-- Push/PR: not performed by this worktree.
+- Branch `codex/ar-invoice-producer-authority` was pushed and PR #391 was opened and merged.
+- A guarded Windows VPS CI/CD dispatch was created from merge commit `f01aec28d49` as run `37943695807`; the publication checkpoint advances `master`, so the workflow must be re-dispatched from the final ledger merge commit to satisfy the deployment freshness gate.
+- No manual VPS action or database mutation was performed.
 
 ## Remaining work
 
-1. Hand branch `codex/ar-invoice-producer-authority` and implementation commit `4334e1b2faf` to the integrating task.
-2. After integration and deployment, retry final approval. If the invoice still fails, inspect its retained authority origin read-only: a correct `SALES` authority should post; an old incorrect `FIN` authority requires supported reject/resubmit and re-freeze.
+1. Merge this publication checkpoint and dispatch the guarded Windows VPS CI/CD workflow from the resulting current `master` commit.
+2. After deployment, retry final approval. If the invoice still fails, inspect its retained authority origin read-only: a correct `SALES` authority should post; an old incorrect `FIN` authority requires supported reject/resubmit and re-freeze.
 
 ## Known limitations
 
