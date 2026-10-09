@@ -602,11 +602,8 @@ public partial class DatabaseSeedingServiceTests
 
         var service = new DatabaseSeedingService(context, CreateUserManager(), CreateRoleManager(),
             NullLogger<DatabaseSeedingService>.Instance, CreateEnvironment());
-        var seedMethod = typeof(DatabaseSeedingService).GetMethod(
-            "EnsureLegalProcedureWorkflowsSeededAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-        seedMethod.Should().NotBeNull();
-        await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
-        await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
+        await service.SeedLegalProcedureWorkflowsAsync();
+        await service.SeedLegalProcedureWorkflowsAsync();
 
         var catalog = new ErpSystem.Core.Services.Legal.LegalProcedureCatalogService();
         var definitions = await context.WorkflowDefinitions

@@ -39,6 +39,7 @@ namespace ErpSystem.Web.Services
         Task SeedFinanceWorkflowDefinitionsAsync();
         Task SeedEstateAcquisitionLandBankParcelsAsync();
         Task SeedPropertyManagementListingWorkflowAsync();
+        Task SeedLegalProcedureWorkflowsAsync();
         Task SeedPortalPropertyRequestExamplesAsync();
         Task SeedTestUsersAsync();
         Task SeedMaintenanceE2ETestDataAsync();
@@ -201,6 +202,9 @@ namespace ErpSystem.Web.Services
 
         public Task SeedPropertyManagementListingWorkflowAsync()
             => EnsurePropertyManagementListingWorkflowSeededAsync();
+
+        public Task SeedLegalProcedureWorkflowsAsync()
+            => EnsureLegalProcedureWorkflowsSeededAsync();
 
         public async Task SeedPortalPropertyRequestExamplesAsync()
         {
