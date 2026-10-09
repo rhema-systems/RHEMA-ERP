@@ -70,6 +70,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `f4d64bf0abf` - Phase 3 public online sale command, canonical invoice/posting and split-payment allocation orchestration, validation, authorization, tests, and tracker evidence.
 - `939e0190b38` - Phase 4 governed catalogue search, canonical sale preview, native cart and split-tender checkout, API/client tests, and tracker evidence.
 - `31399b06bd9` - Canonical Mobile POS receipt projection, assigned-store access boundary, permission-gated idempotent reprint audit, mobile receipt UI, and focused tests.
+- `e8967f404f4` - Safe receipt HTML renderer, retained PDF output, Android system print and native sharing fallback, tests, and Expo dependencies.
 
 ## Phase 2 application foundation
 
@@ -132,6 +133,8 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Added `POST /api/mobile-pos/v1/receipts/{saleId}/reprint-events` behind both `MobilePOS.Access` and `MobilePOS.Receipt.Reprint`. It appends a tenant-scoped central `AuditLog` event keyed by device and client event ID. Exact retries return the same audit event and copy number.
 - Reprinting never calls the invoice or payment services and therefore cannot create, repost, or reallocate Finance documents. No new migration was required because the existing immutable sale snapshot and append-only idempotent audit store satisfy this slice.
 - The mobile success screen renders the canonical receipt, split-tender payment numbers, and a numbered `REPRINT` mark. The reprint action is hidden without the dynamic permission and explains that another copy only records audit evidence.
+- Added a safe HTML receipt renderer that escapes business data and preserves the original or numbered `REPRINT` mark. Android system printing uses the rendered canonical receipt.
+- Added PDF generation into the app's document-backed `receipts` directory and native PDF sharing. The filesystem-safe filename distinguishes the original from each audited reprint copy. This fallback does not depend on the Z92S vendor SDK.
 
 ## Migrations and application state
 
@@ -167,9 +170,9 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Frontend production build passed. The generated app manifest contains `/administration/mobile-pos/page`.
 - Expo application TypeScript check passed. Twenty-eight client tests passed across environment policy, sanitized support references, ProblemDetails and non-JSON response handling, concurrent-401 single-flight refresh behavior, customer/outstanding-invoice request encoding, catalogue/preview/completion contracts, split-tender calculation/completion mapping, offline-grant API shape, expiry, assignment/policy/default-customer/revocation binding, and remaining-time calculation.
 - Thirty-two focused Mobile POS API tests passed after the canonical receipt and audited-reprint slice. Added coverage proves the complete receipt projection, split-tender payment identifiers, cross-store denial, idempotent reprint audit, unchanged canonical sale state, and dynamic access/reprint authorization.
-- The Expo TypeScript check and all 28 mobile tests passed after the receipt API client and receipt/reprint UI were added.
+- The Expo TypeScript check and all 30 mobile tests passed after the receipt API client, receipt/reprint UI, safe printable renderer, and PDF fallback were added.
 - The API Release compilation completed with zero errors for the receipt service/controller/DTO/DI changes. Existing repository warnings and ImageSharp advisories remained warnings.
-- Expo Doctor is installed as a reproducible development dependency and passed 18/18 checks. Android bundle export passed and generated the Android Hermes bundle and metadata under the ignored `apps/mobile/dist/android` output.
+- Expo Doctor is installed as a reproducible development dependency and passed 18/18 checks. Android bundle export passed again after adding the supported Expo file-system, print, and sharing modules, generating the Hermes bundle and metadata under the ignored `apps/mobile/dist/android` output.
 
 ## Known failures and constraints
 
@@ -181,7 +184,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 
 ## Remaining work
 
-Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, receipt, and mobile checkout paths. Next, add the offline catalogue change feed/cache, scanner boundary, governed discount controls, bank-account selection for eligible payment methods, PDF/system/digital receipt fallback, SQL Server concurrency/failure-injection coverage, and end-to-end Finance reconciliation evidence. Offline grant consumption and aggregate-limit enforcement remain in Phase 5. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
+Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, receipt, and mobile checkout paths. Next, add the offline catalogue change feed/cache, scanner boundary, governed discount controls, bank-account selection for eligible payment methods, SQL Server concurrency/failure-injection coverage, and end-to-end Finance reconciliation evidence. Android device acceptance remains for the system print/share fallback. Offline grant consumption and aggregate-limit enforcement remain in Phase 5. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
 
 ## Authorization boundaries
 

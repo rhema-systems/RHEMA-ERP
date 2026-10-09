@@ -95,8 +95,8 @@
 | MPOS-0403 | Cart, pricing preview, tax display, discounts | In progress - mobile cart quantity controls and server-calculated subtotal, discount, tax, and total display are implemented; governed cashier discount entry and offline preview remain |
 | MPOS-0404 | Tender UI and metadata rules | In progress - mobile checkout supports multiple till-mapped online tenders, amount reconciliation, required references, and retry-stable mutation identity; bank-account selection for bank-required methods remains |
 | MPOS-0405 | Atomic split-tender orchestration | In progress - the mobile checkout submits one command and one retry-stable mutation ID; the public endpoint composes the canonical invoice, posting, multiple allocated canonical payments, and source envelopes atomically; SQL failure-injection and live accounting reconciliation evidence remain |
-| MPOS-0406 | Receipt screen, persistence, reprint audit | In progress - checkout loads and renders the canonical receipt; permission-gated reprints append a tenant-scoped idempotent central audit event, return a numbered `REPRINT` copy, and never repost Finance documents; visible-device acceptance and printer output remain |
-| MPOS-0407 | PDF/system/digital printing fallback | Planned |
+| MPOS-0406 | Receipt screen, persistence, reprint audit | In progress - checkout loads and renders the canonical receipt; permission-gated reprints append a tenant-scoped idempotent central audit event, return a numbered `REPRINT` copy, and never repost Finance documents; visible-device receipt/reprint acceptance remains |
+| MPOS-0407 | PDF/system/digital printing fallback | In progress - the receipt screen opens Android system printing, renders and retains a safe PDF in app document storage, and opens the native share sheet; Android device acceptance and vendor-specific Z92S printing remain |
 
 ## Phase 5 - offline
 
