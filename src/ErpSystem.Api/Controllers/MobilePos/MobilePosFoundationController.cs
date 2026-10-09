@@ -113,6 +113,19 @@ public sealed class MobilePosRuntimeController : ControllerBase
         => Ok(await _checkout.SearchCatalogueAsync(
             installationId, search, limit, cancellationToken));
 
+    [HttpGet("catalogue/changes")]
+    [Authorize(Policy = MobilePosPermissions.UseOffline)]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    [Authorize(Policy = MobilePosPermissions.CreateInvoice)]
+    public async Task<ActionResult<MobilePosCatalogueChangePageDto>> GetCatalogueChanges(
+        [FromQuery] string installationId,
+        [FromQuery] DateTime? sinceUtc,
+        [FromQuery] string? cursor,
+        [FromQuery] int limit = 250,
+        CancellationToken cancellationToken = default)
+        => Ok(await _checkout.GetCatalogueChangesAsync(
+            installationId, sinceUtc, cursor, limit, cancellationToken));
+
     [HttpGet("bank-accounts")]
     [Authorize(Policy = MobilePosPermissions.OperateTill)]
     [Authorize(Policy = MobilePosPermissions.CollectPayment)]

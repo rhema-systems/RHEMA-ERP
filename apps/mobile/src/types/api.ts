@@ -258,6 +258,14 @@ export interface MobilePosCatalogueItem {
   changedAtUtc: string;
 }
 
+export interface MobilePosCatalogueChangePage {
+  snapshotAtUtc: string;
+  nextCursor?: string;
+  hasMore: boolean;
+  upserts: MobilePosCatalogueItem[];
+  tombstoneInventoryItemIds: string[];
+}
+
 export interface MobilePosSalePreviewLineInput {
   clientLineId: string;
   inventoryItemId: string;

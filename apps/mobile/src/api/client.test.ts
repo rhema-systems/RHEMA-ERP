@@ -135,7 +135,7 @@ describe("Mobile POS API client", () => {
   });
 
   it("requests an offline grant for the current installation with bearer authorization", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse({
       id: "grant-1",
       token: "signed-token",
       policy: { allowedCommandTypes: ["CashSale"] },
@@ -166,7 +166,8 @@ describe("Mobile POS API client", () => {
       isDefaultWalkInCustomer: false,
     });
 
-    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
+    const calls = fetchMock.mock.calls as unknown as Array<[string | URL | Request]>;
+    expect(calls[0]?.[0].toString()).toBe(
       "https://erp.example.com/api/mobile-pos/v1/customers/search?installationId=installation%2Fcustomer%201&q=A%26B%20Trading&limit=15",
     );
     expect(fetchMock.mock.calls[1]?.[0].toString()).toBe(
@@ -242,5 +243,26 @@ describe("Mobile POS API client", () => {
       clientEventId: "reprint-event-1",
       reason: "Customer copy",
     });
+  });
+
+  it("encodes catalogue watermark and continuation cursor requests", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse({
+      snapshotAtUtc: "2026-10-09T10:00:00.000Z",
+      hasMore: false,
+      upserts: [],
+      tombstoneInventoryItemIds: [],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mobileApi.getCatalogueChanges(
+      "install/01",
+      "2026-10-08T10:00:00.000Z",
+      "page+/=",
+      125,
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/catalogue/changes?installationId=install%2F01&sinceUtc=2026-10-08T10%3A00%3A00.000Z&cursor=page%2B%2F%3D&limit=125",
+    );
   });
 });

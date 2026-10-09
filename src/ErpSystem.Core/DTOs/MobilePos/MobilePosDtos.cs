@@ -565,6 +565,15 @@ public sealed class MobilePosCatalogueItemDto
     public DateTime ChangedAtUtc { get; set; }
 }
 
+public sealed class MobilePosCatalogueChangePageDto
+{
+    public DateTime SnapshotAtUtc { get; set; }
+    public string? NextCursor { get; set; }
+    public bool HasMore { get; set; }
+    public IReadOnlyList<MobilePosCatalogueItemDto> Upserts { get; set; } = [];
+    public IReadOnlyList<Guid> TombstoneInventoryItemIds { get; set; } = [];
+}
+
 public sealed class MobilePosSalePreviewRequestDto
 {
     [Required, MaxLength(200)]

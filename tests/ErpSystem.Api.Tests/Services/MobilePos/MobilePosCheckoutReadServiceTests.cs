@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.MobilePos;
+using ErpSystem.Api.Controllers.MobilePos;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.MobilePos;
@@ -12,6 +13,7 @@ using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 using Moq;
 using Xunit;
 
@@ -19,6 +21,22 @@ namespace ErpSystem.Api.Tests.Services.MobilePos;
 
 public sealed class MobilePosCheckoutReadServiceTests
 {
+    [Fact]
+    public void CatalogueChanges_ShouldRequireOfflineTillAndInvoicePermissions()
+    {
+        var policies = typeof(MobilePosRuntimeController)
+            .GetMethod(nameof(MobilePosRuntimeController.GetCatalogueChanges))!
+            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .ToArray();
+
+        policies.Should().BeEquivalentTo(
+            MobilePosPermissions.UseOffline,
+            MobilePosPermissions.OperateTill,
+            MobilePosPermissions.CreateInvoice);
+    }
+
     [Fact]
     public async Task SearchCatalogueAsync_ShouldReturnOnlySaleReadyMatchingItems()
     {
@@ -32,6 +50,41 @@ public sealed class MobilePosCheckoutReadServiceTests
         results[0].UnitPrice.Should().Be(100m);
         results[0].CurrencyCode.Should().Be("GHS");
         results[0].IsAvailable.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetCatalogueChangesAsync_ShouldReturnEligibleUpsertsAndIneligibleTombstones()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var result = await fixture.Service.GetCatalogueChangesAsync(
+            "install-01", DateTime.UtcNow.AddHours(-1), null, 50, CancellationToken.None);
+
+        result.HasMore.Should().BeFalse();
+        result.NextCursor.Should().BeNull();
+        result.Upserts.Should().ContainSingle(item => item.InventoryItemId == fixture.ItemId);
+        result.TombstoneInventoryItemIds.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task GetCatalogueChangesAsync_ShouldContinueTheSameSnapshotWithOpaqueCursor()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var first = await fixture.Service.GetCatalogueChangesAsync(
+            "install-01", DateTime.UtcNow.AddHours(-1), null, 1, CancellationToken.None);
+        var second = await fixture.Service.GetCatalogueChangesAsync(
+            "install-01", null, first.NextCursor, 1, CancellationToken.None);
+
+        first.HasMore.Should().BeTrue();
+        first.NextCursor.Should().NotBeNullOrWhiteSpace();
+        second.SnapshotAtUtc.Should().Be(first.SnapshotAtUtc);
+        second.HasMore.Should().BeFalse();
+        first.Upserts.Select(item => item.InventoryItemId)
+            .Concat(first.TombstoneInventoryItemIds)
+            .Concat(second.Upserts.Select(item => item.InventoryItemId))
+            .Concat(second.TombstoneInventoryItemIds)
+            .Should().OnlyHaveUniqueItems().And.HaveCount(2);
     }
 
     [Fact]

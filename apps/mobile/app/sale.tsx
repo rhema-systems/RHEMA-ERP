@@ -15,6 +15,7 @@ import { ApiProblem, mobileApi } from "@/src/api/client";
 import { BarcodeScannerModal } from "@/components/barcode-scanner-modal";
 import { BankAccountPickerModal } from "@/components/bank-account-picker-modal";
 import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
+import { searchSessionCatalogue } from "@/src/offline/catalogue-runtime";
 import type { BarcodeScan } from "@/src/scanning/barcode";
 import { buildCompleteSaleRequest, sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
 import { useSession } from "@/src/session/session-context";
@@ -91,6 +92,7 @@ export default function SaleScreen() {
   const [busy, setBusy] = useState<"catalogue" | "customer" | "bankAccounts" | "preview" | "complete" | "reprint" | "print" | "share" | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
   const [outputMessage, setOutputMessage] = useState<string | null>(null);
+  const [catalogueNotice, setCatalogueNotice] = useState<string | null>(null);
 
   const onlineMethods = useMemo(
     () => bootstrap?.till.paymentMethods.filter(method => method.allowOnline) ?? [],
@@ -117,10 +119,24 @@ export default function SaleScreen() {
     if (!term) return setError(problem("Enter an item name, code, or barcode."));
     setBusy("catalogue");
     setError(null);
+    setCatalogueNotice(null);
     try {
       setCatalogueResults(await mobileApi.searchCatalogue(await getInstallationId(), term));
     } catch (caught) {
-      setError(asProblem(caught));
+      const problem = asProblem(caught);
+      if (problem.status > 0 || !session.user) {
+        setError(problem);
+      } else {
+        try {
+          const cached = await searchSessionCatalogue(session.user, bootstrap, term);
+          setCatalogueResults(cached);
+          setCatalogueNotice(cached.length > 0
+            ? "Network unavailable. Showing the latest catalogue saved on this device."
+            : "Network unavailable and no saved catalogue item matched the search.");
+        } catch (cacheError) {
+          setError(asProblem(cacheError));
+        }
+      }
     } finally {
       setBusy(null);
     }
@@ -467,6 +483,7 @@ export default function SaleScreen() {
 
       <SectionTitle number="2" title="Items" />
       <SearchBar label="Item name, code or barcode" value={catalogueQuery} onChangeText={setCatalogueQuery} onSearch={() => void runCatalogueSearch(catalogueQuery)} onScan={() => setScannerOpen(true)} busy={busy === "catalogue"} />
+      {catalogueNotice && <View style={styles.offlineNotice}><Ionicons name="cloud-offline-outline" size={18} color={colors.blue} /><Text style={styles.offlineNoticeText}>{catalogueNotice}</Text></View>}
       <BarcodeScannerModal visible={scannerOpen} onClose={() => setScannerOpen(false)} onScan={acceptBarcodeScan} />
       <BankAccountPickerModal
         accounts={bankAccounts}
@@ -683,4 +700,6 @@ const styles = StyleSheet.create({
   outputButtonText: { color: colors.blue, fontSize: 13, fontWeight: "700" },
   outputMessage: { marginTop: 12, flexDirection: "row", gap: 8, alignItems: "center", padding: 11, borderRadius: 11, backgroundColor: colors.successBg },
   outputMessageText: { flex: 1, color: colors.success, fontSize: 11, lineHeight: 16 },
+  offlineNotice: { marginBottom: 10, flexDirection: "row", gap: 8, alignItems: "center", padding: 11, borderRadius: 11, backgroundColor: colors.paleBlue },
+  offlineNoticeText: { flex: 1, color: colors.navy, fontSize: 11, lineHeight: 16 },
 });

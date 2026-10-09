@@ -11,6 +11,8 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using System.Text;
+using System.Text.Json;
 
 namespace ErpSystem.Api.Services.MobilePos;
 
@@ -19,6 +21,13 @@ public interface IMobilePosCheckoutReadService
     Task<IReadOnlyList<MobilePosCatalogueItemDto>> SearchCatalogueAsync(
         string installationId,
         string? search,
+        int limit,
+        CancellationToken cancellationToken);
+
+    Task<MobilePosCatalogueChangePageDto> GetCatalogueChangesAsync(
+        string installationId,
+        DateTime? sinceUtc,
+        string? cursor,
         int limit,
         CancellationToken cancellationToken);
 
@@ -60,6 +69,109 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
     private Guid TenantId => _currentUser.TenantId is { } id && id != Guid.Empty
         ? id
         : throw new UnauthorizedAccessException("A current tenant is required for Mobile POS.");
+
+    public async Task<MobilePosCatalogueChangePageDto> GetCatalogueChangesAsync(
+        string installationId,
+        DateTime? sinceUtc,
+        string? cursor,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var bootstrap = await _foundation.GetBootstrapAsync(
+            Required(installationId, 200, "installation ID"), cancellationToken);
+        var tenantId = TenantId;
+        var take = Math.Clamp(limit, 1, 500);
+        var state = string.IsNullOrWhiteSpace(cursor)
+            ? NewCatalogueCursor(sinceUtc)
+            : DecodeCatalogueCursor(cursor);
+
+        var store = await _db.MobilePosStores.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == bootstrap.Store.Id && !item.IsDeleted,
+            cancellationToken) ?? throw Reject("MOBILE_POS_STORE_NOT_FOUND", "The assigned Mobile POS store was not found.");
+
+        var itemMarkers = _db.InventoryItems.AsNoTracking()
+            .Where(item => item.TenantId == tenantId)
+            .Select(item => new
+            {
+                InventoryItemId = item.Id,
+                ChangedAtUtc = item.UpdatedAt ?? item.CreatedAt
+            });
+        var markers = itemMarkers;
+        if (store.WarehouseId.HasValue)
+        {
+            var warehouseId = store.WarehouseId.Value;
+            var quantityMarkers = _db.WarehouseQuantities.AsNoTracking()
+                .Where(value => value.TenantId == tenantId && value.WarehouseId == warehouseId)
+                .Select(value => new
+                {
+                    InventoryItemId = value.InventoryItemId,
+                    ChangedAtUtc = value.UpdatedAt ?? value.CreatedAt
+                });
+            markers = markers.Concat(quantityMarkers);
+        }
+
+        var pageMarkers = await markers
+            .Where(marker => marker.ChangedAtUtc > state.SinceUtc
+                && marker.ChangedAtUtc <= state.SnapshotAtUtc)
+            .GroupBy(marker => marker.InventoryItemId)
+            .Select(group => new
+            {
+                InventoryItemId = group.Key,
+                ChangedAtUtc = group.Max(marker => marker.ChangedAtUtc)
+            })
+            .OrderBy(marker => marker.ChangedAtUtc)
+            .ThenBy(marker => marker.InventoryItemId)
+            .Skip(state.Offset)
+            .Take(take + 1)
+            .ToListAsync(cancellationToken);
+        var hasMore = pageMarkers.Count > take;
+        var selectedMarkers = pageMarkers.Take(take).ToArray();
+        var selectedIds = selectedMarkers.Select(marker => marker.InventoryItemId).ToArray();
+        var items = await _db.InventoryItems.AsNoTracking()
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId && selectedIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        var stockIds = items.Values.Where(item => item.ItemType == ItemType.StockItem)
+            .Select(item => item.Id).ToArray();
+        var quantities = store.WarehouseId.HasValue && stockIds.Length > 0
+            ? await _db.WarehouseQuantities.AsNoTracking()
+                .Where(value => value.TenantId == tenantId
+                    && value.WarehouseId == store.WarehouseId.Value
+                    && stockIds.Contains(value.InventoryItemId)
+                    && !value.IsDeleted)
+                .ToDictionaryAsync(value => value.InventoryItemId, value => value.AvailableStock, cancellationToken)
+            : new Dictionary<Guid, decimal>();
+
+        var upserts = new List<MobilePosCatalogueItemDto>(selectedMarkers.Length);
+        var tombstones = new List<Guid>();
+        foreach (var marker in selectedMarkers)
+        {
+            if (!items.TryGetValue(marker.InventoryItemId, out var item)
+                || item.IsDeleted
+                || item.Status != ItemStatus.Active
+                || !item.SalesAccountId.HasValue)
+            {
+                tombstones.Add(marker.InventoryItemId);
+                continue;
+            }
+
+            var available = item.ItemType == ItemType.StockItem
+                ? quantities.GetValueOrDefault(item.Id)
+                : (decimal?)null;
+            upserts.Add(MapCatalogueItem(item, store, available, marker.ChangedAtUtc));
+        }
+
+        return new MobilePosCatalogueChangePageDto
+        {
+            SnapshotAtUtc = state.SnapshotAtUtc,
+            HasMore = hasMore,
+            NextCursor = hasMore
+                ? EncodeCatalogueCursor(state with { Offset = state.Offset + selectedMarkers.Length })
+                : null,
+            Upserts = upserts,
+            TombstoneInventoryItemIds = tombstones
+        };
+    }
 
     public async Task<IReadOnlyList<MobilePosBankAccountOptionDto>> GetEligibleBankAccountsAsync(
         string installationId,
@@ -159,26 +271,7 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
             decimal? available = item.ItemType == ItemType.StockItem
                 ? quantities.GetValueOrDefault(item.Id)
                 : null;
-            return new MobilePosCatalogueItemDto
-            {
-                InventoryItemId = item.Id,
-                ItemCode = item.ItemCode,
-                Name = item.Name,
-                Description = item.Description,
-                Barcode = item.Barcode,
-                AlternateBarcode = item.AlternateBarcode,
-                QrCode = item.QRCode,
-                ItemType = item.ItemType.ToString(),
-                UnitOfMeasureId = item.UnitOfMeasureId,
-                UnitOfMeasureCode = item.UnitOfMeasure,
-                UnitPrice = item.SalePrice,
-                CurrencyCode = store.CurrencyCode,
-                DefaultTaxGroupId = item.DefaultTaxGroupId,
-                AvailableQuantity = available,
-                IsAvailable = item.ItemType != ItemType.StockItem
-                    || (store.WarehouseId.HasValue && available > 0m),
-                ChangedAtUtc = item.UpdatedAt ?? item.CreatedAt
-            };
+            return MapCatalogueItem(item, store, available, item.UpdatedAt ?? item.CreatedAt);
         }).ToArray();
     }
 
@@ -342,6 +435,71 @@ public sealed class MobilePosCheckoutReadService : IMobilePosCheckoutReadService
 
     private static decimal RoundMoney(decimal value, int decimalPlaces) =>
         CurrencyMinorUnitPolicy.Round(value, decimalPlaces);
+
+    private static MobilePosCatalogueItemDto MapCatalogueItem(
+        InventoryItem item,
+        MobilePosStore store,
+        decimal? available,
+        DateTime changedAtUtc) => new()
+    {
+        InventoryItemId = item.Id,
+        ItemCode = item.ItemCode,
+        Name = item.Name,
+        Description = item.Description,
+        Barcode = item.Barcode,
+        AlternateBarcode = item.AlternateBarcode,
+        QrCode = item.QRCode,
+        ItemType = item.ItemType.ToString(),
+        UnitOfMeasureId = item.UnitOfMeasureId,
+        UnitOfMeasureCode = item.UnitOfMeasure,
+        UnitPrice = item.SalePrice,
+        CurrencyCode = store.CurrencyCode,
+        DefaultTaxGroupId = item.DefaultTaxGroupId,
+        AvailableQuantity = available,
+        IsAvailable = item.ItemType != ItemType.StockItem
+            || (store.WarehouseId.HasValue && available > 0m),
+        ChangedAtUtc = changedAtUtc
+    };
+
+    private static CatalogueCursor NewCatalogueCursor(DateTime? sinceUtc)
+    {
+        var since = sinceUtc?.ToUniversalTime() ?? DateTime.UnixEpoch;
+        var snapshot = DateTime.UtcNow;
+        if (since > snapshot)
+            throw Reject("MOBILE_POS_CATALOGUE_CURSOR_INVALID", "The catalogue watermark cannot be in the future.");
+        return new CatalogueCursor(since, snapshot, 0);
+    }
+
+    private static string EncodeCatalogueCursor(CatalogueCursor cursor)
+    {
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(cursor));
+        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    private static CatalogueCursor DecodeCatalogueCursor(string value)
+    {
+        try
+        {
+            var base64 = value.Trim().Replace('-', '+').Replace('_', '/');
+            base64 = base64.PadRight(base64.Length + ((4 - base64.Length % 4) % 4), '=');
+            var cursor = JsonSerializer.Deserialize<CatalogueCursor>(Convert.FromBase64String(base64));
+            if (cursor == null || cursor.Offset < 0 || cursor.Offset > 1_000_000
+                || cursor.SinceUtc.Kind != DateTimeKind.Utc
+                || cursor.SnapshotAtUtc.Kind != DateTimeKind.Utc
+                || cursor.SinceUtc > cursor.SnapshotAtUtc
+                || cursor.SnapshotAtUtc > DateTime.UtcNow.AddMinutes(1))
+            {
+                throw new InvalidOperationException();
+            }
+            return cursor;
+        }
+        catch (Exception exception) when (exception is FormatException or JsonException or InvalidOperationException)
+        {
+            throw Reject("MOBILE_POS_CATALOGUE_CURSOR_INVALID", "The catalogue change cursor is invalid or expired.");
+        }
+    }
+
+    private sealed record CatalogueCursor(DateTime SinceUtc, DateTime SnapshotAtUtc, int Offset);
 
     private static string MaskAccountNumber(string accountNumber)
     {
