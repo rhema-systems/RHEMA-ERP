@@ -152,6 +152,30 @@ describe("Mobile POS API client", () => {
     expect(JSON.parse(String(init.body))).toEqual({ installationId: "installation-123456" });
   });
 
+  it("loads and opens the assigned Finance till session", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => jsonResponse({ sessionNumber: "TILL-0001" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mobileApi.getCurrentTillSession("installation/till 1");
+    await mobileApi.openTillSession({
+      installationId: "installation/till 1",
+      openingFloatAmount: 125,
+      openingNotes: "Opening count",
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/till-sessions/current?installationId=installation%2Ftill%201",
+    );
+    const [url, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(url).toBe("https://erp.example.com/api/mobile-pos/v1/till-sessions/open");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({
+      installationId: "installation/till 1",
+      openingFloatAmount: 125,
+      openingNotes: "Opening count",
+    });
+  });
+
   it("encodes approved-customer search and outstanding-invoice request context", async () => {
     const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);

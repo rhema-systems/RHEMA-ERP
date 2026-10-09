@@ -204,8 +204,14 @@ export default function HomeScreen() {
             <Text style={styles.infoText}>
               {session.bootstrap.currentTillSessionId
                 ? "Your active cashier session is recognized by Finance custody controls."
-                : "Open-till workflow will be enabled in the Finance transaction phase."}
+                : "Open the assigned physical till before recording sales or requesting offline authorization."}
             </Text>
+            <Link href="/till-session" asChild>
+              <Pressable accessibilityRole="button" style={styles.cardAction}>
+                <Text style={styles.cardActionText}>{session.bootstrap.currentTillSessionId ? "View till session" : "Open till session"}</Text>
+                <Ionicons name="chevron-forward" size={17} color={colors.blue} />
+              </Pressable>
+            </Link>
           </View>
 
           <View style={styles.infoCard}>
@@ -334,6 +340,8 @@ const styles = StyleSheet.create({
   tenderRow: { marginTop: 11, flexDirection: "row", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: "#F2F4F7", paddingTop: 11 },
   tenderName: { color: colors.ink, fontSize: 13, fontWeight: "600" },
   tenderMode: { color: colors.muted, fontSize: 12 },
+  cardAction: { marginTop: 14, minHeight: 42, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 10, backgroundColor: colors.paleBlue },
+  cardActionText: { color: colors.blue, fontSize: 12, fontWeight: "700" },
   secondaryButton: { marginTop: 18, minHeight: 48, flexDirection: "row", gap: 8, borderRadius: 12, borderWidth: 1, borderColor: "#B2CCFF", backgroundColor: colors.white, alignItems: "center", justifyContent: "center" },
   secondaryText: { color: colors.blue, fontSize: 14, fontWeight: "700" },
   statusCard: { marginTop: 24, padding: 20, borderRadius: 18 },

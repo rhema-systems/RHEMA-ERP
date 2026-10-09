@@ -243,6 +243,20 @@ public sealed class MobilePosOfflineGrantRequestDto
     public string InstallationId { get; set; } = string.Empty;
 }
 
+public sealed class MobilePosOpenTillSessionRequestDto
+{
+    [Required, StringLength(200, MinimumLength = 16)]
+    public string InstallationId { get; set; } = string.Empty;
+
+    [Range(typeof(decimal), "0", "9999999999999999")]
+    public decimal OpeningFloatAmount { get; set; }
+
+    [MaxLength(1000)]
+    public string? OpeningNotes { get; set; }
+
+    public Guid? OpeningEvidenceFileId { get; set; }
+}
+
 public sealed class MobilePosCustomerSearchResultDto
 {
     public Guid BusinessPartnerId { get; set; }

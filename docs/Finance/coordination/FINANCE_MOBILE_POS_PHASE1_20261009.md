@@ -188,6 +188,13 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Neither Mobile POS migration was applied to a database.
 - No production deployment, service restart, live device enrollment, or provider call was performed.
 
+## Phase 6 till and day-end implementation
+
+- Added the first till-session mobile boundary. It resolves the authenticated device, effective store assignment, physical till, liquidity account, and current cashier before delegating session opening and live custody calculation to the existing `ICashierTillService`.
+- The mobile runtime can now load the assigned operator's current Finance till session or open one with an opening float, note, and optional governed evidence file. The business date is calculated in the configured store time zone from server UTC rather than trusted device time.
+- Both endpoints require the dynamic `MobilePOS.Till.Operate` permission and the canonical `Finance.CashTills.Operate` permission. The service rejects a Finance session returned for any liquidity account other than the assigned Mobile POS till.
+- Added the mobile till screen and dashboard link with current session status, opening float, expected cash, transaction movements, deposits, count, variance, and denomination evidence. The app does not calculate or maintain a second custody balance.
+
 ## Verification evidence
 
 - Git worktree created cleanly from the exact `origin/master` baseline.
@@ -226,6 +233,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Offline push and dispatch passed all 30 focused Mobile POS API tests after a fresh Release build plus the Expo TypeScript check and 50/50 mobile tests. Added coverage proves dynamic endpoint authorization, payload hash rejection before grant/Finance work, explicit idempotency conflict, canonical offline sale completion during pending review, persisted grant/policy/tender evidence, secure-grant-at-dispatch behavior, terminal state mapping, retry scheduling, and scope-mismatch manual review.
 - The operator sync and historical-grant retention slice passed the Expo TypeScript check and all 53 mobile tests. Added coverage proves dispatcher lookup by queued grant ID, retained grant availability after the current authorization pointer is cleared, deliberate retained-grant deletion, and malformed grant-ID rejection.
 - The fresh Release Mobile POS API build and focused test run passed 43/43 tests after unifying online and offline cash-sale mutation identity for safe response-loss replay. The build preserved 90 EF models, compiled 355,610 ordered migration statements and 9,047 distinct statements, and completed with existing repository warnings only.
+- The Phase 6 till-session slice passed the Expo TypeScript check and all 54 mobile tests. A fresh Release API/test build passed 4/4 focused till-session tests covering dual permission enforcement, assigned-liquidity routing, store-local business date calculation, and cross-till rejection. Existing repository warnings and ImageSharp advisories remained warnings.
 - The supplied ZCS archive hash, entry count, JAR/JNI hashes, documented public printer/scanner APIs, ABIs, sample target, and absence of detected licence files were checked read-only. No vendor binary was added to the application at this stage.
 
 ## Known failures and constraints

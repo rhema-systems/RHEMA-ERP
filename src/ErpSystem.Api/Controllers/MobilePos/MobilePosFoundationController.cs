@@ -1,5 +1,6 @@
 using ErpSystem.Api.Services.MobilePos;
 using ErpSystem.Core.DTOs.MobilePos;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Shared;
@@ -20,6 +21,7 @@ public sealed class MobilePosRuntimeController : ControllerBase
     private readonly IMobilePosSaleService _sales;
     private readonly IMobilePosSyncService _sync;
     private readonly IMobilePosReceiptService _receipts;
+    private readonly IMobilePosTillSessionService _tillSessions;
 
     public MobilePosRuntimeController(
         IMobilePosFoundationService service,
@@ -28,7 +30,8 @@ public sealed class MobilePosRuntimeController : ControllerBase
         IMobilePosCheckoutReadService checkout,
         IMobilePosSaleService sales,
         IMobilePosSyncService sync,
-        IMobilePosReceiptService receipts)
+        IMobilePosReceiptService receipts,
+        IMobilePosTillSessionService tillSessions)
     {
         _service = service;
         _authorization = authorization;
@@ -37,6 +40,7 @@ public sealed class MobilePosRuntimeController : ControllerBase
         _sales = sales;
         _sync = sync;
         _receipts = receipts;
+        _tillSessions = tillSessions;
     }
 
     [HttpPost("devices/enrollment-requests")]
@@ -59,6 +63,25 @@ public sealed class MobilePosRuntimeController : ControllerBase
         [FromBody] MobilePosHeartbeatDto dto,
         CancellationToken cancellationToken)
         => Ok(await _service.RecordHeartbeatAsync(dto, cancellationToken));
+
+    [HttpGet("till-sessions/current")]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    [Authorize(Policy = FinancePermissions.OperateCashTills)]
+    public async Task<ActionResult<CashierTillSessionDto>> GetCurrentTillSession(
+        [FromQuery] string installationId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _tillSessions.GetCurrentAsync(installationId, cancellationToken);
+        return result == null ? NoContent() : Ok(result);
+    }
+
+    [HttpPost("till-sessions/open")]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    [Authorize(Policy = FinancePermissions.OperateCashTills)]
+    public async Task<ActionResult<CashierTillSessionDto>> OpenTillSession(
+        [FromBody] MobilePosOpenTillSessionRequestDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _tillSessions.OpenAsync(dto, cancellationToken));
 
     [HttpPost("offline-grants")]
     [Authorize(Policy = MobilePosPermissions.UseOffline)]

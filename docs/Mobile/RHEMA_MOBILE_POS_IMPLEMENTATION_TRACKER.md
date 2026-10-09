@@ -114,7 +114,7 @@
 
 | ID | Work item | Status |
 | --- | --- | --- |
-| MPOS-0601 | Mobile till-session open/current views | Planned |
+| MPOS-0601 | Mobile till-session open/current views | In progress - the authenticated device/store/till bootstrap now opens and loads the operator's canonical Finance cashier session, derives the store-local business date, enforces both dynamic Mobile POS and Finance till permissions, and exposes a mobile opening/current-session screen; live API, database, and Android acceptance remain |
 | MPOS-0602 | Server reconciliation by till/session/tender | Planned |
 | MPOS-0603 | Cash declaration and count evidence | Planned |
 | MPOS-0604 | Variance HQ workflow and segregation of duties | Planned |

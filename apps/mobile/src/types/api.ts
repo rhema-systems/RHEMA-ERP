@@ -155,6 +155,51 @@ export interface MobilePosBootstrap {
   serverTimeUtc: string;
 }
 
+export interface CashierTillCountLine {
+  id: string;
+  denomination: number;
+  quantity: number;
+  lineAmount: number;
+}
+
+export interface MobilePosTillSession {
+  id: string;
+  sessionNumber: string;
+  liquidityAccountId: string;
+  tillCode: string;
+  tillName: string;
+  businessDate: string;
+  currency: string;
+  cashierUserId: string;
+  cashierName: string;
+  status: string | number;
+  openingFloatAmount: number;
+  openingNotes?: string;
+  openedAt: string;
+  activityCutoffAt?: string;
+  transactionMovementAmount: number;
+  depositedAmount: number;
+  expectedClosingAmount: number;
+  countedClosingAmount: number;
+  varianceAmount: number;
+  varianceApprovalThresholdAmount: number;
+  varianceExceedsThreshold: boolean;
+  custodyEntryCount: number;
+  varianceReason?: string;
+  submittedAt?: string;
+  reviewedAt?: string;
+  reviewComments?: string;
+  closedAt?: string;
+  countLines: CashierTillCountLine[];
+  rowVersion: string;
+}
+
+export interface MobilePosOpenTillSessionRequest {
+  installationId: string;
+  openingFloatAmount: number;
+  openingNotes?: string;
+}
+
 export interface MobilePosOfflinePaymentMethodSnapshot {
   paymentMethodId: string;
   code: string;
