@@ -281,6 +281,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                         && (item.SourceDepartment == "External Portal"
                             || item.SourceDepartment == "External Portal - Estate Services"
                             || item.SourceDepartment == "External Portal - Estate Listings"))
+                    || (item.SourceDepartment == "External Portal - Estate Listings"
+                        && item.EntityType == "EstatePropertyManagementListingApplication"
+                        && item.Fields.Any(field => !field.IsDeleted
+                            && field.Key == "sourceReference"
+                            && field.Value != null
+                            && portalCustomerReferences.Contains(field.Value)))
                     || (item.SourceDepartment == "Sales - Estate Enquiry"
                         && item.EntityType == "EstatePropertyManagementListingApplication"
                         && item.Fields.Any(field => !field.IsDeleted
@@ -4031,7 +4037,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return true;
         }
 
-        return procedureCase.SourceDepartment == "Sales - Estate Enquiry"
+        return (procedureCase.SourceDepartment == "External Portal - Estate Listings"
+                || procedureCase.SourceDepartment == "Sales - Estate Enquiry")
             && procedureCase.Fields.Any(field => !field.IsDeleted
                 && field.Key == "sourceReference"
                 && field.Value is not null
