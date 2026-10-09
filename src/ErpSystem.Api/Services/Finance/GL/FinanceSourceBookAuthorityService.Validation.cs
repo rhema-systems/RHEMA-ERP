@@ -95,7 +95,7 @@ public sealed partial class FinanceSourceBookAuthorityService
         if (!SameNormalized(postingEvent.SourceDocumentType, authority.SourceDocumentType) ||
             !SameNormalized(postingEvent.PostingAction, authority.PostingAction) ||
             FinanceModuleLockCatalog.ResolveOriginModuleCode(postingEvent.SourceModule, postingEvent.OriginModuleCode) != authority.OriginModuleCode ||
-            !SameOriginModule(journal.SourceModule, authority.OriginModuleCode) ||
+            !SameOriginModule(journal.SourceModule, journal.OriginModuleCode, authority.OriginModuleCode) ||
             journal.SourceDocumentId != authority.SourceDocumentId || !SameNormalized(journal.SourceDocumentType, authority.SourceDocumentType) ||
             postingEvent.AccountingBookId != authority.AccountingBookId || journal.AccountingBookId != authority.AccountingBookId ||
             postingEvent.BookClassification != authority.AccountingBookCode || journal.BookClassification != authority.AccountingBookCode ||
@@ -300,9 +300,9 @@ public sealed partial class FinanceSourceBookAuthorityService
         catch (InvalidOperationException) { return false; }
     }
 
-    private static bool SameOriginModule(string? sourceModule, string expected)
+    private static bool SameOriginModule(string? sourceModule, string? originModuleCode, string expected)
     {
-        try { return FinanceModuleLockCatalog.ResolveOriginModuleCode(sourceModule ?? string.Empty) == expected; }
+        try { return FinanceModuleLockCatalog.ResolveOriginModuleCode(sourceModule ?? string.Empty, originModuleCode) == expected; }
         catch (InvalidOperationException) { return false; }
     }
 
