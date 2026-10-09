@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "RHEMA Field POS",
+    "slug": "rhema-field-pos",
+    "scheme": "rhemafieldpos",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Allow RHEMA Field POS to protect your signed-in session."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 29,
+            "targetSdkVersion": 35,
+            "compileSdkVersion": 35
+          }
+        }
+      ],
+      "expo-font"
+    ],
+    "android": {
+      "package": "com.rhemasystems.fieldpos",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0B2A5B"
+      }
+    },
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      }
+    }
+  }
+}

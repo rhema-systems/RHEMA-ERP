@@ -1011,6 +1011,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankAccountService, ErpSystem.Api.Services.Finance.Cash.BankAccountService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankingSettlementService, ErpSystem.Api.Services.Finance.Cash.BankingSettlementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICashierTillService, ErpSystem.Api.Services.Finance.Cash.CashierTillService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosFoundationService, ErpSystem.Api.Services.MobilePos.MobilePosFoundationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReportExportService, ErpSystem.Api.Services.Finance.Reporting.FinanceReportExportService>();
             // FR-RP-010 deliberately extends the shared report/template model.
             // The processor is scoped because each scheduler pass owns one EF
@@ -1725,6 +1726,21 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 authorizationBuilder.AddPolicy(permission.Name, policy =>
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
+
+            foreach (var permission in MobilePosPermissions.All.Where(permission => permission.Name != MobilePosPermissions.ViewStore))
+            {
+                authorizationBuilder.AddPolicy(permission.Name, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Name)));
+            }
+
+            // Store managers and device approvers need the same tenant-scoped reference and
+            // store/till reads as a viewer. These remain capabilities assigned to dynamic roles;
+            // no role name is embedded in the policy.
+            authorizationBuilder.AddPolicy(MobilePosPermissions.ViewStore, policy =>
+                policy.Requirements.Add(new PermissionRequirement(
+                    MobilePosPermissions.ViewStore,
+                    MobilePosPermissions.ManageStore,
+                    MobilePosPermissions.ApproveDevice)));
 
             // CRM follows the same capability ladder as the other governed modules. Roles are
             // dynamic and are authorized by their assigned permissions; no Sales role name is

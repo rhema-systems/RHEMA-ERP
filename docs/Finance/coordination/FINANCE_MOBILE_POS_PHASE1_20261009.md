@@ -1,10 +1,10 @@
-# Finance mobile POS architecture and implementation workstream - 2026-10-09
+# Finance mobile POS architecture and foundation workstream - 2026-10-09
 
 ## Objective and scope
 
 Audit the committed Flash ERP Android mobile application and the current RHEMA ERP Finance, AR, payment, till, security, tenant, location, and offline capabilities. Produce an implementation-ready architecture and phased delivery plan for the RHEMA Field POS and Revenue Collection mobile application. The plan must incorporate the management policies recorded in `C:\Users\USER\Desktop\Mobile app.docx`, including per-store default walk-in customers.
 
-This workstream begins with architecture and contract mapping. It does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
+The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, and an HQ administration page. It does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
 
 ## Branch and worktree
 
@@ -58,13 +58,24 @@ This workstream begins with architecture and contract mapping. It does not autho
 ## Commits
 
 - `fb707967413` - Phase 1 architecture report, implementation tracker, and initial coordination ledger.
+- `6df8433f81d` - Phase 1 documentation checkpoint before Phase 2 implementation.
+- Phase 2 foundation commit: pending at the time of this ledger update.
+
+## Phase 2 application foundation
+
+- Added `apps/mobile`, an Expo 54/React Native Android application with TEST/UAT/PRODUCTION profiles, production HTTPS enforcement, SecureStore-backed tokens and installation identity, typed API handling, login/MFA/tenant switching, device enrollment, bootstrap, dashboard, account switching, logout, and sanitized crash handling.
+- Added dynamic `MobilePOS.*` permissions and permission policies without fixed role names.
+- Added tenant-scoped Mobile POS stores, mandatory approved default walk-in customer/Customer-role mapping, Finance dimension defaults, tills, allowed payment methods, effective user-store assignments, persisted devices and assignment history, offline policies, and offline-grant foundation.
+- Added administration/runtime APIs under `/api/administration/mobile-pos/v1` and `/api/mobile-pos/v1`.
+- Added a permission-gated HQ page at `/administration/mobile-pos` for stores, searchable walk-in customers, tills/tenders, offline policies, device approval/revocation, and searchable user-store assignment.
+- Tenant selection now returns and persists a refresh token scoped to the selected tenant, preventing a subsequent refresh from reverting or failing against the original tenant context.
 
 ## Migrations and application state
 
-- Migrations: none created or applied.
-- Database changes: none.
-- Application runtime changes: none.
-- Deployment or service restart: none.
+- Migration created: `20261009054618_AddMobilePosFoundation`.
+- Migration tables: stores, store dimension defaults, tills, till payment methods, user-store assignments, devices, device assignment histories, offline policies, and offline grants.
+- Migration was not applied to a database.
+- No production deployment, service restart, live device enrollment, or provider call was performed.
 
 ## Verification evidence
 
@@ -74,16 +85,25 @@ This workstream begins with architecture and contract mapping. It does not autho
 - Flash committed source and incident documents were inspected at `526acb8f46e5f003b493f1807d8cbd0372a88dda`; unrelated dirty Flash working-tree files were not read as implementation evidence or modified.
 - RHEMA invoice, payment, payment-method, till, liquidity, banking, numbering, Finance-dimension, authorization, tenant, location, warehouse, device, and PWA boundaries were traced in the current source.
 - All requested A-U architecture sections, management decisions, phase gates, data contracts, API proposals, migration plan, test plan, and blockers are present in the Phase 1 report.
+- Full migration-aware API build passed with 0 errors; the build preserved 89 EF models and compiled the new migration metadata.
+- Idempotent SQL generation from `20261008192833_AddPropertySalesOrderDepositLifecycle` to `20261009054618_AddMobilePosFoundation` passed. The 28,333-byte script contains nine `CREATE TABLE` statements and the expected stores, tills, devices, policies, and migration-history marker.
+- Six focused `MobilePosFoundationTests` passed, covering unique permission catalogue entries, database-backed permission policies without role names, runtime/admin controller policy coverage, tenant-scoped unique model indexes, and required walk-in customer foreign keys.
+- Frontend TypeScript check passed. Focused ESLint passed for the Mobile POS page/service and changed route/navigation/auth files.
+- Frontend administration/access tests passed: 27 tests across the route guard, Settings registry, and navigation access helper.
+- Frontend production build passed. The generated app manifest contains `/administration/mobile-pos/page`.
+- Expo application TypeScript check passed; Expo Doctor passed 18/18 checks; Android bundle export passed.
 
 ## Known failures and constraints
 
 - The Flash ERP reference checkout is intentionally dirty. Read committed files through Git object paths and do not clean, reset, stash, or commit that checkout.
 - ZCS Z92S printer/scanner SDK artifacts and provider credentials have not yet been supplied.
-- The accounting, synchronization, and authorization contracts must be frozen before mobile runtime implementation begins.
+- Native Android keystore behavior, visible device enrollment/remote-disable flow, and physical Z92S behavior require an Android device and later acceptance stages.
+- Offline grant signing/issuance and Finance transaction orchestration are intentionally not claimed by the Phase 2 foundation.
+- The repository currently reports pre-existing ImageSharp package advisories and compiler warnings; the verified Mobile POS builds completed with zero errors.
 
 ## Remaining work
 
-Phase 1 is complete. Continue with the Phase 2 tasks in the implementation tracker, beginning with the isolated Expo workspace and the server-side permission, store, till, device-enrollment, and offline-policy foundation. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
+Complete the remaining Phase 2 acceptance evidence: focused API/service integration cases, environment and ProblemDetails contract tests, physical Android secure-storage/auth/enrollment flow, visible HQ browser verification after applying the migration in an authorized test database, and offline-grant signing/issuance. Then begin the Phase 3 canonical Finance orchestration. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
 
 ## Authorization boundaries
 

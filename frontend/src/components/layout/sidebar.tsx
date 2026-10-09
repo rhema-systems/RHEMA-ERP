@@ -4433,6 +4433,17 @@ export const navigationItems: NavItem[] = [
             icon: Building,
           },
           {
+            title: 'Mobile POS',
+            href: '/administration/mobile-pos',
+            icon: Smartphone,
+            permissions: [
+              'MobilePOS.Store.View',
+              'MobilePOS.Store.Manage',
+              'MobilePOS.Device.Approve',
+            ],
+            accessMode: 'any',
+          },
+          {
             title: 'Email Settings',
             href: '/administration/settings/email',
             icon: Mail,

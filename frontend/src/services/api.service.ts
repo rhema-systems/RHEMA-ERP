@@ -98,6 +98,7 @@ export interface SelectTenantRequest {
 
 export interface SelectTenantResponse {
   token: string;
+  refreshToken: string;
   expiresAt: string;
   user: UserInfo;
 }
@@ -849,6 +850,9 @@ class ApiService {
     // Update stored token with new tenant context
     if (response.token) {
       this.setToken(response.token);
+    }
+    if (response.refreshToken && typeof window !== 'undefined') {
+      localStorage.setItem('refreshToken', response.refreshToken);
     }
 
     return response;

@@ -61,6 +61,7 @@
     <Compile Include="Controllers\Inventory\StockMovementCurrencyTests.cs" />
     <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
     <Compile Include="Authorization\CrmPermissionAuthorizationTests.cs" />
+    <Compile Include="Authorization\MobilePosFoundationTests.cs" />
     <Compile Include="Configuration\StartupInitializationPolicyTests.cs" />
     <Compile Include="Configuration\CandidatePortalOptionsTests.cs" />
     <Compile Include="Authorization\StructuredAuthorizationMiddlewareResultHandlerTests.cs" />

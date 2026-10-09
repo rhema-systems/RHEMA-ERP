@@ -239,6 +239,14 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
   roleAccess(pathPrefix('/administration/helpdesk')),
 
   // Shared workflow, identity, tenant, security, audit and communications setup.
+  {
+    matches: pathPrefix('/administration/mobile-pos'),
+    permissions: [
+      'MobilePOS.Store.View',
+      'MobilePOS.Store.Manage',
+      'MobilePOS.Device.Approve',
+    ],
+  },
   anyAccess(
     exactPath('/administration/workflow'),
     ['procurement.workflow.configure'],

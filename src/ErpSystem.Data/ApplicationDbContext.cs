@@ -9,6 +9,7 @@ using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.MobilePos;
 using ErpSystem.Core.Entities.Numbering;
 using ErpSystem.Core.Entities.Pricing;
 using ErpSystem.Core.Entities.Procedures;
@@ -236,6 +237,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<LiquidityAccount> LiquidityAccounts { get; set; }
     public DbSet<LiquidityAccountEntry> LiquidityAccountEntries { get; set; }
     public DbSet<CashierTillSession> CashierTillSessions { get; set; }
+    public DbSet<MobilePosStore> MobilePosStores { get; set; }
+    public DbSet<MobilePosStoreDimensionDefault> MobilePosStoreDimensionDefaults { get; set; }
+    public DbSet<MobilePosTill> MobilePosTills { get; set; }
+    public DbSet<MobilePosTillPaymentMethod> MobilePosTillPaymentMethods { get; set; }
+    public DbSet<MobilePosUserStoreAssignment> MobilePosUserStoreAssignments { get; set; }
+    public DbSet<MobilePosOfflinePolicy> MobilePosOfflinePolicies { get; set; }
+    public DbSet<MobilePosDevice> MobilePosDevices { get; set; }
+    public DbSet<MobilePosDeviceAssignmentHistory> MobilePosDeviceAssignmentHistories { get; set; }
+    public DbSet<MobilePosOfflineGrant> MobilePosOfflineGrants { get; set; }
     public DbSet<CashierTillCountLine> CashierTillCountLines { get; set; }
     public DbSet<FinanceControlledDocumentIssue> FinanceControlledDocumentIssues { get; set; }
     public DbSet<BankDepositBatch> BankDepositBatches { get; set; }
@@ -1300,6 +1310,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
         builder.ApplyConfiguration(new TenantConfiguration());
         builder.ApplyConfiguration(new UserTenantConfiguration());
+        builder.ApplyConfiguration(new MobilePosStoreConfiguration());
+        builder.ApplyConfiguration(new MobilePosStoreDimensionDefaultConfiguration());
+        builder.ApplyConfiguration(new MobilePosTillConfiguration());
+        builder.ApplyConfiguration(new MobilePosTillPaymentMethodConfiguration());
+        builder.ApplyConfiguration(new MobilePosUserStoreAssignmentConfiguration());
+        builder.ApplyConfiguration(new MobilePosOfflinePolicyConfiguration());
+        builder.ApplyConfiguration(new MobilePosDeviceConfiguration());
+        builder.ApplyConfiguration(new MobilePosDeviceAssignmentHistoryConfiguration());
+        builder.ApplyConfiguration(new MobilePosOfflineGrantConfiguration());
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyEnquiryProspectConfiguration());
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyProspectDepositPolicyConfiguration());
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.ProspectDepositReceiptConfiguration());

@@ -1,0 +1,154 @@
+using ErpSystem.Api.Services.MobilePos;
+using ErpSystem.Core.DTOs.MobilePos;
+using ErpSystem.Core.Enums;
+using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace ErpSystem.Api.Controllers.MobilePos;
+
+[ApiController]
+[Authorize]
+[Route("api/mobile-pos/v1")]
+public sealed class MobilePosRuntimeController : ControllerBase
+{
+    private readonly IMobilePosFoundationService _service;
+
+    public MobilePosRuntimeController(IMobilePosFoundationService service) => _service = service;
+
+    [HttpPost("devices/enrollment-requests")]
+    [Authorize(Policy = MobilePosPermissions.EnrollDevice)]
+    public async Task<ActionResult<MobilePosDeviceDto>> RequestEnrollment(
+        [FromBody] MobilePosDeviceEnrollmentRequestDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.RequestEnrollmentAsync(dto, cancellationToken));
+
+    [HttpGet("bootstrap")]
+    [Authorize(Policy = MobilePosPermissions.Access)]
+    public async Task<ActionResult<MobilePosBootstrapDto>> Bootstrap(
+        [FromQuery] string installationId,
+        CancellationToken cancellationToken)
+        => Ok(await _service.GetBootstrapAsync(installationId, cancellationToken));
+
+    [HttpPost("heartbeat")]
+    [Authorize(Policy = MobilePosPermissions.Access)]
+    public async Task<ActionResult<MobilePosDeviceDto>> Heartbeat(
+        [FromBody] MobilePosHeartbeatDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.RecordHeartbeatAsync(dto, cancellationToken));
+}
+
+[ApiController]
+[Authorize]
+[Route("api/administration/mobile-pos/v1")]
+public sealed class MobilePosAdministrationController : ControllerBase
+{
+    private readonly IMobilePosFoundationService _service;
+
+    public MobilePosAdministrationController(IMobilePosFoundationService service) => _service = service;
+
+    [HttpGet("references")]
+    [Authorize(Policy = MobilePosPermissions.ViewStore)]
+    public async Task<ActionResult<MobilePosAdministrationReferencesDto>> GetReferences(
+        CancellationToken cancellationToken)
+        => Ok(await _service.GetAdministrationReferencesAsync(cancellationToken));
+
+    [HttpGet("stores")]
+    [Authorize(Policy = MobilePosPermissions.ViewStore)]
+    public async Task<ActionResult<IReadOnlyList<MobilePosStoreDto>>> GetStores(CancellationToken cancellationToken)
+        => Ok(await _service.GetStoresAsync(cancellationToken));
+
+    [HttpPost("stores")]
+    [Authorize(Policy = MobilePosPermissions.ManageStore)]
+    public async Task<ActionResult<MobilePosStoreDto>> CreateStore(
+        [FromBody] MobilePosStoreUpsertDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.SaveStoreAsync(null, dto, cancellationToken);
+        return CreatedAtAction(nameof(GetStores), new { id = result.Id }, result);
+    }
+
+    [HttpPut("stores/{id:guid}")]
+    [Authorize(Policy = MobilePosPermissions.ManageStore)]
+    public async Task<ActionResult<MobilePosStoreDto>> UpdateStore(
+        Guid id,
+        [FromBody] MobilePosStoreUpsertDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.SaveStoreAsync(id, dto, cancellationToken));
+
+    [HttpGet("offline-policies")]
+    [Authorize(Policy = MobilePosPermissions.ViewStore)]
+    public async Task<ActionResult<IReadOnlyList<MobilePosOfflinePolicyDto>>> GetOfflinePolicies(
+        CancellationToken cancellationToken)
+        => Ok(await _service.GetOfflinePoliciesAsync(cancellationToken));
+
+    [HttpPost("offline-policies")]
+    [Authorize(Policy = MobilePosPermissions.ManageStore)]
+    public async Task<ActionResult<MobilePosOfflinePolicyDto>> CreateOfflinePolicy(
+        [FromBody] MobilePosOfflinePolicyUpsertDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.SaveOfflinePolicyAsync(null, dto, cancellationToken));
+
+    [HttpPut("offline-policies/{id:guid}")]
+    [Authorize(Policy = MobilePosPermissions.ManageStore)]
+    public async Task<ActionResult<MobilePosOfflinePolicyDto>> UpdateOfflinePolicy(
+        Guid id,
+        [FromBody] MobilePosOfflinePolicyUpsertDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.SaveOfflinePolicyAsync(id, dto, cancellationToken));
+
+    [HttpGet("tills")]
+    [Authorize(Policy = MobilePosPermissions.ViewStore)]
+    public async Task<ActionResult<IReadOnlyList<MobilePosTillDto>>> GetTills(
+        [FromQuery] Guid? storeId,
+        CancellationToken cancellationToken)
+        => Ok(await _service.GetTillsAsync(storeId, cancellationToken));
+
+    [HttpPost("tills")]
+    [Authorize(Policy = MobilePosPermissions.ManageStore)]
+    public async Task<ActionResult<MobilePosTillDto>> CreateTill(
+        [FromBody] MobilePosTillUpsertDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.SaveTillAsync(null, dto, cancellationToken));
+
+    [HttpPut("tills/{id:guid}")]
+    [Authorize(Policy = MobilePosPermissions.ManageStore)]
+    public async Task<ActionResult<MobilePosTillDto>> UpdateTill(
+        Guid id,
+        [FromBody] MobilePosTillUpsertDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.SaveTillAsync(id, dto, cancellationToken));
+
+    [HttpPost("user-store-assignments")]
+    [Authorize(Policy = MobilePosPermissions.ManageStore)]
+    public async Task<IActionResult> SaveUserStoreAssignment(
+        [FromBody] MobilePosUserStoreAssignmentUpsertDto dto,
+        CancellationToken cancellationToken)
+    {
+        await _service.SaveUserStoreAssignmentAsync(dto, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpGet("devices")]
+    [Authorize(Policy = MobilePosPermissions.ApproveDevice)]
+    public async Task<ActionResult<IReadOnlyList<MobilePosDeviceDto>>> GetDevices(
+        [FromQuery] MobilePosDeviceStatus? status,
+        CancellationToken cancellationToken)
+        => Ok(await _service.GetDevicesAsync(status, cancellationToken));
+
+    [HttpPost("devices/{id:guid}/approve")]
+    [Authorize(Policy = MobilePosPermissions.ApproveDevice)]
+    public async Task<ActionResult<MobilePosDeviceDto>> ApproveDevice(
+        Guid id,
+        [FromBody] MobilePosDeviceApprovalDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.ApproveDeviceAsync(id, dto, cancellationToken));
+
+    [HttpPost("devices/{id:guid}/revoke")]
+    [Authorize(Policy = MobilePosPermissions.ApproveDevice)]
+    public async Task<ActionResult<MobilePosDeviceDto>> RevokeDevice(
+        Guid id,
+        [FromBody] MobilePosDeviceStatusChangeDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.RevokeDeviceAsync(id, dto, cancellationToken));
+}

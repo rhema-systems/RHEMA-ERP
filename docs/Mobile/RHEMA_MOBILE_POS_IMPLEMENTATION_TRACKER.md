@@ -57,21 +57,21 @@
 
 | ID | Work item | Status | Acceptance evidence |
 | --- | --- | --- | --- |
-| MPOS-0201 | Create isolated `apps/mobile` Expo workspace | Ready | Typecheck, Expo alignment, Android export |
-| MPOS-0202 | Metro singleton/runtime protection | Ready | One React/React Native runtime gate |
-| MPOS-0203 | Root crash boundary and sanitized diagnostics | Ready | Startup fault injection tests |
-| MPOS-0204 | Environment/server profile with HTTPS production policy | Ready | Environment identity and TLS tests |
-| MPOS-0205 | Typed API client and ProblemDetails model | Ready | Correlation/error contract tests |
-| MPOS-0206 | Secure token/install-secret storage | Ready | Keystore-backed native tests |
-| MPOS-0207 | Login, MFA, tenant select, refresh, logout state machine | Ready | Auth lifecycle tests and UI flow |
-| MPOS-0208 | Mobile POS permission catalogue and policies | Ready | Dynamic role assignment tests |
-| MPOS-0209 | Store/default-customer/dimension model | Ready | Migration plus validity/tenant tests |
-| MPOS-0210 | Till and tender mappings | Ready | Unique till and mapping tests |
-| MPOS-0211 | Effective user-store assignment | Ready | One-active-store concurrency tests |
-| MPOS-0212 | Persisted device enrollment, approval, revoke, heartbeat | Ready | Enrollment and remote-disable tests |
-| MPOS-0213 | Offline policy and grant model | Ready | Signature, expiry, limit tests |
-| MPOS-0214 | Bootstrap, dashboard shell, account, diagnostics | Ready | Real API values; no mock dashboard data |
-| MPOS-0215 | HQ Mobile POS administration UI | Ready | Browser route and permission verification |
+| MPOS-0201 | Create isolated `apps/mobile` Expo workspace | Complete | Expo 54 workspace; typecheck passed; Expo Doctor 18/18; Android export passed |
+| MPOS-0202 | Metro singleton/runtime protection | Complete | Metro pins React/React Native to the app root; Expo Doctor and Android bundle export passed |
+| MPOS-0203 | Root crash boundary and sanitized diagnostics | In progress | Root boundary and reference-only diagnostic view implemented; fault injection evidence remains |
+| MPOS-0204 | Environment/server profile with HTTPS production policy | In progress | TEST/UAT/PRODUCTION profiles and production HTTPS rejection implemented; focused environment tests remain |
+| MPOS-0205 | Typed API client and ProblemDetails model | In progress | Typed client, correlation parsing, single-flight refresh, and retry-once 401 implemented; contract tests remain |
+| MPOS-0206 | Secure token/install-secret storage | In progress | SecureStore-backed native session and install secret implemented; physical Android keystore evidence remains |
+| MPOS-0207 | Login, MFA, tenant select, refresh, logout state machine | In progress | Real auth APIs implemented; tenant switch now returns a tenant-scoped refresh token; visible device lifecycle remains |
+| MPOS-0208 | Mobile POS permission catalogue and policies | Complete | Six focused authorization/model tests pass; controller actions use dynamic `MobilePOS.*` policies without role names |
+| MPOS-0209 | Store/default-customer/dimension model | In progress | Migration, approved-customer validation, dimension defaults, and tenant indexes implemented; database integration cases remain |
+| MPOS-0210 | Till and tender mappings | In progress | CashTill and payment-method mappings with uniqueness checks and admin UI implemented; database mapping cases remain |
+| MPOS-0211 | Effective user-store assignment | In progress | Effective assignment command closes prior current assignments; concurrency integration evidence remains |
+| MPOS-0212 | Persisted device enrollment, approval, revoke, heartbeat | In progress | APIs, assignment history, revocation epoch, and admin UI implemented; live remote-disable flow remains |
+| MPOS-0213 | Offline policy and grant model | In progress | Persisted policy/grant foundation and policy UI implemented; grant signing/issuance and limit tests remain |
+| MPOS-0214 | Bootstrap, dashboard shell, account, diagnostics | In progress | Dashboard and account surfaces use real bootstrap/auth values; authenticated visible-device evidence remains |
+| MPOS-0215 | HQ Mobile POS administration UI | In progress | Permission-gated route, navigation, stores/tills/policies/devices/assignments UI, typecheck, lint, and 27 route/access tests pass; browser verification remains |
 
 ## Phase 3 - core Finance
 
