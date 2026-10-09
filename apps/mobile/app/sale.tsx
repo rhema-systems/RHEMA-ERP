@@ -12,7 +12,9 @@ import {
   View,
 } from "react-native";
 import { ApiProblem, mobileApi } from "@/src/api/client";
+import { BarcodeScannerModal } from "@/components/barcode-scanner-modal";
 import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
+import type { BarcodeScan } from "@/src/scanning/barcode";
 import { buildCompleteSaleRequest, sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
 import { useSession } from "@/src/session/session-context";
 import { getInstallationId } from "@/src/storage/secure-session";
@@ -71,6 +73,7 @@ export default function SaleScreen() {
 
   const [catalogueQuery, setCatalogueQuery] = useState("");
   const [catalogueResults, setCatalogueResults] = useState<MobilePosCatalogueItem[]>([]);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<MobilePosCustomerSearchResult[]>([]);
   const [customer, setCustomer] = useState<MobilePosCustomerSearchResult | null>(defaultCustomer);
@@ -104,8 +107,8 @@ export default function SaleScreen() {
     setError(null);
   };
 
-  const searchCatalogue = async () => {
-    const term = catalogueQuery.trim();
+  const runCatalogueSearch = async (rawTerm: string) => {
+    const term = rawTerm.trim();
     if (!term) return setError(problem("Enter an item name, code, or barcode."));
     setBusy("catalogue");
     setError(null);
@@ -116,6 +119,12 @@ export default function SaleScreen() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const acceptBarcodeScan = (scan: BarcodeScan) => {
+    setScannerOpen(false);
+    setCatalogueQuery(scan.value);
+    void runCatalogueSearch(scan.value);
   };
 
   const searchCustomers = async () => {
@@ -427,7 +436,8 @@ export default function SaleScreen() {
       )}
 
       <SectionTitle number="2" title="Items" />
-      <SearchBar label="Item name, code or barcode" value={catalogueQuery} onChangeText={setCatalogueQuery} onSearch={() => void searchCatalogue()} busy={busy === "catalogue"} />
+      <SearchBar label="Item name, code or barcode" value={catalogueQuery} onChangeText={setCatalogueQuery} onSearch={() => void runCatalogueSearch(catalogueQuery)} onScan={() => setScannerOpen(true)} busy={busy === "catalogue"} />
+      <BarcodeScannerModal visible={scannerOpen} onClose={() => setScannerOpen(false)} onScan={acceptBarcodeScan} />
       {catalogueResults.map(item => (
         <ResultRow
           key={item.inventoryItemId}
@@ -494,8 +504,8 @@ export default function SaleScreen() {
   );
 }
 
-function SearchBar({ label, value, onChangeText, onSearch, busy }: { label: string; value: string; onChangeText: (value: string) => void; onSearch: () => void; busy: boolean }) {
-  return <View style={styles.searchRow}><TextInput accessibilityLabel={label} autoCapitalize="none" onChangeText={onChangeText} onSubmitEditing={onSearch} placeholder={label} placeholderTextColor={colors.muted} returnKeyType="search" style={[styles.input, styles.searchInput]} value={value} /><Pressable disabled={busy} onPress={onSearch} style={styles.searchButton}>{busy ? <ActivityIndicator size="small" color={colors.white} /> : <Ionicons name="search" size={19} color={colors.white} />}</Pressable></View>;
+function SearchBar({ label, value, onChangeText, onSearch, onScan, busy }: { label: string; value: string; onChangeText: (value: string) => void; onSearch: () => void; onScan?: () => void; busy: boolean }) {
+  return <View style={styles.searchRow}><TextInput accessibilityLabel={label} autoCapitalize="none" onChangeText={onChangeText} onSubmitEditing={onSearch} placeholder={label} placeholderTextColor={colors.muted} returnKeyType="search" style={[styles.input, styles.searchInput]} value={value} />{onScan && <Pressable accessibilityLabel="Open camera barcode scanner" disabled={busy} onPress={onScan} style={styles.scanButton}><Ionicons name="barcode-outline" size={21} color={colors.blue} /></Pressable>}<Pressable disabled={busy} onPress={onSearch} style={styles.searchButton}>{busy ? <ActivityIndicator size="small" color={colors.white} /> : <Ionicons name="search" size={19} color={colors.white} />}</Pressable></View>;
 }
 
 function ResultRow({ title, detail, onPress, disabled = false }: { title: string; detail: string; onPress: () => void; disabled?: boolean }) {
@@ -562,6 +572,7 @@ const styles = StyleSheet.create({
   input: { minHeight: 46, marginTop: 9, paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, fontSize: 14 },
   searchInput: { flex: 1, marginTop: 0 },
   searchButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: colors.blue },
+  scanButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: "#B2CCFF", backgroundColor: colors.white },
   resultRow: { minHeight: 66, marginTop: 8, flexDirection: "row", alignItems: "center", padding: 13, borderRadius: 13, backgroundColor: colors.white, borderWidth: 1, borderColor: "#EAECF0" },
   lineTitle: { color: colors.ink, fontSize: 13, fontWeight: "700" },
   cartLine: { marginTop: 8, flexDirection: "row", alignItems: "center", padding: 13, borderRadius: 14, backgroundColor: colors.white, borderWidth: 1, borderColor: "#EAECF0" },

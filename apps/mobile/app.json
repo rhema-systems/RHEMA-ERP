@@ -26,7 +26,14 @@
           }
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow RHEMA Field POS to scan product barcodes.",
+          "recordAudioAndroid": false
+        }
+      ]
     ],
     "android": {
       "package": "com.rhemasystems.fieldpos",
