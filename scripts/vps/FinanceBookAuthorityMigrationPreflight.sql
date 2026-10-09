@@ -1,5 +1,5 @@
--- Read-only Up preconditions for the 20260930000100 through
--- 20260930000600 Finance book-authority migration chain.
+-- Read-only Up preconditions for the Finance book-authority migration chain,
+-- including the 20261009163000 evidence-trigger origin alignment.
 -- Only table variables are written. The checks reject missing prerequisites,
 -- partial pending schema and the explicit source-authority schema collision.
 SET NOCOUNT ON;
@@ -25,7 +25,8 @@ EXEC sys.sp_executesql N'
         N''20260930000300_LeaseInstalmentApOpenItems'',
         N''20260930000400_FinanceSourceBookAuthority'',
         N''20260930000500_AddFinanceSourceBookAuthorityCallerBindings'',
-        N''20260930000600_AddCapitalizationLineage''
+        N''20260930000600_AddCapitalizationLineage'',
+        N''20261009163000_AlignSourceBookAuthorityJournalOrigin''
     );';
 
 IF NOT EXISTS (SELECT 1 FROM @Applied WHERE MigrationId=N'20260930000100_YearEndBookCloseCycles')
@@ -170,6 +171,25 @@ BEGIN
         INSERT @Checks VALUES(N'FinanceBookAuthority.Capitalization.RequiredIndexMissing:IX_CapitalProjects_TenantId', 1);
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.ProjectCostLines') AND name=N'IX_ProjectCostLines_TenantId')
         INSERT @Checks VALUES(N'FinanceBookAuthority.Capitalization.RequiredIndexMissing:IX_ProjectCostLines_TenantId', 1);
+END;
+
+IF NOT EXISTS (SELECT 1 FROM @Applied WHERE MigrationId=N'20261009163000_AlignSourceBookAuthorityJournalOrigin')
+   AND EXISTS (SELECT 1 FROM @Applied WHERE MigrationId=N'20260930000500_AddFinanceSourceBookAuthorityCallerBindings')
+BEGIN
+    -- This migration replaces an existing evidence-trigger definition. Its only
+    -- new database dependency is the explicit journal producer-origin column;
+    -- the source-module coordinate remains the legacy fallback.
+    IF OBJECT_ID(N'dbo.FinanceSourceBookAuthorities', N'U') IS NULL
+        INSERT @Checks VALUES(N'FinanceBookAuthority.JournalOrigin.RequiredTableMissing:FinanceSourceBookAuthorities', 1);
+    IF OBJECT_ID(N'dbo.JournalEntries', N'U') IS NULL
+        INSERT @Checks VALUES(N'FinanceBookAuthority.JournalOrigin.RequiredTableMissing:JournalEntries', 1);
+    ELSE
+    BEGIN
+        IF COL_LENGTH(N'dbo.JournalEntries', N'OriginModuleCode') IS NULL
+            INSERT @Checks VALUES(N'FinanceBookAuthority.JournalOrigin.RequiredColumnMissing:JournalEntries.OriginModuleCode', 1);
+        IF COL_LENGTH(N'dbo.JournalEntries', N'SourceModule') IS NULL
+            INSERT @Checks VALUES(N'FinanceBookAuthority.JournalOrigin.RequiredColumnMissing:JournalEntries.SourceModule', 1);
+    END;
 END;
 
 SELECT CheckName,AffectedRows FROM @Checks WHERE AffectedRows>0 ORDER BY CheckName;
