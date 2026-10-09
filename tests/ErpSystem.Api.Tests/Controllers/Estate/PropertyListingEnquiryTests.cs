@@ -1025,6 +1025,165 @@ public sealed class PropertyListingEnquiryTests
     }
 
     [Fact]
+    public async Task MyPropertiesIncludesPriorSalesBillAndReceiptForSameParcel()
+    {
+        await using var db = Database();
+        var customer = new BusinessPartner
+        {
+            TenantId = tenantId,
+            PartnerCode = "CUS-BILL-076",
+            PartnerName = "Ikea Customer",
+            PartnerType = "Customer",
+            CustomerAccountNumber = "CUS-BILL-076",
+            UserId = userId,
+            IsActive = true,
+            ApprovalStatus = "Approved"
+        };
+        var parcel = new EstateManagedAsset
+        {
+            TenantId = tenantId,
+            AssetCode = "LAND-076",
+            ProjectUnitCode = "PLOT-076",
+            Name = "Bill 76",
+            AssetType = EstateManagedAssetType.Land,
+            Status = EstateManagedAssetStatus.Sold,
+            Location = "Accra",
+            CustomerBusinessPartnerId = customer.Id,
+            ExternalListingType = "Sale",
+            ExternalListingCurrency = "GHS"
+        };
+        var salesInvoice = new Invoice
+        {
+            TenantId = tenantId,
+            InvoiceNumber = "INV-SALES-076",
+            BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = Guid.NewGuid(),
+            BusinessPartnerArProfileVersionId = Guid.NewGuid(),
+            BusinessPartnerCode = customer.PartnerCode,
+            CustomerName = customer.PartnerName,
+            InvoiceDate = DateTime.UtcNow.Date.AddDays(-10),
+            TotalAmount = 500000m,
+            PaidAmount = 500000m,
+            CurrencyCode = "GHS",
+            Status = InvoiceStatus.Paid,
+            Reference = "SO-BILL-076",
+            Notes = "Source: Sales"
+        };
+        var estateInvoice = new Invoice
+        {
+            TenantId = tenantId,
+            InvoiceNumber = "INV-ESTATE-076",
+            BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = Guid.NewGuid(),
+            BusinessPartnerArProfileVersionId = Guid.NewGuid(),
+            BusinessPartnerCode = customer.PartnerCode,
+            CustomerName = customer.PartnerName,
+            InvoiceDate = DateTime.UtcNow.Date,
+            TotalAmount = 120000m,
+            PaidAmount = 120000m,
+            CurrencyCode = "GHS",
+            Status = InvoiceStatus.Paid,
+            Reference = "ESTATE-BILL-076",
+            Notes = "Source: Estate / Property Management -> Finance AR"
+        };
+        var unrelatedSalesInvoice = new Invoice
+        {
+            TenantId = tenantId,
+            InvoiceNumber = "INV-SALES-OTHER",
+            BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = Guid.NewGuid(),
+            BusinessPartnerArProfileVersionId = Guid.NewGuid(),
+            BusinessPartnerCode = customer.PartnerCode,
+            CustomerName = customer.PartnerName,
+            InvoiceDate = DateTime.UtcNow.Date.AddDays(-5),
+            TotalAmount = 300000m,
+            PaidAmount = 300000m,
+            CurrencyCode = "GHS",
+            Status = InvoiceStatus.Paid,
+            Reference = "SO-OTHER",
+            Notes = "Source: Sales"
+        };
+        var salesOrder = new SalesOrder
+        {
+            TenantId = tenantId,
+            DocumentNumber = "SO-BILL-076",
+            BusinessPartnerId = customer.Id,
+            CustomerName = customer.PartnerName,
+            PropertyReference = parcel.AssetCode,
+            OrderStatus = SalesOrderStatus.Closed,
+            TotalAmount = salesInvoice.TotalAmount,
+            Currency = "GHS",
+            InvoiceId = salesInvoice.Id
+        };
+        var unrelatedOrder = new SalesOrder
+        {
+            TenantId = tenantId,
+            DocumentNumber = "SO-OTHER",
+            BusinessPartnerId = customer.Id,
+            CustomerName = customer.PartnerName,
+            PropertyReference = "LAND-OTHER",
+            OrderStatus = SalesOrderStatus.Closed,
+            TotalAmount = unrelatedSalesInvoice.TotalAmount,
+            Currency = "GHS",
+            InvoiceId = unrelatedSalesInvoice.Id
+        };
+        var salesLine = new InvoiceLineItem
+        {
+            TenantId = tenantId,
+            InvoiceId = salesInvoice.Id,
+            Description = "Sales bill for LAND-076",
+            Quantity = 1,
+            UnitPrice = salesInvoice.TotalAmount
+        };
+        var payment = new CustomerPayment
+        {
+            TenantId = tenantId,
+            PaymentNumber = "RCT-SALES-076",
+            BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = Guid.NewGuid(),
+            BusinessPartnerArProfileVersionId = Guid.NewGuid(),
+            BusinessPartnerCode = customer.PartnerCode,
+            BusinessPartnerName = customer.PartnerName,
+            PaymentDate = DateTime.UtcNow.Date.AddDays(-9),
+            TotalAmount = salesInvoice.PaidAmount,
+            AllocatedAmount = salesInvoice.PaidAmount,
+            CurrencyCode = "GHS",
+            PaymentMethod = "BankTransfer",
+            TransactionReference = "BANK-SALES-076",
+            Status = "Approved"
+        };
+        var allocation = new PaymentAllocation
+        {
+            TenantId = tenantId,
+            CustomerPaymentId = payment.Id,
+            CustomerPayment = payment,
+            InvoiceId = salesInvoice.Id,
+            Invoice = salesInvoice,
+            AllocatedAmount = salesInvoice.PaidAmount,
+            PaymentCurrencyAmount = salesInvoice.PaidAmount,
+            InvoiceCurrencyCode = "GHS",
+            PaymentCurrencyCode = "GHS"
+        };
+        db.AddRange(customer, parcel, salesInvoice, estateInvoice, unrelatedSalesInvoice, salesOrder,
+            unrelatedOrder, salesLine, payment, allocation);
+        await db.SaveChangesAsync();
+
+        var result = Assert.IsType<OkObjectResult>(await Controller(db, new Mock<IEhcTicketService>()).GetMyProperties(default));
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(result.Value));
+        var invoices = document.RootElement.GetProperty("data").GetProperty("Invoices").EnumerateArray().ToList();
+
+        Assert.Contains(invoices, item => item.GetProperty("InvoiceNumber").GetString() == "INV-ESTATE-076");
+        var matchedSalesInvoice = Assert.Single(invoices, item => item.GetProperty("InvoiceNumber").GetString() == "INV-SALES-076");
+        Assert.DoesNotContain(invoices, item => item.GetProperty("InvoiceNumber").GetString() == "INV-SALES-OTHER");
+        Assert.Equal(620000m, invoices.Sum(item => item.GetProperty("PaidAmount").GetDecimal()));
+        Assert.Equal("Sales bill for LAND-076", matchedSalesInvoice.GetProperty("Description").GetString());
+
+        var receipt = Assert.Single(matchedSalesInvoice.GetProperty("Receipts").EnumerateArray());
+        Assert.Equal("RCT-SALES-076", receipt.GetProperty("PaymentNumber").GetString());
+        Assert.Equal("BANK-SALES-076", receipt.GetProperty("TransactionReference").GetString());
+    }
+
+    [Fact]
     public async Task EstateHandoffRequiresClosedWonOpportunity()
     {
         await using var db = Database();

@@ -198,6 +198,11 @@
         {
           "id": "20260930000600_AddCapitalizationLineage",
           "sourceSha256": "EE2BE207977293AB566645626C02B1629ADC273597B0ADE2CC1F93D74A874506"
+        },
+        {
+          "id": "20261009163000_AlignSourceBookAuthorityJournalOrigin",
+          "sourceSha256": "DBF6465E7B3C4DF9CE54A8DEC5B4797347605FEA9EFBE2A349509A9EABD412C4",
+          "guardKind": "trigger-definition"
         }
       ]
     },

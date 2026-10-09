@@ -32,7 +32,7 @@ public sealed partial class FinanceSourceBookAuthorityService
             ?? throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_LEGACY_JOURNAL_MISSING: retained journal was not found.");
         if (!string.Equals(journal.PostingStatus, "Posted", StringComparison.OrdinalIgnoreCase) ||
             journal.ReplicatedFromJournalEntryId.HasValue || journal.IsReversed || journal.ReversalJournalEntryId.HasValue ||
-            !SameOriginModule(journal.SourceModule, source.OriginModuleCode) ||
+            !SameOriginModule(journal.SourceModule, journal.OriginModuleCode, source.OriginModuleCode) ||
             journal.SourceDocumentId != source.SourceDocumentId || !SameNormalized(journal.SourceDocumentType, source.SourceDocumentType))
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_LEGACY_JOURNAL_INVALID: journal must be posted, non-replica, unreversed, and exact-source.");
         var eventQuery = _db.FinancePostingEvents.AsNoTracking().Where(item =>
@@ -150,7 +150,7 @@ public sealed partial class FinanceSourceBookAuthorityService
         if (!SameNormalized(postingEvent.SourceDocumentType, authority.SourceDocumentType) ||
             !SameNormalized(postingEvent.PostingAction, authority.PostingAction) ||
             FinanceModuleLockCatalog.ResolveOriginModuleCode(postingEvent.SourceModule, postingEvent.OriginModuleCode) != authority.OriginModuleCode ||
-            !SameOriginModule(journal.SourceModule, authority.OriginModuleCode) ||
+            !SameOriginModule(journal.SourceModule, journal.OriginModuleCode, authority.OriginModuleCode) ||
             journal.SourceDocumentId != authority.SourceDocumentId || !SameNormalized(journal.SourceDocumentType, authority.SourceDocumentType) ||
             postingEvent.AccountingBookId != authority.AccountingBookId || journal.AccountingBookId != authority.AccountingBookId ||
             postingEvent.BookClassification != authority.AccountingBookCode || journal.BookClassification != authority.AccountingBookCode ||

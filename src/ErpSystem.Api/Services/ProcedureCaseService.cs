@@ -138,13 +138,19 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         string? entityType,
         bool mineOnly,
         int page,
-        int pageSize)
+        int pageSize,
+        string? search = null,
+        string? status = null,
+        string? stage = null,
+        string? requestType = null,
+        string? workflowMode = null)
     {
         var tenantId = RequireTenantId();
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 50);
 
         var query = BuildProcedureCaseListQuery(tenantId, module, entityType);
+        query = ApplyProcedureCaseFilters(query, search, status, stage, requestType, workflowMode);
         var visiblePage = await LoadVisibleProcedureCasesPageAsync(query, mineOnly, page, pageSize);
 
         return new CommonPagedResult
@@ -154,6 +160,81 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             Page = page,
             PageSize = pageSize
         };
+    }
+
+    private static IQueryable<ProcedureCase> ApplyProcedureCaseFilters(
+        IQueryable<ProcedureCase> query,
+        string? search,
+        string? status,
+        string? stage,
+        string? requestType,
+        string? workflowMode)
+    {
+        var searchTerm = NormalizeFilterValue(search);
+        if (searchTerm is not null)
+        {
+            query = query.Where(item =>
+                item.Title.ToLower().Contains(searchTerm)
+                || (item.ReferenceNumber != null && item.ReferenceNumber.ToLower().Contains(searchTerm))
+                || (item.ApplicantName != null && item.ApplicantName.ToLower().Contains(searchTerm))
+                || (item.SourceDepartment != null && item.SourceDepartment.ToLower().Contains(searchTerm))
+                || item.CurrentStageName.ToLower().Contains(searchTerm)
+                || item.Status.ToLower().Contains(searchTerm)
+                || item.Fields.Any(field => !field.IsDeleted
+                    && field.Value != null
+                    && field.Value.ToLower().Contains(searchTerm)));
+        }
+
+        var statusTerm = NormalizeFilterValue(status);
+        if (statusTerm is not null)
+        {
+            query = query.Where(item => item.Status.ToLower() == statusTerm);
+        }
+
+        var stageTerm = NormalizeFilterValue(stage);
+        if (stageTerm is not null)
+        {
+            query = query.Where(item => item.CurrentStageName.ToLower() == stageTerm);
+        }
+
+        var requestTypeTerm = NormalizeFilterValue(requestType);
+        if (requestTypeTerm is not null)
+        {
+            query = query.Where(item =>
+                item.Title.ToLower().Contains(requestTypeTerm)
+                || item.Fields.Any(field => !field.IsDeleted
+                    && field.Value != null
+                    && (field.Key == "requestType"
+                        || field.Key == "listingType"
+                        || field.Key == "transactionType"
+                        || field.Key == "applicationType"
+                        || field.Key == "listingRecordType")
+                    && field.Value.ToLower().Contains(requestTypeTerm)));
+        }
+
+        var workflowTerm = NormalizeFilterValue(workflowMode);
+        if (workflowTerm == "configured")
+        {
+            query = query.Where(item => item.WorkflowDefinitionId.HasValue);
+        }
+        else if (workflowTerm == "manual")
+        {
+            query = query.Where(item => !item.WorkflowDefinitionId.HasValue);
+        }
+
+        return query;
+    }
+
+    private static string? NormalizeFilterValue(string? value)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized)
+            || string.Equals(normalized, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return normalized.ToLowerInvariant();
     }
 
     public async Task<IReadOnlyList<ProcedureCaseSubmissionDocumentRequirementDto>> GetSubmissionDocumentRequirementsAsync(
@@ -205,6 +286,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .AsNoTracking()
             .Include(item => item.OrganizationLevel)
             .Include(item => item.OrganizationUnit)
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
             .Where(item => item.TenantId == tenantId && !item.IsDeleted);
 
         if (!string.IsNullOrWhiteSpace(module))
@@ -2322,6 +2404,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     {
         if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "propertyUnit")))
             throw new InvalidOperationException("Select a property before creating the maintenance handoff.");
+        if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "issueType")))
+            throw new InvalidOperationException("Record the issue type before creating the maintenance handoff.");
         if (string.IsNullOrWhiteSpace(FirstNonBlank(FieldValue(procedureCase, "issueDescription"), procedureCase.Description)))
             throw new InvalidOperationException("Record the customer's problem description before creating the maintenance handoff.");
         if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "handoffDescription")))
@@ -2334,6 +2418,13 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             throw new InvalidOperationException("Select a Maintenance type before creating the maintenance handoff.");
         if (!new[] { "Low", "Medium", "High" }.Contains(FieldValue(procedureCase, "priority")?.Trim(), StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Select Low, Medium, or High priority before creating the maintenance handoff.");
+        var issueDecision = FieldValue(procedureCase, "issueDecision")?.Trim();
+        if (!IsFacilitiesMaintenanceIssueDecision(issueDecision))
+            throw new InvalidOperationException("Select whether the issue will be handled internally or by an external supplier before creating the maintenance handoff.");
+        if (IsExternalSupplierIssueDecision(issueDecision)
+            && (!Guid.TryParse(FieldValue(procedureCase, "serviceProviderBusinessPartnerId"), out _)
+                || !Guid.TryParse(FieldValue(procedureCase, "serviceProviderContractId"), out _)))
+            throw new InvalidOperationException("Select an approved external service provider and active contract before creating the maintenance handoff.");
     }
 
     internal static async Task EnsureFacilitiesMaintenancePropertyForIntakeAsync(
@@ -2353,6 +2444,14 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             throw new InvalidOperationException("Select a property from the Estate property register before creating the maintenance case.");
         }
 
+        var issueType = fieldValues is not null && fieldValues.TryGetValue("issueType", out var issueTypeValue)
+            ? issueTypeValue
+            : null;
+        if (string.IsNullOrWhiteSpace(issueType))
+        {
+            throw new InvalidOperationException("Record the issue type before creating the maintenance case.");
+        }
+
         var matches = await db.EstateManagedAssets.AsNoTracking().AnyAsync(asset =>
             asset.TenantId == tenantId && asset.Id == assetId && !asset.IsDeleted
             && (asset.AssetCode == propertyUnit || asset.ProjectUnitCode == propertyUnit));
@@ -2361,6 +2460,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             throw new InvalidOperationException("The selected Estate property does not match this maintenance case. Select the property again.");
         }
     }
+
+    private static bool IsFacilitiesMaintenanceIssueDecision(string? value)
+        => IsInternalMaintenanceIssueDecision(value) || IsExternalSupplierIssueDecision(value);
+
+    private static bool IsInternalMaintenanceIssueDecision(string? value)
+        => string.Equals(value?.Trim(), "InternalMaintenance", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsExternalSupplierIssueDecision(string? value)
+        => string.Equals(value?.Trim(), "ExternalSupplier", StringComparison.OrdinalIgnoreCase);
 
     private async Task CreateMaintenanceJobCardForFacilitiesHandoffAsync(
         ProcedureCase procedureCase,
@@ -2447,11 +2555,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             ? parsedCustomerId
             : (Guid?)null;
 
-        var providerSelection = await new FacilitiesProviderSelectionService(_db).ResolveAsync(
-            tenantId,
-            FieldValue(procedureCase, "serviceProviderBusinessPartnerId"),
-            FieldValue(procedureCase, "serviceProviderContractId"),
-            now);
+        var issueDecision = FieldValue(procedureCase, "issueDecision")?.Trim();
+        var isExternalSupplier = IsExternalSupplierIssueDecision(issueDecision);
+        var providerSelection = isExternalSupplier
+            ? await new FacilitiesProviderSelectionService(_db).ResolveAsync(
+                tenantId,
+                FieldValue(procedureCase, "serviceProviderBusinessPartnerId"),
+                FieldValue(procedureCase, "serviceProviderContractId"),
+                now)
+            : null;
 
         var createdJobCard = await _jobCardService.CreateJobCardAsync(new CreateJobCardDto
         {
@@ -2462,7 +2574,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             MaintenanceTypeId = maintenanceType.Id,
             PriorityLevelId = priorityLevel.Id,
             CustomerBusinessPartnerId = customerBusinessPartnerId,
-            MaintenanceLocation = "External",
+            MaintenanceLocation = isExternalSupplier ? "External" : "Internal",
             RequiredCompletionDate = targetDate,
             EstimatedHours = double.Parse(FieldValue(procedureCase, "estimatedHours")!, CultureInfo.InvariantCulture),
             EstimatedCost = decimal.Parse(FieldValue(procedureCase, "estimatedCost")!, CultureInfo.InvariantCulture),
@@ -2485,6 +2597,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 ["handoffDescription"] = handoffDescription ?? string.Empty,
                 ["accessInstructions"] = accessInstructions,
                 ["issueType"] = issueType,
+                ["issueDecision"] = issueDecision ?? string.Empty,
                 ["serviceImpact"] = serviceImpact,
                 ["serviceProviderBusinessPartnerId"] = providerSelection?.Provider.Id.ToString() ?? string.Empty,
                 ["serviceProviderContractId"] = providerSelection?.Contract.Id.ToString() ?? string.Empty,
@@ -3743,13 +3856,56 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                         .ToList();
                 }
 
-                return configuredRequiredFields;
+                return configuredRequiredFields
+                    .Concat(GetRequiredFacilitiesMaintenanceStageFieldKeys(procedureCase))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
             }
         }
 
-        return IsPropertyManagementListingApplication(procedureCase)
-            ? GetRequiredPropertyListingStageFieldKeys(procedureCase)
-            : [];
+        if (IsPropertyManagementListingApplication(procedureCase))
+        {
+            return GetRequiredPropertyListingStageFieldKeys(procedureCase);
+        }
+
+        return GetRequiredFacilitiesMaintenanceStageFieldKeys(procedureCase);
+    }
+
+    private static IReadOnlyList<string> GetRequiredFacilitiesMaintenanceStageFieldKeys(ProcedureCase procedureCase)
+    {
+        if (!string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        if (string.Equals(procedureCase.CurrentStageName, "Facilities Intake", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["propertyUnit", "issueType", "issueDescription"];
+        }
+
+        if (string.Equals(procedureCase.CurrentStageName, "Maintenance Handoff Review", StringComparison.OrdinalIgnoreCase))
+        {
+            var required = new List<string>
+            {
+                "priority",
+                "maintenanceTypeId",
+                "handoffDescription",
+                "estimatedHours",
+                "estimatedCost",
+                "issueDecision"
+            };
+
+            if (IsExternalSupplierIssueDecision(FieldValue(procedureCase, "issueDecision")))
+            {
+                required.Add("serviceProviderBusinessPartnerId");
+                required.Add("serviceProviderContractId");
+            }
+
+            return required;
+        }
+
+        return [];
     }
 
     private static IReadOnlyList<string> GetRequiredPropertyListingStageFieldKeys(ProcedureCase procedureCase)
@@ -3800,6 +3956,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.None,
                 out _);
+        }
+
+        if (string.Equals(key, "issueDecision", StringComparison.OrdinalIgnoreCase))
+        {
+            return IsFacilitiesMaintenanceIssueDecision(value);
         }
 
         return true;
@@ -6379,7 +6540,19 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             OrganizationLevelId = procedureCase.OrganizationLevelId,
             OrganizationLevelName = procedureCase.OrganizationLevel?.Name,
             OrganizationUnitId = procedureCase.OrganizationUnitId,
-            OrganizationUnitName = procedureCase.OrganizationUnit?.Name
+            OrganizationUnitName = procedureCase.OrganizationUnit?.Name,
+            SubmittedByName = procedureCase.CreatedBy,
+            SubmittedAt = procedureCase.CreatedAt,
+            FieldValues = procedureCase.Fields
+                .Where(field => !field.IsDeleted)
+                .GroupBy(field => field.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .OrderByDescending(field => field.UpdatedAt ?? field.CreatedAt)
+                        .Select(field => field.Value)
+                        .FirstOrDefault(),
+                    StringComparer.OrdinalIgnoreCase)
         };
 
     private async Task<ProcedureCaseDetailDto> ToDetailDtoAsync(ProcedureCase procedureCase)
@@ -6390,8 +6563,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             && string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var seed in BuildFacilitiesSeed(procedureCase.EntityType).Fields
-                .Where(item => new[] { "maintenanceTypeId", "handoffDescription", "estimatedHours", "estimatedCost" }
-                    .Contains(item.Key, StringComparer.OrdinalIgnoreCase)))
+                .Where(item => currentStageFieldKeys.Contains(item.Key, StringComparer.OrdinalIgnoreCase)))
             {
                 if (fields.All(item => !string.Equals(item.Key, seed.Key, StringComparison.OrdinalIgnoreCase)))
                     fields.Add(new ProcedureCaseFieldDto(Guid.NewGuid(), seed.Key, seed.Label, seed.FieldType, null, seed.Options));
@@ -6457,7 +6629,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             OrganizationLevelId = procedureCase.OrganizationLevelId,
             OrganizationLevelName = procedureCase.OrganizationLevel?.Name,
             OrganizationUnitId = procedureCase.OrganizationUnitId,
-            OrganizationUnitName = procedureCase.OrganizationUnit?.Name
+            OrganizationUnitName = procedureCase.OrganizationUnit?.Name,
+            SubmittedByName = procedureCase.CreatedBy,
+            SubmittedAt = procedureCase.CreatedAt
         };
     }
 
@@ -6703,7 +6877,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         if (!string.Equals(procedureCase.CurrentStageName, "Maintenance Handoff Review", StringComparison.OrdinalIgnoreCase))
             return configuredFields;
 
-        return configuredFields.Concat(["priority", "maintenanceTypeId", "handoffDescription", "estimatedHours", "estimatedCost", "serviceProviderBusinessPartnerId", "serviceProviderContractId"])
+        return configuredFields.Concat(["priority", "maintenanceTypeId", "handoffDescription", "estimatedHours", "estimatedCost", "issueDecision", "serviceProviderBusinessPartnerId", "serviceProviderContractId"])
             .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 

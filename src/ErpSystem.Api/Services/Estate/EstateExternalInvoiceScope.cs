@@ -7,9 +7,11 @@ public static class EstateExternalInvoiceScope
     public static IQueryable<Invoice> ForCustomerProperties(
         this IQueryable<Invoice> source,
         Guid tenantId,
-        IReadOnlyCollection<Guid> customerIds)
+        IReadOnlyCollection<Guid> customerIds,
+        IReadOnlyCollection<Guid>? linkedSalesInvoiceIds = null)
     {
         var ids = customerIds.ToArray();
+        var salesInvoiceIds = linkedSalesInvoiceIds?.ToArray() ?? [];
         return source.Where(invoice => invoice.TenantId == tenantId
             && !invoice.IsDeleted
             && ids.Contains(invoice.BusinessPartnerId)
@@ -19,6 +21,7 @@ public static class EstateExternalInvoiceScope
                 || invoice.Status == InvoiceStatus.Overdue)
             && ((invoice.Reference != null && invoice.Reference.StartsWith("RENT-"))
                 || (invoice.Reference != null && invoice.Reference.StartsWith("LEGAL-TRANSFER-FEE-"))
+                || salesInvoiceIds.Contains(invoice.Id)
                 || (invoice.Notes != null
                     && (invoice.Notes.Contains("Estate / Property Management")
                         || invoice.Notes.Contains("Estate / Facilities")))));

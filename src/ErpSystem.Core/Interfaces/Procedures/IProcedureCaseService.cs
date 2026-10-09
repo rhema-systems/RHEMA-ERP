@@ -7,7 +7,17 @@ public interface IProcedureCaseService
 {
     Task<IReadOnlyList<ProcedureCaseSummaryDto>> GetCasesAsync(string? module, string? entityType, bool mineOnly);
     Task<IReadOnlyList<ProcedureCaseSummaryDto>> SearchCasesAsync(string module, string search, int take, CancellationToken cancellationToken = default);
-    Task<PagedResult<ProcedureCaseSummaryDto>> GetCasesPageAsync(string? module, string? entityType, bool mineOnly, int page, int pageSize);
+    Task<PagedResult<ProcedureCaseSummaryDto>> GetCasesPageAsync(
+        string? module,
+        string? entityType,
+        bool mineOnly,
+        int page,
+        int pageSize,
+        string? search = null,
+        string? status = null,
+        string? stage = null,
+        string? requestType = null,
+        string? workflowMode = null);
     Task<IReadOnlyList<ProcedureCaseSubmissionDocumentRequirementDto>> GetSubmissionDocumentRequirementsAsync(string module, string entityType);
     Task<ProcedureCaseDetailDto?> GetCaseAsync(Guid id);
     Task<ProcedureCaseDetailDto> CreateCaseAsync(CreateProcedureCaseRequest request);
