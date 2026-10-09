@@ -57,6 +57,7 @@ Resolve the UAT `PROFILE_EFFECTIVE_PERIOD_OVERLAP` failure when approving a late
 - PASS: `git diff --check`.
 - PASS: BOOKV2 post-migration checks retained 48 users (including one active `admin`) and 13 business partners; migration history reached `20261007191000_SeedCrmAndSalesPermissionCatalogues`; representative new columns/nullability checks passed.
 - PASS: restarted local API from this worktree on port 5050; `/health/live` and the database/startup readiness components are healthy.
+- PASS: local `admin` authentication against the restarted BOOKV2-backed API returned a token; the verification session was immediately logged out with HTTP 200.
 - ENVIRONMENT: aggregate `/health/ready` remains HTTP 503 only because the separately configured `file-virus-scanner` readiness check is unhealthy; database and startup checks are healthy.
 - EXISTING DATA WARNING: startup reconciliation logged tenant-mismatch failures for orphaned exchange-rate workflows and one recurring-journal workflow. The API remained running; no repair of those records was authorized or attempted.
 - EXPECTED/UNRELATED: broader `BusinessPartnerPostingDefaultsTests` filter produced 42 passes and one existing `PostingOptionsExposeOnlyCurrentTenantActiveCatalogueMetadata` null-reference failure in `BusinessPartnerService.GetPostingOptionsAsync`.
