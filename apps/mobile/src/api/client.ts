@@ -11,6 +11,8 @@ import type {
   MobilePosBootstrap,
   MobilePosDevice,
   MobilePosOfflineGrant,
+  MobilePosCustomerSearchResult,
+  OutstandingInvoice,
   SelectTenantResponse,
   UserInfo,
 } from "@/src/types/api";
@@ -155,6 +157,12 @@ export const mobileApi = {
   issueOfflineGrant: (installationId: string) => authorizedRequest<MobilePosOfflineGrant>(
     "/api/mobile-pos/v1/offline-grants",
     { method: "POST", body: JSON.stringify({ installationId }) },
+  ),
+  searchCustomers: (installationId: string, search: string, limit = 20) => authorizedRequest<MobilePosCustomerSearchResult[]>(
+    `/api/mobile-pos/v1/customers/search?installationId=${encodeURIComponent(installationId)}&q=${encodeURIComponent(search)}&limit=${limit}`,
+  ),
+  getOutstandingInvoices: (installationId: string, customer: MobilePosCustomerSearchResult) => authorizedRequest<OutstandingInvoice[]>(
+    `/api/mobile-pos/v1/customers/${encodeURIComponent(customer.businessPartnerId)}/outstanding-invoices?businessPartnerRoleId=${encodeURIComponent(customer.businessPartnerRoleId)}&installationId=${encodeURIComponent(installationId)}`,
   ),
   requestEnrollment: (request: DeviceEnrollmentRequest) => authorizedRequest<MobilePosDevice>(
     "/api/mobile-pos/v1/devices/enrollment-requests",

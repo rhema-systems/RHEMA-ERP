@@ -4,7 +4,7 @@
 
 Audit the committed Flash ERP Android mobile application and the current RHEMA ERP Finance, AR, payment, till, security, tenant, location, and offline capabilities. Produce an implementation-ready architecture and phased delivery plan for the RHEMA Field POS and Revenue Collection mobile application. The plan must incorporate the management policies recorded in `C:\Users\USER\Desktop\Mobile app.docx`, including per-store default walk-in customers.
 
-The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. It does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
+The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. The Phase 3 read slice adds governed approved-customer search, automatic store default-customer resolution, and canonical outstanding-invoice lookup. It does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
 
 ## Branch and worktree
 
@@ -74,6 +74,14 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Added a permission-gated HQ page at `/administration/mobile-pos` for stores, searchable walk-in customers, tills/tenders, offline policies, device approval/revocation, and searchable user-store assignment.
 - Tenant selection now returns and persists a refresh token scoped to the selected tenant, preventing a subsequent refresh from reverting or failing against the original tenant context.
 
+## Phase 3 Finance read slice
+
+- Added dynamic `MobilePOS.Customer.View` authorization for customer search and outstanding-invoice access without restricting role names.
+- Added a central eligible-customer query requiring tenant scope, active/effective Customer role, active and non-blacklisted Business Partner, approved/active registration, approved Business Partner status, and an effective approved AR profile.
+- Blank customer search resolves only the active store's mapped default walk-in customer. A typed search returns matching approved transaction-ready customers and marks the store default.
+- Added a device/store/till-scoped mobile Customers and balances screen. Operators may search approved customers and inspect their outstanding invoices; users without the permission receive an explicit disabled state.
+- Outstanding invoices delegate to the existing canonical `IPaymentService` query after the selected customer and role pass the Mobile POS eligibility boundary.
+
 ## Migrations and application state
 
 - Migration created: `20261009054618_AddMobilePosFoundation`.
@@ -90,12 +98,13 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - RHEMA invoice, payment, payment-method, till, liquidity, banking, numbering, Finance-dimension, authorization, tenant, location, warehouse, device, and PWA boundaries were traced in the current source.
 - All requested A-U architecture sections, management decisions, phase gates, data contracts, API proposals, migration plan, test plan, and blockers are present in the Phase 1 report.
 - Full migration-aware API build passed with 0 errors; the build preserved 89 EF models and compiled the new migration metadata.
+- The Phase 3 read-slice API rebuild passed with 0 errors after the customer eligibility, read service, controller, and permission changes.
 - Idempotent SQL generation from `20261008192833_AddPropertySalesOrderDepositLifecycle` to `20261009054618_AddMobilePosFoundation` passed. The 28,333-byte script contains nine `CREATE TABLE` statements and the expected stores, tills, devices, policies, and migration-history marker.
-- Thirteen focused Mobile POS API tests passed: seven authorization/model tests plus six service integration/token tests covering rejection of an unapproved default customer, persistence of an approved store/customer mapping with audit evidence, replacement of an effective user-store assignment, enrollment/approval/revocation/heartbeat behavior, the endpoint's required offline-and-till permission pair, signed grant issuance and supersession, permission-filtered commands, offline-tender filtering, bounded expiry/limit snapshots, token round-trip, tamper rejection, and expiry rejection.
+- Eighteen focused Mobile POS API tests passed. Coverage includes authorization/model contracts, customer eligibility/default resolution, canonical outstanding-invoice delegation and ineligible-customer rejection, store/customer persistence, assignment replacement, device lifecycle, the offline-and-till permission pair, signed grant issuance and supersession, permission-filtered commands, tender filtering, bounded snapshots, token round-trip, tamper rejection, and expiry rejection.
 - Frontend TypeScript check passed. Focused ESLint passed for the Mobile POS page/service and changed route/navigation/auth files.
 - Frontend administration/access tests passed: 27 tests across the route guard, Settings registry, and navigation access helper.
 - Frontend production build passed. The generated app manifest contains `/administration/mobile-pos/page`.
-- Expo application TypeScript check passed. Twenty-three client tests passed across environment policy, sanitized support references, ProblemDetails and non-JSON response handling, concurrent-401 single-flight refresh behavior, offline-grant API shape, expiry, assignment/policy/default-customer/revocation binding, and remaining-time calculation.
+- Expo application TypeScript check passed. Twenty-four client tests passed across environment policy, sanitized support references, ProblemDetails and non-JSON response handling, concurrent-401 single-flight refresh behavior, customer/outstanding-invoice request encoding, offline-grant API shape, expiry, assignment/policy/default-customer/revocation binding, and remaining-time calculation.
 - Expo Doctor is installed as a reproducible development dependency and passed 18/18 checks. Android bundle export passed and generated the Android Hermes bundle and metadata under the ignored `apps/mobile/dist/android` output.
 
 ## Known failures and constraints
@@ -108,7 +117,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 
 ## Remaining work
 
-Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migration in an authorized test database, and relational concurrency coverage for effective assignments. Then begin the Phase 3 canonical Finance orchestration. Offline grant consumption and aggregate-limit enforcement remain in Phase 5. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
+Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migration in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer and invoice read slice, then implement the certified Finance dimension, invoice, receipt/allocation, idempotency, receipt-projection, and reconciliation write orchestration. Offline grant consumption and aggregate-limit enforcement remain in Phase 5. ZCS native adapter completion remains dependent on vendor artifacts and a physical certification unit.
 
 ## Authorization boundaries
 

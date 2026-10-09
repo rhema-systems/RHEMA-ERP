@@ -192,6 +192,34 @@ export interface MobilePosOfflineGrant {
   policy: MobilePosOfflineGrantPolicySnapshot;
 }
 
+export interface MobilePosCustomerSearchResult {
+  businessPartnerId: string;
+  businessPartnerRoleId: string;
+  code: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  currencyCode: string;
+  isDefaultWalkInCustomer: boolean;
+}
+
+export interface OutstandingInvoice {
+  id: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate?: string;
+  totalAmount: number;
+  paidAmount: number;
+  balanceAmount: number;
+  daysOverdue: number;
+  currencyCode: string;
+  earlyPaymentDiscountPercentage?: number;
+  earlyPaymentDiscountDueDate?: string;
+  isDiscountAvailable: boolean;
+  requiresTaxAdjustmentForDiscount: boolean;
+  discountAmount?: number;
+}
+
 export interface DeviceEnrollmentRequest {
   installationId: string;
   deviceName: string;

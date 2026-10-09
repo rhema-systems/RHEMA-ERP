@@ -242,6 +242,18 @@ public sealed class MobilePosOfflineGrantRequestDto
     public string InstallationId { get; set; } = string.Empty;
 }
 
+public sealed class MobilePosCustomerSearchResultDto
+{
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public bool IsDefaultWalkInCustomer { get; set; }
+}
+
 public sealed class MobilePosOfflinePaymentMethodSnapshotDto
 {
     public Guid PaymentMethodId { get; set; }

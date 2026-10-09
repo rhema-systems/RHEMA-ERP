@@ -74,21 +74,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         var tenantId = TenantId;
         var now = DateTime.UtcNow;
 
-        var eligibleCustomerRoles = await _db.BusinessPartnerRoles.AsNoTracking()
-            .Where(role => role.TenantId == tenantId &&
-                           role.RoleType == BusinessPartnerRoleType.Customer &&
-                           role.Status == BusinessPartnerRoleStatus.Active &&
-                           role.ActiveFromUtc <= now &&
-                           (!role.InactiveFromUtc.HasValue || role.InactiveFromUtc > now) &&
-                           role.BusinessPartner.IsActive &&
-                           !role.BusinessPartner.IsBlacklisted &&
-                           role.BusinessPartner.RegistrationStatus == "Approved" &&
-                           _db.BusinessPartnerArProfileVersions.Any(profile =>
-                               profile.TenantId == tenantId &&
-                               profile.BusinessPartnerRoleId == role.Id &&
-                               profile.Status == BusinessPartnerFinanceProfileStatus.Approved &&
-                               profile.EffectiveFrom <= now &&
-                               (!profile.EffectiveTo.HasValue || profile.EffectiveTo > now)))
+        var eligibleCustomerRoles = await _db.EligibleMobilePosCustomerRoles(tenantId, now).AsNoTracking()
             .OrderBy(role => role.BusinessPartner.PartnerName)
             .Select(role => new MobilePosCustomerReferenceDto
             {
@@ -1039,8 +1025,11 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         var partner = await _db.BusinessPartners.AsNoTracking().SingleOrDefaultAsync(
             item => item.TenantId == tenantId && item.Id == businessPartnerId, cancellationToken)
             ?? throw new InvalidOperationException("Select a walk-in Business Partner belonging to the current tenant.");
-        if (!partner.IsActive || partner.IsBlacklisted ||
-            !string.Equals(partner.RegistrationStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+        var operationalRegistration =
+            string.Equals(partner.RegistrationStatus, "Approved", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(partner.RegistrationStatus, "Active", StringComparison.OrdinalIgnoreCase);
+        if (!partner.IsActive || partner.IsDeleted || partner.IsBlacklisted || !operationalRegistration ||
+            !string.Equals(partner.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The default walk-in Business Partner must be active, approved, and not blacklisted.");
 
         var role = await _db.BusinessPartnerRoles.AsNoTracking().SingleOrDefaultAsync(

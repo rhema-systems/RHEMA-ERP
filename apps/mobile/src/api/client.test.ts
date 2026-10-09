@@ -151,4 +151,26 @@ describe("Mobile POS API client", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer old-access");
     expect(JSON.parse(String(init.body))).toEqual({ installationId: "installation-123456" });
   });
+
+  it("encodes approved-customer search and outstanding-invoice request context", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mobileApi.searchCustomers("installation/customer 1", "A&B Trading", 15);
+    await mobileApi.getOutstandingInvoices("installation/customer 1", {
+      businessPartnerId: "partner-1",
+      businessPartnerRoleId: "role-1",
+      code: "CUST-1",
+      name: "A&B Trading",
+      currencyCode: "GHS",
+      isDefaultWalkInCustomer: false,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/customers/search?installationId=installation%2Fcustomer%201&q=A%26B%20Trading&limit=15",
+    );
+    expect(fetchMock.mock.calls[1]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/customers/partner-1/outstanding-invoices?businessPartnerRoleId=role-1&installationId=installation%2Fcustomer%201",
+    );
+  });
 });

@@ -93,6 +93,27 @@ export default function HomeScreen() {
             <Text style={styles.infoText}>Used automatically for walk-in sales. Search and choose another approved customer when required.</Text>
           </View>
 
+          {session.user?.permissions.includes("MobilePOS.Customer.View") ? (
+            <Link href="/customers" asChild>
+              <Pressable accessibilityRole="button" style={styles.featureButton}>
+                <View style={styles.featureIcon}><Ionicons name="people-outline" size={22} color={colors.blue} /></View>
+                <View style={styles.featureMain}>
+                  <Text style={styles.featureTitle}>Customers and balances</Text>
+                  <Text style={styles.featureText}>Use the store default or find another approved customer.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={19} color={colors.muted} />
+              </Pressable>
+            </Link>
+          ) : (
+            <View style={[styles.featureButton, styles.buttonDisabled]}>
+              <View style={styles.featureIcon}><Ionicons name="people-outline" size={22} color={colors.blue} /></View>
+              <View style={styles.featureMain}>
+                <Text style={styles.featureTitle}>Customers and balances</Text>
+                <Text style={styles.featureText}>Your role needs the View Mobile POS Customers permission.</Text>
+              </View>
+            </View>
+          )}
+
           <View style={styles.infoCard}>
             <View style={styles.sectionRow}>
               <Text style={styles.sectionTitle}>Offline authorization</Text>
@@ -262,6 +283,11 @@ const styles = StyleSheet.create({
   grantButton: { marginTop: 14, minHeight: 46, flexDirection: "row", gap: 8, borderRadius: 11, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center" },
   grantButtonText: { color: colors.white, fontSize: 13, fontWeight: "700" },
   buttonDisabled: { opacity: 0.45 },
+  featureButton: { marginTop: 12, minHeight: 76, padding: 14, flexDirection: "row", alignItems: "center", borderRadius: 16, backgroundColor: colors.white, borderWidth: 1, borderColor: "#EAECF0" },
+  featureIcon: { width: 44, height: 44, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: colors.paleBlue },
+  featureMain: { flex: 1, marginLeft: 12, marginRight: 8 },
+  featureTitle: { color: colors.ink, fontSize: 14, fontWeight: "700" },
+  featureText: { marginTop: 4, color: colors.slate, fontSize: 12, lineHeight: 17 },
   openPill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: colors.successBg },
   openText: { color: colors.success, fontSize: 11, fontWeight: "700" },
   closedPill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: colors.warningBg },

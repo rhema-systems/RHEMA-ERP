@@ -1,5 +1,6 @@
 using ErpSystem.Api.Services.MobilePos;
 using ErpSystem.Core.DTOs.MobilePos;
+using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -14,13 +15,16 @@ public sealed class MobilePosRuntimeController : ControllerBase
 {
     private readonly IMobilePosFoundationService _service;
     private readonly IAuthorizationService _authorization;
+    private readonly IMobilePosFinanceReadService _financeReads;
 
     public MobilePosRuntimeController(
         IMobilePosFoundationService service,
-        IAuthorizationService authorization)
+        IAuthorizationService authorization,
+        IMobilePosFinanceReadService financeReads)
     {
         _service = service;
         _authorization = authorization;
+        _financeReads = financeReads;
     }
 
     [HttpPost("devices/enrollment-requests")]
@@ -69,6 +73,25 @@ public sealed class MobilePosRuntimeController : ControllerBase
 
         return Ok(await _service.IssueOfflineGrantAsync(dto, authorizedPermissions, cancellationToken));
     }
+
+    [HttpGet("customers/search")]
+    [Authorize(Policy = MobilePosPermissions.ViewCustomer)]
+    public async Task<ActionResult<IReadOnlyList<MobilePosCustomerSearchResultDto>>> SearchCustomers(
+        [FromQuery] string installationId,
+        [FromQuery] string? q,
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
+        => Ok(await _financeReads.SearchCustomersAsync(installationId, q, limit, cancellationToken));
+
+    [HttpGet("customers/{businessPartnerId:guid}/outstanding-invoices")]
+    [Authorize(Policy = MobilePosPermissions.ViewCustomer)]
+    public async Task<ActionResult<IReadOnlyList<OutstandingInvoiceDto>>> GetOutstandingInvoices(
+        Guid businessPartnerId,
+        [FromQuery] Guid businessPartnerRoleId,
+        [FromQuery] string installationId,
+        CancellationToken cancellationToken)
+        => Ok(await _financeReads.GetOutstandingInvoicesAsync(
+            installationId, businessPartnerId, businessPartnerRoleId, cancellationToken));
 }
 
 [ApiController]

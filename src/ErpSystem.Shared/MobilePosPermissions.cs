@@ -28,6 +28,7 @@ public static class MobilePosPermissions
     public const string ReviewTill = "MobilePOS.Till.Review";
     public const string CorrectTill = "MobilePOS.Till.Correct";
     public const string CreateInvoice = "MobilePOS.Invoice.Create";
+    public const string ViewCustomer = "MobilePOS.Customer.View";
     public const string PostInvoice = "MobilePOS.Invoice.Post";
     public const string CollectPayment = "MobilePOS.Payment.Collect";
     public const string ReprintReceipt = "MobilePOS.Receipt.Reprint";
@@ -49,6 +50,7 @@ public static class MobilePosPermissions
         new(ReviewTill, "Review Mobile POS Till Close", "Review variances and approve or return till closures.", CategoryTill),
         new(CorrectTill, "Correct Mobile POS Till Session", "Open a governed correction for a closed till session.", CategoryTill),
         new(CreateInvoice, "Create Mobile POS Invoice", "Create an invoice or immediate sale through Mobile POS.", CategoryTransactions),
+        new(ViewCustomer, "View Mobile POS Customers", "Search approved customers and view their outstanding invoices in Mobile POS.", CategoryTransactions),
         new(PostInvoice, "Post Mobile POS Invoice", "Post a Mobile POS invoice where Finance policy permits immediate posting.", CategoryTransactions),
         new(CollectPayment, "Collect Mobile POS Payment", "Create and allocate customer receipts through Mobile POS.", CategoryTransactions),
         new(ReprintReceipt, "Reprint Mobile POS Receipt", "Reprint an existing receipt with audit evidence.", CategoryTransactions),

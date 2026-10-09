@@ -85,6 +85,20 @@ public sealed class MobilePosFoundationTests
             .Should().BeEquivalentTo(MobilePosPermissions.UseOffline, MobilePosPermissions.OperateTill);
     }
 
+    [Theory]
+    [InlineData(nameof(MobilePosRuntimeController.SearchCustomers))]
+    [InlineData(nameof(MobilePosRuntimeController.GetOutstandingInvoices))]
+    public void CustomerReadEndpoints_ShouldRequireTheDynamicCustomerViewPermission(string actionName)
+    {
+        var action = typeof(MobilePosRuntimeController).GetMethod(actionName);
+
+        action.Should().NotBeNull();
+        action!.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .Should().ContainSingle(policy => policy == MobilePosPermissions.ViewCustomer);
+    }
+
     [Fact]
     public void AdministrationController_ShouldProtectEveryActionWithAMobilePosPermission()
     {

@@ -78,8 +78,8 @@
 | ID | Work item | Status |
 | --- | --- | --- |
 | MPOS-0301 | Certified Mobile POS Finance dimension routes | Planned |
-| MPOS-0302 | Approved-customer search and default customer resolution | Planned |
-| MPOS-0303 | Outstanding-invoice lookup | Planned |
+| MPOS-0302 | Approved-customer search and default customer resolution | In progress - tenant/store/device-scoped API and mobile screen implemented; eligible customers require an effective Customer role, approved/active registration, approved Business Partner status, and an effective approved AR profile; blank search resolves only the mapped store default; service tests pass; live SQL/API/device evidence remains |
+| MPOS-0303 | Outstanding-invoice lookup | In progress - selected eligible customers use the canonical `IPaymentService` outstanding-invoice query through a `MobilePOS.Customer.View` protected endpoint; mobile balance view and focused tests pass; live AR/API evidence remains |
 | MPOS-0304 | Invoice preview/create/lifecycle adapter | Planned |
 | MPOS-0305 | Customer receipt and allocation adapter | Planned |
 | MPOS-0306 | Server idempotency registry | Planned |

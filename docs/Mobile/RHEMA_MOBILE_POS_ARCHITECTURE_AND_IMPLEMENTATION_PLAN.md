@@ -528,7 +528,7 @@ All endpoints are versioned, tenant scoped, permission protected, return Problem
 
 - `POST /api/mobile-pos/v1/devices/enrollment-requests`
 - `GET /api/mobile-pos/v1/bootstrap`
-- `POST /api/mobile-pos/v1/auth/offline-grants`
+- `POST /api/mobile-pos/v1/offline-grants`
 - `GET /api/mobile-pos/v1/catalogue/changes`
 - `GET /api/mobile-pos/v1/customers/search`
 - `GET /api/mobile-pos/v1/customers/{id}/outstanding-invoices`
