@@ -138,6 +138,17 @@ export default function HomeScreen() {
             </View>
           )}
 
+          <Link href="/sync" asChild>
+            <Pressable accessibilityRole="button" style={styles.featureButton}>
+              <View style={styles.featureIcon}><Ionicons name="sync-outline" size={22} color={colors.blue} /></View>
+              <View style={styles.featureMain}>
+                <Text style={styles.featureTitle}>Sync & exceptions</Text>
+                <Text style={styles.featureText}>Submit pending device work and review server decisions.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={19} color={colors.muted} />
+            </Pressable>
+          </Link>
+
           <View style={styles.infoCard}>
             <View style={styles.sectionRow}>
               <Text style={styles.sectionTitle}>Offline authorization</Text>

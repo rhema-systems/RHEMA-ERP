@@ -46,7 +46,7 @@ function openSessionCatalogue(user: UserInfo, bootstrap: MobilePosBootstrap): Pr
   return SqliteCatalogueCache.open(sessionScope(user, bootstrap));
 }
 
-function sessionScope(user: UserInfo, bootstrap: MobilePosBootstrap) {
+export function sessionScope(user: UserInfo, bootstrap: MobilePosBootstrap) {
   const tenantId = user.currentTenantId?.trim();
   if (!tenantId) throw new Error("Select a tenant before using the offline catalogue.");
   return createOfflineScope({

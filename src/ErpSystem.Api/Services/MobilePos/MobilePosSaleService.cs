@@ -33,7 +33,7 @@ public interface IMobilePosSaleService
 /// </summary>
 public sealed class MobilePosSaleService : IMobilePosSaleService
 {
-    private const string CommandType = "MobilePos.CompleteSale";
+    private const string CommandType = "CashSale";
     private const string OfflineCommandType = "CashSale";
     private const int SchemaVersion = 1;
     private static readonly FinancePostingProducerContext InvoiceProducer =

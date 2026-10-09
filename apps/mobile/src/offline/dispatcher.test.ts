@@ -12,7 +12,7 @@ vi.mock("@/src/api/client", async () => {
   }
   return { ApiProblem, mobileApi: { pushOfflineCommand: vi.fn() } };
 });
-vi.mock("@/src/storage/secure-session", () => ({ loadOfflineGrant: vi.fn() }));
+vi.mock("@/src/storage/secure-session", () => ({ loadOfflineGrantById: vi.fn() }));
 
 import { ApiProblem } from "@/src/api/client";
 import { MobilePosOutboxDispatcher, type OutboxDispatchStore } from "./dispatcher";
@@ -94,14 +94,16 @@ function store(next: OutboxMessage | null = message()) {
 describe("Mobile POS outbox dispatcher", () => {
   it("loads the signed grant only at dispatch and marks a canonical result synced", async () => {
     const outbox = store();
+    const loadGrant = vi.fn(async () => grant());
     const push = vi.fn(async request => ({
       state: "Synced",
       clientMutationId: request.clientMutationId,
       sale: { saleId: "sale-1" },
     }) as MobilePosSyncPushResult);
-    const dispatcher = new MobilePosOutboxDispatcher(outbox.value, async () => grant(), push);
+    const dispatcher = new MobilePosOutboxDispatcher(outbox.value, loadGrant, push);
 
     await expect(dispatcher.dispatchNext()).resolves.toBe("Synced");
+    expect(loadGrant).toHaveBeenCalledWith("grant-1");
     expect(push).toHaveBeenCalledWith(expect.objectContaining({
       offlineGrantToken: "signed-grant-token",
       payloadHash: "abc123",

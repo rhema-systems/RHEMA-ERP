@@ -16,6 +16,7 @@ import { BarcodeScannerModal } from "@/components/barcode-scanner-modal";
 import { BankAccountPickerModal } from "@/components/bank-account-picker-modal";
 import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
 import { searchSessionCatalogue, searchSessionCustomers } from "@/src/offline/catalogue-runtime";
+import { openSessionOutbox } from "@/src/offline/sync-runtime";
 import type { BarcodeScan } from "@/src/scanning/barcode";
 import { buildCompleteSaleRequest, sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
 import { useSession } from "@/src/session/session-context";
@@ -89,6 +90,7 @@ export default function SaleScreen() {
   const [pendingIdentity, setPendingIdentity] = useState<PendingIdentity | null>(null);
   const [result, setResult] = useState<MobilePosSaleResult | null>(null);
   const [receipt, setReceipt] = useState<MobilePosReceipt | null>(null);
+  const [queuedSale, setQueuedSale] = useState<{ localReference: string; total: number; currencyCode: string } | null>(null);
   const [busy, setBusy] = useState<"catalogue" | "customer" | "bankAccounts" | "preview" | "complete" | "reprint" | "print" | "share" | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
   const [outputMessage, setOutputMessage] = useState<string | null>(null);
@@ -315,17 +317,51 @@ export default function SaleScreen() {
     setPendingIdentity(identity);
     setBusy("complete");
     setError(null);
+    const request = buildCompleteSaleRequest({
+      installationId: await getInstallationId(),
+      ...identity,
+      preview,
+      tenders,
+    });
     try {
-      const completed = await mobileApi.completeSale(buildCompleteSaleRequest({
-        installationId: await getInstallationId(),
-        ...identity,
-        preview,
-        tenders,
-      }));
+      const completed = await mobileApi.completeSale(request);
       setResult(completed);
       setReceipt(await mobileApi.getReceipt(completed.saleId, await getInstallationId()));
     } catch (caught) {
-      setError(asProblem(caught));
+      const failure = asProblem(caught);
+      const grant = session.offlineGrant;
+      const retryable = failure.status === 0 || failure.status === 408 || failure.status === 429 || failure.status >= 500;
+      const allowedTenderIds = new Set(grant?.policy.allowedPaymentMethods.map(method => method.paymentMethodId) ?? []);
+      const offlineTenderAllowed = tenders.every(tender => {
+        const method = bootstrap.till.paymentMethods.find(item => item.paymentMethodId === tender.paymentMethodId);
+        return Boolean(method?.allowOffline && allowedTenderIds.has(tender.paymentMethodId));
+      });
+      const discountAllowed = cart.every(line => line.discountPercentage === 0) || grant?.policy.allowDiscounts === true;
+      if (retryable && grant && session.user && bootstrap.currentTillSessionId
+        && grant.policy.allowedCommandTypes.includes("CashSale")
+        && offlineTenderAllowed && discountAllowed) {
+        try {
+          await (await openSessionOutbox(session.user, bootstrap)).enqueue({
+            clientMutationId: identity.clientMutationId,
+            localReference: identity.localReference,
+            commandType: "CashSale",
+            schemaVersion: 1,
+            tillSessionId: bootstrap.currentTillSessionId,
+            offlineGrantId: grant.id,
+            payload: request,
+          });
+          setQueuedSale({
+            localReference: identity.localReference,
+            total: preview.totalAmount,
+            currencyCode: preview.currencyCode,
+          });
+          setError(null);
+        } catch (queueError) {
+          setError(asProblem(queueError));
+        }
+      } else {
+        setError(failure);
+      }
     } finally {
       setBusy(null);
     }
@@ -338,6 +374,7 @@ export default function SaleScreen() {
     setPendingIdentity(null);
     setResult(null);
     setReceipt(null);
+    setQueuedSale(null);
     setError(null);
     setOutputMessage(null);
     setCustomer(defaultCustomer);
@@ -390,6 +427,30 @@ export default function SaleScreen() {
       setBusy(null);
     }
   };
+
+  if (queuedSale) {
+    return (
+      <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+        <View style={styles.successIcon}><Ionicons name="cloud-offline-outline" size={31} color={colors.white} /></View>
+        <Text style={styles.successTitle}>Sale saved securely</Text>
+        <Text style={styles.successNumber}>{queuedSale.localReference}</Text>
+        <Text style={styles.successAmount}>{money(queuedSale.total, queuedSale.currencyCode, preview?.currencyDecimalPlaces ?? 2)}</Text>
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Pending synchronization</Text>
+          <Text style={styles.meta}>The same sale identity and tender evidence are retained in the encrypted device workflow. RHEMA will create the final invoice, payments, and canonical receipt after server validation.</Text>
+          <Text style={styles.receiptNote}>Do not issue another sale for this transaction. Reconnect and open Sync & exceptions to submit it.</Text>
+        </View>
+        <Link href="/sync" asChild>
+          <Pressable accessibilityRole="button" style={styles.primaryButton}>
+            <Text style={styles.primaryButtonText}>Open Sync & exceptions</Text>
+          </Pressable>
+        </Link>
+        <Pressable accessibilityRole="button" onPress={startNewSale} style={styles.secondaryButton}>
+          <Text style={styles.secondaryButtonText}>Start another sale</Text>
+        </Pressable>
+      </ScrollView>
+    );
+  }
 
   if (result) {
     return (

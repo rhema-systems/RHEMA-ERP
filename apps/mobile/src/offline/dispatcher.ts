@@ -1,6 +1,6 @@
 import { ApiProblem, mobileApi } from "@/src/api/client";
 import type { MobilePosOfflineGrant, MobilePosSyncPushRequest, MobilePosSyncPushResult } from "@/src/types/api";
-import { loadOfflineGrant } from "@/src/storage/secure-session";
+import { loadOfflineGrantById } from "@/src/storage/secure-session";
 import type { OutboxMessage } from "./outbox";
 import { SqliteOutbox } from "./outbox";
 
@@ -13,7 +13,7 @@ export interface OutboxDispatchStore {
   retry(clientMutationId: string, errorCode: string, errorDetail: string, now?: Date): Promise<OutboxMessage>;
 }
 
-export type OfflineGrantLoader = () => Promise<MobilePosOfflineGrant | null>;
+export type OfflineGrantLoader = (grantId: string) => Promise<MobilePosOfflineGrant | null>;
 export type OfflinePushTransport = (request: MobilePosSyncPushRequest) => Promise<MobilePosSyncPushResult>;
 
 export type DispatchOutcome = "Idle" | "Synced" | "Rejected" | "Conflict" | "RetryScheduled" | "ManualReview";
@@ -21,7 +21,7 @@ export type DispatchOutcome = "Idle" | "Synced" | "Rejected" | "Conflict" | "Ret
 export class MobilePosOutboxDispatcher {
   constructor(
     private readonly outbox: OutboxDispatchStore,
-    private readonly grantLoader: OfflineGrantLoader = loadOfflineGrant,
+    private readonly grantLoader: OfflineGrantLoader = loadOfflineGrantById,
     private readonly push: OfflinePushTransport = request => mobileApi.pushOfflineCommand(request),
   ) {}
 
@@ -30,7 +30,7 @@ export class MobilePosOutboxDispatcher {
     if (!message) return "Idle";
 
     try {
-      const grant = await this.grantLoader();
+      const grant = await this.grantLoader(message.offlineGrantId);
       if (!grant) {
         await this.outbox.markManualReview(
           message.clientMutationId,
