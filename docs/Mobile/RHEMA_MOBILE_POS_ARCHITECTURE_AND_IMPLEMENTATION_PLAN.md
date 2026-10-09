@@ -454,7 +454,15 @@ Print failure does not reverse or duplicate a successful financial transaction. 
 
 ## P. ZCS Z92S integration requirements
 
-No ZCS SDK, AIDL definition, service contract, intent documentation, or signed vendor library is present in the audited sources. Implementation must not fabricate one.
+The initial repository audit found no ZCS SDK, AIDL definition, service contract, intent documentation, or signed vendor library, so the implementation must never fabricate a device contract. On 2026-10-09 management supplied `SmartPos_1.8.1_R231213_SDK.zip` (SHA-256 `8A5A259076030F17DFA629F413968B67CEBA55B02EA8B2018BF67F1B0C26AF66`) for later Phase 7 integration.
+
+The supplied package contains the SmartPos 1.8.1 JAR, ARM64 and ARMv7 `libSmartPosJni.so` libraries, English/Chinese guides, and a demonstration application. The documented Z90/Z91/Z92/Z100 flow initializes `DriverManager`/`Sys`, exposes printer status/text/bitmap/QR/start APIs through `Printer`, and exposes direct hardware scanning through `HQrsanner`. The relevant artifact hashes are:
+
+- SmartPos JAR: `3A65BF1A26D59730C014D79BA7B5AA8744BAB6E0B5275A2C055B996F4A7277E9`.
+- ARM64 JNI library: `DE5CBF76EAFC3D0FBF1767BD0E8007E6217A2C81A6FDACE02FBD511A1D9FF9BF`.
+- ARMv7 JNI library: `7D8821DD051F83072023744019F1EDD86AB7CF0B0EAE2D7FD674DF7ED844A090`.
+
+SDK receipt does not move the hardware adapter ahead of the tracker. Phase 4 through Phase 6 remain the active sequence; the Kotlin/Expo native bridge belongs to MPOS-0702/0703. The package contains no detected licence, notice, or redistribution terms, its demonstration app targets Android 26 while RHEMA targets Android 35, and no physical Z92S evidence is available. Distribution and production claims therefore remain gated by written redistribution approval and Z92S Android 14 certification.
 
 Required from ZCS or the device supplier:
 
@@ -465,7 +473,7 @@ Required from ZCS or the device supplier:
 5. Supported ABI, min/target SDK, ProGuard/R8 rules, and lifecycle guidance.
 6. A physical Z92S development/certification unit.
 
-The initial code supplies interfaces and a fake/test adapter. When the artifact arrives, a Kotlin native module and Expo config plugin can implement the adapter without changing checkout or receipt use cases.
+The Phase 4 scanner boundary supplies normalized camera/manual/keyboard-wedge input and a disposable test adapter. When Phase 7 begins, a Kotlin native module and Expo config plugin can adapt the supplied `Printer` and `HQrsanner` APIs without changing checkout or receipt use cases.
 
 ## Q. Permissions
 
@@ -659,7 +667,7 @@ Deliver this report, the implementation tracker, and the Finance coordination le
 
 ### Phase 7 - Hardware
 
-- ZCS adapter after vendor artifact receipt.
+- ZCS printer and scanner adapters using the audited SmartPos 1.8.1 contract.
 - Keyboard-wedge/vendor scanner adapter.
 - Bluetooth ESC/POS and native physical-device certification.
 

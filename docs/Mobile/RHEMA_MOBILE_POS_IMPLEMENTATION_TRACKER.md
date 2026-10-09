@@ -91,7 +91,7 @@
 | ID | Work item | Status |
 | --- | --- | --- |
 | MPOS-0401 | Catalogue/service search and cache contract | In progress - the assigned store/device/till-scoped online search returns active sale-ready items with current price, UOM, tax group, and warehouse availability; offline change feed and device cache remain |
-| MPOS-0402 | Camera/manual/keyboard-wedge scanner boundary | Planned |
+| MPOS-0402 | Camera/manual/keyboard-wedge scanner boundary | In progress - camera permission and barcode modal, normalized scan contract, manual/Enter-triggered catalogue input compatible with keyboard wedges, and a disposable test adapter are implemented; physical camera/wedge evidence and the Phase 7 ZCS adapter remain |
 | MPOS-0403 | Cart, pricing preview, tax display, discounts | In progress - mobile cart quantity controls and server-calculated subtotal, discount, tax, and total display are implemented; governed cashier discount entry and offline preview remain |
 | MPOS-0404 | Tender UI and metadata rules | In progress - mobile checkout supports multiple till-mapped online tenders, amount reconciliation, required references, and retry-stable mutation identity; bank-account selection for bank-required methods remains |
 | MPOS-0405 | Atomic split-tender orchestration | In progress - the mobile checkout submits one command and one retry-stable mutation ID; the public endpoint composes the canonical invoice, posting, multiple allocated canonical payments, and source envelopes atomically; SQL failure-injection and live accounting reconciliation evidence remain |
@@ -126,9 +126,9 @@
 
 | ID | Work item | Status | Dependency |
 | --- | --- | --- | --- |
-| MPOS-0701 | Printer/scanner capability interfaces and fake adapters | Planned | None |
-| MPOS-0702 | ZCS built-in printer adapter | Blocked | ZCS SDK/AIDL/intent artifact and test unit |
-| MPOS-0703 | ZCS hardware scanner adapter | Blocked | ZCS scanner contract and test unit |
+| MPOS-0701 | Printer/scanner capability interfaces and fake adapters | In progress | Scanner normalization/test adapter exists; printer capability interface remains |
+| MPOS-0702 | ZCS built-in printer adapter | Ready | SDK supplied and audited; scheduled after Phase 6; redistribution approval and physical test unit still required for acceptance |
+| MPOS-0703 | ZCS hardware scanner adapter | Ready | `HQrsanner` contract supplied and audited; scheduled after Phase 6; physical test unit still required for acceptance |
 | MPOS-0704 | Bluetooth ESC/POS adapter | Planned | Supported printer models |
 | MPOS-0705 | Z92S physical certification | Blocked | Signed build and physical Z92S |
 
@@ -148,8 +148,8 @@
 
 | Dependency | Needed by | Owner/status |
 | --- | --- | --- |
-| ZCS Z92S printer SDK/service contract | MPOS-0702 | Awaiting supplier/vendor |
-| ZCS hardware scanner contract | MPOS-0703 | Awaiting supplier/vendor |
+| ZCS Z92S printer SDK/service contract | MPOS-0702 | Supplied 2026-10-09 as SmartPos 1.8.1 and hash-audited; no licence/redistribution terms detected; exact Android 14 firmware behavior remains unverified |
+| ZCS hardware scanner contract | MPOS-0703 | Supplied 2026-10-09 through `HQrsanner`; physical Z92S behavior remains unverified |
 | Physical Z92S certification unit | MPOS-0705 | Awaiting availability |
 | Mobile Money/card provider contract and sandbox | MPOS-0804 | Awaiting management/provider selection |
 | Android signing identity and secure CI credentials | Phase 8 | Must be prepared before release |
