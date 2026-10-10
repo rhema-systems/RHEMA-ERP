@@ -254,10 +254,14 @@ try {
             '20261009114817_AddMobilePosTransactionFoundation',
             '20261009235832_AddMobilePosTillCloseControl',
             '20261010003147_LinkMobilePosTillCloseBankDeposit',
+            '20261010042645_AddMobilePosCustomerCollections',
             'MobilePosStores',
             'MobilePosSales',
             'MobilePosTillCloseSubmissions',
-            'BankDepositBatchId'
+            'BankDepositBatchId',
+            'MobilePosCollections',
+            'MobilePosCollectionAllocations',
+            'MobilePosCollectionTenders'
         )
         $missing = @($requiredMarkers | Where-Object { $sql.IndexOf($_, [StringComparison]::Ordinal) -lt 0 })
         if ($missing.Count -gt 0) { throw "Migration SQL is missing: $($missing -join ', ')" }
