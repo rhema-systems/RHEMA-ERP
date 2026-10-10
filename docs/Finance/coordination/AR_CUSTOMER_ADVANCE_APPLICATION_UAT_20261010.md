@@ -11,6 +11,7 @@
 - Branch: `codex/business-partner-workflow-fixed-asset-transaction`
 - Exact base: `dd6fb224a1eaa7512087ed3bf0dd767d490c0f12`
 - Existing branch commits before this workstream: `14f1bb5c6`, `52e41f6aa`, `5ccce718c`
+- Completed workstream commit: `612aef0e9` (`Clarify AR receipt and ledger dates`)
 
 ## Confirmed current behavior
 
@@ -64,7 +65,6 @@
 
 ## Remaining work
 
-- Commit the completed date-clarity changes and this ledger.
 - Run the full frontend type-check when a longer verification window is available.
 - Implement the payment-on-account workflow only after explicit authorization to move from planning to implementation.
 
@@ -72,4 +72,3 @@
 
 - Authorized: local date-label/report corrections, focused tests, investigation, and implementation planning.
 - Not authorized: payment-on-account feature implementation, database changes, migrations, push, pull request creation, merge, or deployment.
-
