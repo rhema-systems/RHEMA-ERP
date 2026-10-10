@@ -28,6 +28,13 @@
 - Added both date fields to the component's CSV export.
 - Missing posting timestamps now render as `-` instead of silently falling back to the business date.
 - Added focused regression coverage for the new labels and independent date semantics.
+- Added explicit **Record new receipt** and **Apply payment on account** modes to the AR receipt workspace.
+- Added a customer-scoped selector that lists only posted, unapplied records explicitly classified as customer advances.
+- Added direct **Apply payment on account** actions to the AR invoice list and invoice details page while preserving invoice preselection.
+- Exposed `IsCustomerAdvance` in the payment query/response contract and added a server-side query filter.
+- Reused the existing posted-advance allocation service and canonical receipt trace route; no second receipt or cash posting is created.
+- Invalidated invoice, receipt, customer and advance-candidate queries after successful application.
+- Corrected the pre-existing `HasUnallocatedAmount` query, which referenced an unmapped computed property and failed EF translation, to use stored amount columns.
 
 ## Changed files
 
@@ -35,15 +42,35 @@
 - `frontend/src/app/finance/ar/payments/new/page.test.ts`
 - `frontend/src/components/finance/PartnerDetailedLedgerReport.tsx`
 - `frontend/src/components/finance/PartnerDetailedLedgerReport.datetime.test.tsx`
+- `frontend/src/app/finance/ar/invoices/[id]/page.tsx`
+- `frontend/src/app/finance/ar/invoices/page.tsx`
+- `frontend/src/components/finance/ar/CustomerAdvanceSelector.tsx`
+- `frontend/src/lib/finance/ar-customer-advance.ts`
+- `frontend/src/lib/finance/ar-customer-advance.test.ts`
+- `frontend/src/services/ar-service.ts`
+- `frontend/src/services/ar-service.payments.test.ts`
+- `frontend/src/types/ar.ts`
+- `src/ErpSystem.Api/Services/Finance/AR/PaymentService.cs`
+- `src/ErpSystem.Core/DTOs/AR/PaymentCrudDtos.cs`
+- `src/ErpSystem.Core/DTOs/Finance/PaymentDtos.cs`
+- `tests/ErpSystem.Api.Tests/Services/Finance/ArReceiptPostingMigrationTests.cs`
 
 ## Verification
 
 - PASS: `npm test -- --run src/components/finance/PartnerDetailedLedgerReport.datetime.test.tsx src/components/finance/PartnerDetailedLedgerReport.supplier-identity.test.tsx src/app/finance/ar/payments/new/page.test.ts`
 - Result: 3 files, 10 tests passed.
 - PASS: `git diff --check` (line-ending warnings only).
-- Full `npm run type-check` was stopped after several minutes without output; it did not report a TypeScript error before termination. This remains outstanding.
+- PASS: payment-on-account frontend tests: 4 files, 13 tests.
+- PASS: ESLint on every changed TypeScript/TSX implementation file.
+- PASS: focused backend tests for advance candidate filtering and governed no-duplicate-cash application: 2 tests.
+- `npm run type-check` remains blocked by the existing workspace dependency error `TS2307: Cannot find module 'libphonenumber-js/max'` in `frontend/src/lib/phone-number.ts`; no changed file was reported.
 
-## Proposed implementation: apply payment on account
+## Migrations and application state
+
+- No migration was created or applied; the new fields are API DTO/query fields over the existing `CustomerPayment.IsCustomerAdvance` column.
+- No local or remote application was started, restarted, pushed, or deployed for this workstream.
+
+## Implemented workflow: apply payment on account
 
 1. Extend the frontend `PaymentQuery` and `arService.getPayments` serialization to support the existing API filter `HasUnallocatedAmount=true`.
 2. Add a customer-scoped `available advances` query after the customer is selected. Request posted receipts with an unapplied amount and exclude credit notes/reversed or diagnostic records. Prefer exposing `IsCustomerAdvance` in `CustomerPaymentDto` (or add a dedicated application-candidate endpoint) so eligibility is explicit rather than inferred.
@@ -65,10 +92,10 @@
 
 ## Remaining work
 
-- Run the full frontend type-check when a longer verification window is available.
-- Implement the payment-on-account workflow only after explicit authorization to move from planning to implementation.
+- Run manual UAT against a customer with a posted unapplied advance and an open invoice.
+- Repair/install the existing `libphonenumber-js/max` frontend dependency resolution and rerun the full type-check.
 
 ## Authorization boundaries
 
-- Authorized: local date-label/report corrections, focused tests, investigation, and implementation planning.
-- Not authorized: payment-on-account feature implementation, database changes, migrations, push, pull request creation, merge, or deployment.
+- Authorized: local date-label/report corrections, payment-on-account implementation, focused tests, investigation, and implementation planning.
+- Not authorized: database changes, migrations, push, pull request creation, merge, or deployment.

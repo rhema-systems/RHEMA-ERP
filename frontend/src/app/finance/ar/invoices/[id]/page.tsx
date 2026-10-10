@@ -188,9 +188,14 @@ export default function InvoiceDetailsPage() {
                         </Button>
                     )}
                     {showRecordReceipt && (
-                        <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
-                            <CreditCard className="mr-2 h-4 w-4" /> Record Receipt
-                        </Button>
+                        <>
+                            <Button variant="outline" size="sm" onClick={() => router.push(`/finance/ar/receipts/new?mode=apply-account&businessPartnerId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
+                                <CreditCard className="mr-2 h-4 w-4" /> Apply payment on account
+                            </Button>
+                            <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
+                                <CreditCard className="mr-2 h-4 w-4" /> Record Receipt
+                            </Button>
+                        </>
                     )}
                 </div>
             </div>

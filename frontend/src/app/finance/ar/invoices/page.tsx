@@ -261,9 +261,14 @@ export default function InvoicesPage() {
                                                             </DropdownMenuItem>
                                                         )}
                                                         {(invoice.status === 'Sent' || invoice.status === 'Posted') && invoice.balanceAmount > 0 && (
-                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
-                                                                <DollarSign className="mr-2 h-4 w-4" /> Receive Payment
-                                                            </DropdownMenuItem>
+                                                            <>
+                                                                <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?mode=apply-account&businessPartnerId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
+                                                                    <DollarSign className="mr-2 h-4 w-4" /> Apply payment on account
+                                                                </DropdownMenuItem>
+                                                                <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
+                                                                    <DollarSign className="mr-2 h-4 w-4" /> Record new receipt
+                                                                </DropdownMenuItem>
+                                                            </>
                                                         )}
                                                         <DropdownMenuSeparator />
                                                         {(invoice.status === 'Draft' || invoice.status === 'Rejected') && hasPermission('Finance.AR.Invoices.Send') && (

@@ -75,6 +75,7 @@ public class PaymentQueryDto
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
     public bool? HasUnallocatedAmount { get; set; }
+    public bool? IsCustomerAdvance { get; set; }
     public int PageNumber { get; set; } = 1;
     public int PageSize { get; set; } = 50;
     public string? SortBy { get; set; }

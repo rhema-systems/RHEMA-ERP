@@ -41,7 +41,7 @@ import { PaymentMethodType } from '@/types/cash-management';
 import { TaxApplicability, TaxCategory, type Tax } from '@/types/tax';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { loadApprovedSettlementRate } from '@/lib/finance/settlement-exchange-rate';
@@ -57,6 +57,9 @@ import {
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 import { useAuth } from '@/hooks/use-auth';
+import { CustomerAdvanceSelector } from '@/components/finance/ar/CustomerAdvanceSelector';
+
+type ReceiptMode = 'new-receipt' | 'apply-account';
 
 const optionalGuidSchema = z.preprocess(
     value => value === '' || value == null ? undefined : value,
@@ -127,6 +130,7 @@ export default function NewReceiptPage() {
     const preselectedBusinessPartnerId = searchParams.get('businessPartnerId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
     const existingAdvancePaymentId = searchParams.get('paymentId');
+    const requestedMode = searchParams.get('mode') === 'apply-account' ? 'apply-account' : 'new-receipt';
     const preselectedBankAccountId = searchParams.get('bankAccountId') || '';
     const preselectedPaymentMethodId = searchParams.get('paymentMethodId') || '';
     const preselectedAmountParam = searchParams.get('amount');
@@ -140,7 +144,11 @@ export default function NewReceiptPage() {
     const preselectedReferenceNumber = searchParams.get('referenceNumber') || '';
     const preselectedDescription = searchParams.get('description') || '';
     const { toast } = useToast();
+    const queryClient = useQueryClient();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [receiptMode, setReceiptMode] = useState<ReceiptMode>(
+        existingAdvancePaymentId ? 'apply-account' : requestedMode,
+    );
     // Keep invoice reduction and receipt consumption distinct. They are equal for the common
     // same-currency path but represent different legal amounts for FIN-LIM-0022 settlements.
     const [allocations, setAllocations] = useState<Record<string, number>>({});
@@ -153,6 +161,10 @@ export default function NewReceiptPage() {
     const [vatWithholdingAllocations, setVatWithholdingAllocations] = useState<Record<string, number>>({});
     const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
     const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
+
+    useEffect(() => {
+        if (existingAdvancePaymentId) setReceiptMode('apply-account');
+    }, [existingAdvancePaymentId]);
 
     // Fetch customers
     const { data: customersData } = useQuery({
@@ -566,8 +578,15 @@ export default function NewReceiptPage() {
                     customerPaymentId: existingAdvancePaymentId,
                     allocations: allocationRows,
                 });
+                await Promise.all([
+                    queryClient.invalidateQueries({ queryKey: ['customer-advance-candidates'] }),
+                    queryClient.invalidateQueries({ queryKey: ['customer-receipts'] }),
+                    queryClient.invalidateQueries({ queryKey: ['outstanding-invoices', data.businessPartnerId] }),
+                    queryClient.invalidateQueries({ queryKey: ['invoices'] }),
+                    queryClient.invalidateQueries({ queryKey: ['customers'] }),
+                ]);
                 toast({ title: 'Advance applied', description: 'The customer advance and any realized FX were posted successfully.' });
-                router.push(`/finance/ar/payments/${existingAdvancePaymentId}`);
+                router.push(`/finance/ar/receipts/${existingAdvancePaymentId}`);
                 return;
             }
 
@@ -690,7 +709,7 @@ export default function NewReceiptPage() {
 
         for (const inv of sortedInvoices) {
             if (remaining <= 0) break;
-            const discountAmount = Number(inv.discountAmount) || 0;
+            const discountAmount = existingAdvancePaymentId ? 0 : Number(inv.discountAmount) || 0;
             const netBalance = Math.max(inv.balanceAmount - discountAmount, 0);
             const allocateAmount = Math.min(remaining, netBalance);
             newAllocations[inv.id] = allocateAmount;
@@ -706,6 +725,18 @@ export default function NewReceiptPage() {
         setVatWithholdingAllocations({});
     };
 
+    const changeReceiptMode = (mode: ReceiptMode) => {
+        if (mode === receiptMode && !(mode === 'new-receipt' && existingAdvancePaymentId)) return;
+        setReceiptMode(mode);
+        if (mode === 'new-receipt' && existingAdvancePaymentId) {
+            const params = new URLSearchParams();
+            if (selectedCustomerId) params.set('businessPartnerId', selectedCustomerId);
+            if (preselectedInvoiceId) params.set('invoiceId', preselectedInvoiceId);
+            const query = params.toString();
+            router.replace(`/finance/ar/receipts/new${query ? `?${query}` : ''}`);
+        }
+    };
+
     return (
         <div className="space-y-8 p-8 max-w-[1600px] mx-auto">
             <div className="flex items-center space-x-4">
@@ -714,16 +745,46 @@ export default function NewReceiptPage() {
                 </Button>
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">
-                        {existingAdvancePaymentId ? 'Apply Customer Advance' : 'Record Customer Receipt'}
+                        {receiptMode === 'apply-account' ? 'Apply Payment on Account' : 'Record Customer Receipt'}
                     </h1>
                     <p className="text-muted-foreground">
-                        {existingAdvancePaymentId
-                            ? 'Consume the posted receipt currency lot against outstanding customer invoices.'
+                        {receiptMode === 'apply-account'
+                            ? 'Apply an existing posted customer-advance lot to outstanding invoices without recording new cash.'
                             : 'Record a receipt from a customer and allocate it to outstanding invoices.'}
                     </p>
                 </div>
             </div>
 
+            <Card>
+                <CardContent className="flex flex-col gap-3 p-4 sm:flex-row">
+                    <Button
+                        type="button"
+                        variant={receiptMode === 'new-receipt' ? 'default' : 'outline'}
+                        onClick={() => changeReceiptMode('new-receipt')}
+                    >
+                        Record new receipt
+                    </Button>
+                    <Button
+                        type="button"
+                        variant={receiptMode === 'apply-account' ? 'default' : 'outline'}
+                        onClick={() => setReceiptMode('apply-account')}
+                    >
+                        Apply payment on account
+                    </Button>
+                </CardContent>
+            </Card>
+
+            {receiptMode === 'apply-account' && !existingAdvancePaymentId ? (
+                <CustomerAdvanceSelector
+                    customers={customersData?.items ?? []}
+                    selectedCustomerId={selectedCustomerId}
+                    preselectedInvoiceId={preselectedInvoiceId}
+                    disabled={isSubmitting}
+                    onCustomerChange={(businessPartnerId) => form.setValue('businessPartnerId', businessPartnerId)}
+                    onContinue={(url) => router.push(url)}
+                />
+            ) : (
+            <>
             <div className="grid items-start gap-6 xl:grid-cols-12">
                 {/* Customer receipt details; the API persists receipts as AR payments. */}
                 <Card className="h-fit xl:col-span-4">
@@ -755,6 +816,27 @@ export default function NewReceiptPage() {
                                 )}
                             </div>
 
+                            {existingAdvancePayment && (
+                                <div className="space-y-3 rounded-md border bg-muted/30 p-4 text-sm">
+                                    <div>
+                                        <span className="text-muted-foreground">Advance receipt</span>
+                                        <div className="font-medium">{existingAdvancePayment.paymentNumber}</div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <span className="text-muted-foreground">Receipt date</span>
+                                            <div className="font-medium">{format(new Date(existingAdvancePayment.paymentDate), 'dd MMM yyyy')}</div>
+                                        </div>
+                                        <div>
+                                            <span className="text-muted-foreground">Available</span>
+                                            <div className="font-medium text-emerald-700">{formatCurrency(currentAmount, currentCurrencyCode)}</div>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">The original receipt and cash posting remain unchanged.</p>
+                                </div>
+                            )}
+
+                            {!existingAdvancePaymentId && (<>
                             <div className="space-y-2">
                                 <Label htmlFor="paymentMethod">Payment Method</Label>
                                 <Select
@@ -1040,6 +1122,7 @@ export default function NewReceiptPage() {
                                 <Label htmlFor="notes">Notes</Label>
                                 <Textarea id="notes" {...form.register('notes')} disabled={isSubmitting} />
                             </div>
+                            </>)}
                         </form>
                     </CardContent>
                 </Card>
@@ -1201,7 +1284,7 @@ export default function NewReceiptPage() {
                                                                         [inv.id]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting || availableDiscount <= 0}
+                                                                disabled={isSubmitting || !!existingAdvancePaymentId || availableDiscount <= 0}
                                                             />
                                                         </td>
                                                         <td className="p-3">
@@ -1295,7 +1378,7 @@ export default function NewReceiptPage() {
                 <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
                     <div className="grid flex-1 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                         <div>
-                            <p className="text-xs text-muted-foreground">Cash received</p>
+                            <p className="text-xs text-muted-foreground">{existingAdvancePaymentId ? 'Advance available' : 'Cash received'}</p>
                             <p className="font-semibold">{formatCurrency(currentAmount, currentCurrencyCode)}</p>
                         </div>
                         <div>
@@ -1303,7 +1386,7 @@ export default function NewReceiptPage() {
                             <p className="font-semibold">{formatCurrency(totalAllocated, currentCurrencyCode)}</p>
                         </div>
                         <div>
-                            <p className="text-xs text-muted-foreground">Unallocated cash</p>
+                            <p className="text-xs text-muted-foreground">{existingAdvancePaymentId ? 'Advance remaining' : 'Unallocated cash'}</p>
                             <p className={cn('font-semibold', remainingAmount < -0.01 ? 'text-destructive' : '')}>
                                 {formatCurrency(remainingAmount, currentCurrencyCode)}
                             </p>
@@ -1311,7 +1394,7 @@ export default function NewReceiptPage() {
                         <div className="sm:col-span-3 lg:col-span-2">
                             <p className="text-xs text-muted-foreground">Invoice reduction evidence</p>
                             {invoiceComponentSummaries.length === 0 ? (
-                                <p className="font-semibold">None — customer advance</p>
+                                <p className="font-semibold">{existingAdvancePaymentId ? 'No invoice selected' : 'None — customer advance'}</p>
                             ) : invoiceComponentSummaries.map(([currency, summary]) => (
                                 <p key={currency} className="text-sm font-medium">
                                     {formatCurrency(summary.invoiceReduction, currency)}
@@ -1345,6 +1428,8 @@ export default function NewReceiptPage() {
                     </div>
                 </CardContent>
             </Card>
+            </>
+            )}
         </div>
     );
 }

@@ -340,7 +340,14 @@ namespace ErpSystem.Api.Services.Finance.AR
                 queryable = queryable.Where(p => p.PaymentDate <= query.ToDate.Value);
 
             if (query.HasUnallocatedAmount.HasValue && query.HasUnallocatedAmount.Value)
-                queryable = queryable.Where(p => p.UnallocatedAmount > 0);
+                // UnallocatedAmount is a domain convenience property, not a mapped SQL column.
+                // Keep this predicate server-translatable so payment-on-account candidate lists
+                // cannot fail at runtime or fall back to tenant-wide client evaluation.
+                queryable = queryable.Where(p =>
+                    p.TotalAmount - p.AllocatedAmount - p.RoundingAdjustmentAmount > 0m);
+
+            if (query.IsCustomerAdvance.HasValue)
+                queryable = queryable.Where(p => p.IsCustomerAdvance == query.IsCustomerAdvance.Value);
 
             // Get total count
             var totalCount = await queryable.CountAsync(cancellationToken);
@@ -4918,6 +4925,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Status = payment.Status,
                 ClearedDate = payment.ClearedDate,
                 IsCreditNote = payment.IsCreditNote,
+                IsCustomerAdvance = payment.IsCustomerAdvance,
                 JournalEntryId = payment.JournalEntryId,
                 ReversalJournalEntryId = payment.ReversalJournalEntryId,
                 ReversalPostingEventId = payment.ReversalPostingEventId,
