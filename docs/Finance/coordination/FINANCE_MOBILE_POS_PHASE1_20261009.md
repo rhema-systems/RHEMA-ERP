@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `b69159ea281589d0e196a0d95a8c04d8d1ecefcc`
+- Current implementation checkpoint: `d3d45fa1bb99d9fb21a8addddadd1981ef142498`
 - Pull request: not created
 
 ## Source baselines
@@ -86,6 +86,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `1a3d0ad98ec` - Cash declaration, pending-sync finalization controls, HQ day-end workflow/reporting, and canonical bank-deposit proposal integration.
 - `7c172f8f47f` - Z92S printer/scanner capability contracts, Expo/Kotlin bridge, controlled external SDK packaging, sale-screen integration, and focused tests.
 - `b69159ea281` - Repeatable Mobile POS acceptance gate, Z92S packaging verification, evidence contract, and operator runbook.
+- `d3d45fa1bb9` - Per-request server-origin revalidation, remote cleartext rejection, Android backup/transport manifest hardening, tests, and Mobile POS threat review.
 
 ## Phase 2 application foundation
 
@@ -270,6 +271,8 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Expo Doctor passed 18/18 and the Android Hermes export completed after adding the local module. An SDK-enabled clean Expo prebuild succeeded, autolinking resolved `com.rhemasystems.zcssmartpos.ZcsSmartPosModule`, the generated app Gradle file contained the controlled JAR dependency, and all three packaged artifacts matched the audited SHA-256 hashes.
 - The verification host has no Java runtime or Android SDK, so native Gradle/Kotlin compilation was not claimed. That gate remains explicit rather than treating JavaScript export or Expo prebuild as a compiled APK.
 - The release-form `acceptance:mobile-pos` run passed on 2026-10-10 from fresh mobile and HQ frontend lockfile restores. It passed mobile and HQ TypeScript, all 68 mobile tests, Expo Doctor 18/18, Android Hermes export, the migration-aware API Release build, 63/63 focused Mobile POS API tests, idempotent SQL containing all four Mobile POS migrations, SDK-enabled clean Expo prebuild, the Gradle dependency contract, and exact SHA-256 checks for the supplied JAR plus both JNI libraries. Local detailed evidence is under the ignored `.artifacts/mobile-pos/acceptance/20261010-014020/` directory.
+- The MPOS-0802 source hardening passed TypeScript, all 74 mobile tests, Expo Doctor 18/18, and Android Hermes export. A production SDK-enabled prebuild produced `android:allowBackup="false"` and `android:usesCleartextTraffic="false"`; the vendor JAR and both JNI hashes remained exact. The request-client regression proves an altered HTTP production profile is rejected before `fetch` receives a bearer token.
+- Current dependency scans were recorded in `docs/Mobile/RHEMA_MOBILE_POS_THREAT_REVIEW.md`: npm reported 23 high and 16 moderate dependency paths with no critical advisory, while the API graph reported the existing ImageSharp and transitive cryptography advisories. They require coordinated compatible upgrades and reachability review rather than an unreviewed major framework change.
 
 ## Known failures and constraints
 
@@ -278,6 +281,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The current verification host has no Java runtime or Android SDK, so the generated Android project and Kotlin bridge have not passed a native Gradle build here.
 - Native Android keystore behavior, visible device enrollment/remote-disable flow, and physical Z92S behavior require an Android device and later acceptance stages.
 - Bluetooth ESC/POS implementation is blocked until management or the vendor identifies the supported printer models and protocol contracts; a generic compatibility claim would not be testable.
+- MPOS-0802 remains open for dependency remediation/acceptance, an opaque MFA challenge contract decision, screenshot and certificate-pinning decisions, signed-APK inspection, authorized API penetration checks, and physical root/TLS/revoke testing.
 - Offline grant consumption and cash-sale Finance orchestration are implemented for schema version 1. Physical disconnect/reconnect, concurrent SQL Server aggregate consumption, and process/APK persistence remain unverified outside the automated in-memory and client test boundaries.
 - The repository currently reports pre-existing ImageSharp package advisories and compiler warnings; the verified Mobile POS builds completed with zero errors.
 
