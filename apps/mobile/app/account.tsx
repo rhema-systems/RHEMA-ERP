@@ -1,19 +1,47 @@
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import { Link, Redirect } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { buildMobilePosSupportBundle } from "@/src/diagnostics/support-bundle";
+import { shareMobilePosSupportBundle } from "@/src/diagnostics/support-bundle-output";
+import { loadSessionOutboxSummary } from "@/src/offline/sync-runtime";
 import { useSession } from "@/src/session/session-context";
 import { colors } from "@/src/ui/theme";
 
 export default function AccountScreen() {
   const session = useSession();
   const [busyTenant, setBusyTenant] = useState<string | null>(null);
+  const [sharingSupport, setSharingSupport] = useState(false);
+  const [supportError, setSupportError] = useState<string | null>(null);
 
   if (session.status === "signedOut" || session.status === "mfaRequired") return <Redirect href="/login" />;
 
   const switchTenant = async (code: string) => {
     setBusyTenant(code);
     try { await session.switchTenant(code); } finally { setBusyTenant(null); }
+  };
+
+  const shareSupport = async () => {
+    setSharingSupport(true);
+    setSupportError(null);
+    try {
+      const outbox = session.user && session.bootstrap
+        ? await loadSessionOutboxSummary(session.user, session.bootstrap)
+        : null;
+      await shareMobilePosSupportBundle(buildMobilePosSupportBundle({
+        profile: session.profile,
+        appVersion: Constants.expoConfig?.version,
+        bootstrap: session.bootstrap,
+        pendingDevice: session.pendingDevice,
+        offlineGrant: session.offlineGrant,
+        outbox,
+      }));
+    } catch (caught) {
+      setSupportError(caught instanceof Error ? caught.message : "The support bundle could not be shared.");
+    } finally {
+      setSharingSupport(false);
+    }
   };
 
   return (
@@ -66,6 +94,20 @@ export default function AccountScreen() {
         <InfoRow label="Scanner" value={session.bootstrap?.device.scannerAdapterKey ?? session.pendingDevice?.scannerAdapterKey ?? "camera-manual"} last />
       </View>
 
+      <Text style={styles.sectionLabel}>Support details</Text>
+      <View style={styles.card}>
+        <InfoRow label="Environment" value={session.profile.environment} />
+        <InfoRow label="App version" value={Constants.expoConfig?.version ?? "Unavailable"} />
+        <InfoRow label="Server" value={session.profile.apiBaseUrl || "Unavailable"} />
+        <InfoRow label="Device ID" value={session.bootstrap?.device.id ?? session.pendingDevice?.id ?? "Unavailable"} last />
+      </View>
+      <Text style={styles.supportNote}>The support bundle contains configuration and queue counts only. It excludes passwords, tokens, customer data, sale payloads, and payment details.</Text>
+      {supportError && <Text style={styles.supportError}>{supportError}</Text>}
+      <Pressable accessibilityRole="button" disabled={sharingSupport} onPress={() => void shareSupport()} style={[styles.supportButton, sharingSupport && styles.disabled]}>
+        {sharingSupport ? <ActivityIndicator color={colors.blue} /> : <Ionicons name="share-social-outline" size={19} color={colors.blue} />}
+        <Text style={styles.supportButtonText}>{sharingSupport ? "Preparing support details" : "Share support details"}</Text>
+      </Pressable>
+
       <Pressable accessibilityRole="button" onPress={() => void session.signOut()} style={styles.logoutButton}>
         <Ionicons name="log-out-outline" size={20} color={colors.danger} />
         <Text style={styles.logoutText}>Sign out</Text>
@@ -107,6 +149,11 @@ const styles = StyleSheet.create({
   lastRow: { borderBottomWidth: 0 },
   infoLabel: { color: colors.muted, fontSize: 13 },
   infoValue: { maxWidth: "65%", color: colors.ink, fontSize: 13, fontWeight: "600", textAlign: "right" },
+  supportNote: { marginTop: 9, color: colors.muted, fontSize: 10, lineHeight: 15 },
+  supportError: { marginTop: 9, color: colors.danger, fontSize: 11, lineHeight: 16 },
+  supportButton: { marginTop: 12, minHeight: 48, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: "#B2CCFF", backgroundColor: colors.white },
+  supportButtonText: { color: colors.blue, fontSize: 13, fontWeight: "700" },
+  disabled: { opacity: 0.5 },
   logoutButton: { marginTop: 26, minHeight: 50, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: "#FECDCA", backgroundColor: colors.white },
   logoutText: { color: colors.danger, fontSize: 14, fontWeight: "700" },
 });

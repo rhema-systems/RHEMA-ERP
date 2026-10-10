@@ -62,7 +62,7 @@ export default function SyncScreen() {
       {error && (
         <View style={styles.errorBox}>
           <Ionicons name="alert-circle-outline" size={19} color={colors.danger} />
-          <Text style={styles.errorText}>{error.message}</Text>
+          <Text style={styles.errorText}>{error.message}{error.correlationId ? ` Reference: ${error.correlationId}` : ""}</Text>
         </View>
       )}
 
