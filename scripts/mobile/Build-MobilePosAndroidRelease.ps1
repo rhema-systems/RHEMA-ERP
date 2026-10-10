@@ -260,7 +260,12 @@ try {
 
     $apkVerifyLog = Join-Path $releaseDirectory 'apksigner-verify.log'
     $stages.Add((Invoke-LoggedCommand 'Verify APK signature and certificates' $apksigner @('verify', '--verbose', '--print-certs', $apkPath) $releaseDirectory $apkVerifyLog))
-    $stages.Add((Invoke-LoggedCommand 'Verify AAB JAR signature' $jarsigner @('-verify', '-strict', '-certs', $aabPath) $releaseDirectory (Join-Path $releaseDirectory 'jarsigner-verify.log')))
+    $aabVerifyLog = Join-Path $releaseDirectory 'jarsigner-verify.log'
+    $stages.Add((Invoke-LoggedCommand 'Verify AAB JAR signature' $jarsigner @('-verify', '-verbose', '-certs', $aabPath) $releaseDirectory $aabVerifyLog))
+    $aabVerifyOutput = Get-Content -LiteralPath $aabVerifyLog -Raw
+    if ($aabVerifyOutput -notmatch '(?m)^jar verified\.$') {
+        throw 'AAB JAR signature verification did not report a verified archive.'
+    }
 
     $certificateLine = Get-Content -LiteralPath $apkVerifyLog |
         Where-Object { $_ -match 'certificate SHA-256 digest:' } |
