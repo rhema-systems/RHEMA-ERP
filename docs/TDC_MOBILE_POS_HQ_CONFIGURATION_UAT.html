@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TDC Mobile POS — HQ Configuration and First-Use UAT</title>
+  <style>
+    :root { --ink:#172b3f; --muted:#536779; --line:#d8e3ec; --blue:#145f9d; --blue-soft:#eef6fc; --green:#176b44; --green-soft:#edf8f1; --amber:#8b5500; --amber-soft:#fff7e8; --red:#a32929; --red-soft:#fff0f0; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; background:#eef3f7; color:var(--ink); font:15px/1.58 "Segoe UI",Arial,sans-serif; }
+    header { background:#102c47; color:white; padding:24px max(24px,calc((100vw - 1260px)/2)); }
+    header strong { display:block; font-size:21px; }
+    header span { color:#c7dced; font-size:13px; }
+    nav { position:sticky; top:0; z-index:3; display:flex; flex-wrap:wrap; gap:8px; padding:10px max(24px,calc((100vw - 1260px)/2)); background:white; border-bottom:1px solid var(--line); }
+    nav a { border:1px solid #bfd2e1; border-radius:7px; padding:6px 10px; color:var(--blue); text-decoration:none; font-weight:650; font-size:12px; }
+    main { max-width:1308px; margin:26px auto; padding:38px 42px 54px; background:white; border:1px solid var(--line); border-radius:12px; box-shadow:0 4px 28px #17324d0a; }
+    h1 { margin:0 0 12px; font-size:34px; line-height:1.2; }
+    h2 { margin:42px 0 16px; padding-top:24px; border-top:2px solid #dbe8f3; color:#103d64; font-size:24px; scroll-margin-top:84px; }
+    h3 { margin:28px 0 12px; color:#164d78; font-size:19px; scroll-margin-top:84px; }
+    p { margin:10px 0; }
+    ol,ul { padding-left:23px; }
+    li { margin:6px 0; }
+    code { padding:1px 5px; border-radius:4px; background:#f0f4f8; color:#153d63; font-size:.9em; overflow-wrap:anywhere; }
+    a { color:#0c568e; }
+    table { width:100%; margin:14px 0 26px; border-collapse:collapse; font-size:13px; line-height:1.48; }
+    th,td { padding:9px 10px; border:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+    th { background:#eaf2f8; color:#153e60; }
+    tr:nth-child(even) td { background:#f9fbfc; }
+    .callout { margin:14px 0; padding:15px 17px; border:1px solid #bcd1e1; border-radius:8px; background:var(--blue-soft); }
+    .passbox { border-color:#a9d3b9; background:var(--green-soft); }
+    .warnbox { border-color:#e2c27f; background:var(--amber-soft); }
+    .stopbox { border-color:#e1aaaa; background:var(--red-soft); }
+    .pass { color:var(--green); font-weight:700; }
+    .hold { color:var(--amber); font-weight:700; }
+    .stop { color:var(--red); font-weight:700; }
+    .check { width:52px; text-align:center; font-size:18px; }
+    .step { width:112px; color:#103d64; font-weight:750; }
+    .actor { width:145px; }
+    .route { display:block; margin-bottom:6px; padding:7px 9px; border-left:3px solid #4b88ba; border-radius:4px; background:#eef6fc; color:#203d57; font-weight:650; }
+    .url { display:block; margin-top:5px; font:12px/1.45 Consolas,monospace; word-break:break-all; }
+    .click { font-weight:700; color:#0c568e; }
+    .value { display:inline-block; margin:1px 2px 1px 0; padding:1px 5px; border:1px solid #c8d6e1; border-radius:4px; background:white; font-family:Consolas,monospace; font-size:.92em; }
+    .mini { color:var(--muted); font-size:12px; }
+    .sample-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(235px,1fr)); gap:10px; margin:14px 0 22px; }
+    .sample-card { padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:#fbfdff; }
+    .sample-card b { display:block; margin-bottom:4px; color:#164d78; }
+    .permission-grid { columns:2 320px; column-gap:34px; }
+    .permission-grid li { break-inside:avoid; }
+    details { margin:12px 0; padding:12px 15px; border:1px solid var(--line); border-radius:8px; }
+    summary { cursor:pointer; color:var(--blue); font-weight:700; }
+    footer { padding:0 20px 25px; color:var(--muted); text-align:center; font-size:12px; }
+    @media (max-width:800px) { main{margin:10px;padding:22px 13px} nav{position:static} h1{font-size:27px} table{font-size:12px} th,td{padding:7px} .permission-grid{columns:1} }
+    @page { size:A4 landscape; margin:12mm; }
+    @media print { body{background:white;font-size:10pt} header,nav,footer{display:none} main{max-width:none;margin:0;padding:0;border:0;box-shadow:none} h2{break-before:page;border:0;margin-top:0;padding-top:0} tr{break-inside:avoid} thead{display:table-header-group} table{font-size:8.5pt} th,td{padding:6px} .callout{background:#f7f7f7} }
+  </style>
+</head>
+<body>
+  <header><strong>TDC ERP · Mobile POS HQ configuration and first-use UAT</strong><span>Field-by-field setup guide · prepared 10 October 2026 · print with Ctrl+P</span></header>
+  <nav aria-label="Guide sections">
+    <a href="#start">Start</a><a href="#preflight">Preflight</a><a href="#masters">Master data</a><a href="#permissions">Permissions</a><a href="#offline">Offline policy</a><a href="#store">Store</a><a href="#till">Till</a><a href="#assignment">User</a><a href="#device">Device</a><a href="#first-use">First use</a><a href="#day-end">Day end</a><a href="#problems">Problems</a><a href="#signoff">Sign-off</a>
+  </nav>
+  <main>
+    <h1 id="start">Mobile POS — HQ configuration before using the app</h1>
+    <p>This guide tells the HQ administrator exactly where each prerequisite is configured, what values are required, how the configuration connects to Mobile POS, and what must be visible before a cashier starts using the Android app.</p>
+
+    <aside class="callout warnbox"><strong>Use the deployed VPS address.</strong> Every route below is shown with the current UAT host, <code>https://63.141.230.56</code>. Complete this guide only after the deployment workflow has succeeded and the six Mobile POS database migrations have been applied.</aside>
+    <aside class="callout"><strong>Two controls apply to every operator.</strong> Giving a user Mobile POS permissions does not assign the user to a store. Assigning a user to a store does not grant permissions. HQ must complete both.</aside>
+    <aside class="callout passbox"><strong>Recommended first UAT scope.</strong> Configure the first store as <strong>Online only</strong>. Printer and dedicated scanner hardware are not required for the first test; use item search, camera/manual identifier entry, receipt view, PDF/system print, or share fallback.</aside>
+
+    <h2>Configuration map</h2>
+    <table>
+      <thead><tr><th>Configuration</th><th>Where it is done</th><th>Direct route</th><th>Required before first sale?</th></tr></thead>
+      <tbody>
+        <tr><td>Operating location</td><td>Settings → Modules → Human Resources → Locations → Locations</td><td><a href="https://63.141.230.56/administration/hr/location/locations">/administration/hr/location/locations</a></td><td><strong>Yes</strong></td></tr>
+        <tr><td>Default walk-in customer</td><td>Procurement → Supplier Management → Business Partners</td><td><a href="https://63.141.230.56/procurement/business-partners">/procurement/business-partners</a></td><td><strong>Yes</strong></td></tr>
+        <tr><td>CashTill liquidity account</td><td>Finance → Cash Management → Liquidity Accounts</td><td><a href="https://63.141.230.56/finance/cash/liquidity-accounts">/finance/cash/liquidity-accounts</a></td><td><strong>Yes</strong></td></tr>
+        <tr><td>Payment methods</td><td>Settings → Modules → Finance → Payments &amp; Documents → Payment Methods</td><td><a href="https://63.141.230.56/administration/finance/payment-methods">/administration/finance/payment-methods</a></td><td><strong>Yes</strong></td></tr>
+        <tr><td>Items, UOM, identifiers, prices and warehouse stock</td><td>Inventory → Items &amp; Catalogue, plus Settings → Modules → Inventory</td><td><a href="https://63.141.230.56/inventory/items">/inventory/items</a></td><td><strong>Yes</strong> for sales</td></tr>
+        <tr><td>Role permissions</td><td>Settings → Administration &amp; Governance → Security &amp; Identity → Role Management</td><td><a href="https://63.141.230.56/administration/identity-management/roles">/administration/identity-management/roles</a></td><td><strong>Yes</strong></td></tr>
+        <tr><td>Offline policy, store, till, user assignment and device approval</td><td>Settings → Administration &amp; Governance → General Administration → Mobile POS</td><td><a href="https://63.141.230.56/administration/mobile-pos">/administration/mobile-pos</a></td><td><strong>Store, till, assignment and device: Yes.</strong> Offline policy: optional.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="preflight">0. Deployment and tenant preflight</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to check</th><th>Expected result</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">0.1 Deployment</td><td>Release administrator</td><td>Open the GitHub <strong>Windows VPS CI/CD</strong> run for the release being tested. Confirm the workflow conclusion is successful and the deployed commit matches the intended release.</td><td class="pass">The deployment is green. Do not configure against an incomplete release.</td></tr>
+      <tr><td class="check">☐</td><td class="step">0.2 Sign in</td><td>HQ administrator</td><td>Open <a href="https://63.141.230.56/login">https://63.141.230.56/login</a>, sign in, and select the intended tenant.</td><td>The dashboard opens and the correct tenant is visible in the tenant selector.</td></tr>
+      <tr><td class="check">☐</td><td class="step">0.3 Mobile POS page</td><td>HQ administrator</td><td><span class="route">Settings → Administration &amp; Governance → General Administration → Mobile POS</span><a class="url" href="https://63.141.230.56/administration/mobile-pos">https://63.141.230.56/administration/mobile-pos</a>Open the page and confirm the tabs <strong>Stores, Tills, Day end, Till reports, Devices, Offline policies</strong> and <strong>User assignments</strong> appear.</td><td>The page loads without a permission or database error.</td></tr>
+    </tbody></table>
+
+    <h2 id="masters">1. Configure the supporting master data</h2>
+    <p class="mini">Complete these masters before creating the Mobile POS store because the store and till dialogs read their selectors from these records.</p>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th>Where to configure it</th><th>What to enter or verify</th><th>Expected result</th></tr></thead><tbody>
+      <tr>
+        <td class="check">☐</td><td class="step">1.1 Location</td>
+        <td><span class="route">Settings → Modules → Human Resources → Locations → Locations</span><a class="url" href="https://63.141.230.56/administration/hr/location/locations">https://63.141.230.56/administration/hr/location/locations</a>Click <span class="click">New Location</span> if the shop/site does not exist.</td>
+        <td>Create or verify the physical operating site. It must be active and belong to the correct location structure/level.</td>
+        <td>The location appears as an option in the Mobile POS store dialog.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.2 Company profile</td>
+        <td><span class="route">Settings → Modules → Human Resources → Company Setup → Company Profile</span><a class="url" href="https://63.141.230.56/administration/hr/settings/company-profile">https://63.141.230.56/administration/hr/settings/company-profile</a></td>
+        <td>Verify the legal identity, address, contact, tax and document details if the receipt or store should use a specific company profile. This store field is optional.</td>
+        <td>The company profile is selectable in the store dialog when required.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.3 Walk-in customer</td>
+        <td><span class="route">Procurement → Supplier Management → Business Partners</span><a class="url" href="https://63.141.230.56/procurement/business-partners">https://63.141.230.56/procurement/business-partners</a>Open an existing walk-in customer or click <span class="click">New Business Partner</span>.</td>
+        <td>Verify: Business Partner is active; registration is approved; it is not blacklisted; it has an active <strong>Customer</strong> role; and that role has an approved, currently effective AR profile. Use one default customer for each store.</td>
+        <td class="pass">The customer appears in <strong>Default walk-in customer</strong> on the Mobile POS store dialog.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.4 Finance dimensions</td>
+        <td><span class="route">Settings → Modules → Finance → Core Accounting → Coding Dimensions</span><a class="url" href="https://63.141.230.56/administration/finance/dimensions">https://63.141.230.56/administration/finance/dimensions</a></td>
+        <td>If the tenant requires branch, department, cost centre or another certified dimension, create/activate the correct values. The store can then carry those defaults.</td>
+        <td>Required dimension values appear in the Mobile POS store dialog.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.5 CashTill account</td>
+        <td><span class="route">Finance → Cash Management → Liquidity Accounts</span><a class="url" href="https://63.141.230.56/finance/cash/liquidity-accounts">https://63.141.230.56/finance/cash/liquidity-accounts</a>Click <span class="click">New account</span>.</td>
+        <td>Enter code and name; set Type to <span class="value">Cash Till</span>; select its GL control account; select currency <span class="value">GHS</span>; add notes if needed. The GL account must support the selected currency.</td>
+        <td>The account is active and appears in <strong>CashTill liquidity account</strong> when creating a Mobile POS till.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.6 Payment methods</td>
+        <td><span class="route">Settings → Modules → Finance → Payments &amp; Documents → Payment Methods</span><a class="url" href="https://63.141.230.56/administration/finance/payment-methods">https://63.141.230.56/administration/finance/payment-methods</a>Click <span class="click">New Payment Method</span> or edit an existing one.</td>
+        <td>Configure the code, name, type and active status. For Card, Mobile Money or Bank Transfer, enable <strong>Require bank account</strong> and/or <strong>Require transaction reference</strong> according to the approved business rule. Verify its Finance/GL mapping.</td>
+        <td>Each intended tender is active and appears under <strong>Accepted payment methods</strong> in the Mobile POS till dialog.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.7 UOM</td>
+        <td><span class="route">Settings → Modules → Inventory → Units of Measure</span><a class="url" href="https://63.141.230.56/administration/inventory/units-of-measure">https://63.141.230.56/administration/inventory/units-of-measure</a></td>
+        <td>Verify the selling units required by the catalogue, for example <span class="value">Each</span>. Maintain conversions where an item is stocked and sold in different units.</td>
+        <td>The intended selling unit is active and attached to saleable items.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.8 Warehouse</td>
+        <td><span class="route">Settings → Modules → Inventory → Warehouses &amp; Locations</span><a class="url" href="https://63.141.230.56/administration/inventory/warehouses">https://63.141.230.56/administration/inventory/warehouses</a></td>
+        <td>Create or verify the active warehouse supplying the store. Maintain its storage locations where applicable.</td>
+        <td>The warehouse appears as <strong>Warehouse default</strong> in the Mobile POS store dialog.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.9 Catalogue</td>
+        <td><span class="route">Inventory → Items &amp; Catalogue → Inventory Items</span><a class="url" href="https://63.141.230.56/inventory/items">https://63.141.230.56/inventory/items</a></td>
+        <td>Verify each test item is active, saleable, has the correct selling UOM and tax treatment, and has an effective selling price.</td>
+        <td>The item can be found in Mobile POS catalogue search and its preview returns the expected governed price and tax.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.10 Price and stock</td>
+        <td><span class="route">Inventory → Items &amp; Catalogue → Price Lists</span><a class="url" href="https://63.141.230.56/inventory/price-lists">https://63.141.230.56/inventory/price-lists</a><span class="route">Inventory → Items &amp; Catalogue → Warehouse Items</span><a class="url" href="https://63.141.230.56/inventory/warehouse-items">https://63.141.230.56/inventory/warehouse-items</a></td>
+        <td>Confirm an effective selling price and assign the item to the store warehouse. Load sufficient UAT stock where inventory control applies.</td>
+        <td>The item is available for the store and does not fail checkout due to missing price or warehouse assignment.</td>
+      </tr>
+      <tr>
+        <td class="check">☐</td><td class="step">1.11 Barcode</td>
+        <td><span class="route">Inventory → Items &amp; Catalogue → Item Identifiers</span><a class="url" href="https://63.141.230.56/inventory/item-identifiers">https://63.141.230.56/inventory/item-identifiers</a></td>
+        <td>Optionally maintain a primary, alternate, QR or unit barcode. Use <strong>Authenticated lookup</strong> to verify the identifier resolves to the intended item/UOM.</td>
+        <td>The barcode resolves correctly. If no barcode is configured, manual catalogue search remains usable.</td>
+      </tr>
+    </tbody></table>
+
+    <h2 id="permissions">2. Configure roles and permissions</h2>
+    <p><span class="route">Settings → Administration &amp; Governance → Security &amp; Identity → Role Management</span><a class="url" href="https://63.141.230.56/administration/identity-management/roles">https://63.141.230.56/administration/identity-management/roles</a></p>
+    <ol>
+      <li>Open the role assigned to the cashier. The role name may be any management-defined name.</li>
+      <li>Use the permission search box to find <span class="value">MobilePOS</span> and <span class="value">Finance</span>.</li>
+      <li>Grant the permissions required for the tasks that role performs.</li>
+      <li>Save the role, then verify the intended user is assigned to that role under <a href="https://63.141.230.56/administration/identity-management/users">Identity Management → Users</a>.</li>
+    </ol>
+
+    <h3>Cashier permissions for normal online sales</h3>
+    <ul class="permission-grid">
+      <li><code>MobilePOS.Access</code></li>
+      <li><code>MobilePOS.Store.View</code></li>
+      <li><code>MobilePOS.Device.Enroll</code></li>
+      <li><code>MobilePOS.Till.Operate</code></li>
+      <li><code>MobilePOS.Till.Close</code></li>
+      <li><code>MobilePOS.Invoice.Create</code></li>
+      <li><code>MobilePOS.Customer.View</code></li>
+      <li><code>MobilePOS.Invoice.Post</code></li>
+      <li><code>MobilePOS.Payment.Collect</code></li>
+      <li><code>MobilePOS.Receipt.Reprint</code></li>
+      <li><code>Finance.CashTills.Operate</code></li>
+      <li><code>Finance.AR.Invoices.Create</code></li>
+      <li><code>Finance.AR.Invoices.ApprovePost</code></li>
+      <li><code>Finance.AR.Payments.Receive</code></li>
+    </ul>
+    <aside class="callout warnbox"><strong>Do not stop at <code>MobilePOS.Access</code>.</strong> That permission opens the app, but catalogue search, till operation, posting and payment collection are protected by their own permissions.</aside>
+
+    <h3>Optional cashier permissions</h3>
+    <table><thead><tr><th>Permission</th><th>Grant only when the role may perform this operation</th></tr></thead><tbody>
+      <tr><td><code>MobilePOS.Discount.Apply</code></td><td>Apply governed line discounts.</td></tr>
+      <tr><td><code>MobilePOS.Offline.Use</code></td><td>Request and use a signed offline grant.</td></tr>
+      <tr><td><code>MobilePOS.Return.Create</code></td><td>Initiate a controlled return.</td></tr>
+      <tr><td><code>MobilePOS.Reversal.Create</code></td><td>Initiate a controlled reversal.</td></tr>
+    </tbody></table>
+
+    <h3>HQ administration and review permissions</h3>
+    <aside class="callout"><strong>Which role should be assigned?</strong> <strong>SuperAdmin</strong> and <strong>TenantAdmin</strong> receive the full <code>MobilePOS.*</code> permission catalogue from the seeder. For separation of duties, management may create any custom role name and grant only the permissions in the table below. The application authorizes permissions, not the role name.</aside>
+    <table><thead><tr><th>HQ responsibility</th><th>Permissions</th></tr></thead><tbody>
+      <tr><td>Configure stores, tills, policies and assignments</td><td><code>MobilePOS.Store.View</code>, <code>MobilePOS.Store.Manage</code></td></tr>
+      <tr><td>Approve/reassign/revoke devices</td><td><code>MobilePOS.Device.Approve</code></td></tr>
+      <tr><td>Review till close</td><td><code>MobilePOS.Till.Review</code>, <code>Finance.CashTills.Closures.Review</code></td></tr>
+      <tr><td>Resolve retained sync exceptions</td><td>Review permissions above plus <code>MobilePOS.Sync.Resolve</code></td></tr>
+      <tr><td>Create bank-deposit proposal</td><td><code>MobilePOS.Till.Review</code>, <code>Finance.Banking.Deposits.Create</code></td></tr>
+      <tr><td>View Mobile POS reporting</td><td><code>MobilePOS.Reports.View</code></td></tr>
+    </tbody></table>
+
+    <h2 id="offline">3. Configure the offline policy — optional for first UAT</h2>
+    <p><span class="route">Settings → Administration &amp; Governance → General Administration → Mobile POS → Offline policies</span><a class="url" href="https://63.141.230.56/administration/mobile-pos">https://63.141.230.56/administration/mobile-pos</a></p>
+    <p>For the first test, skip this step and select <span class="value">Online only</span> on the store. When management is ready to test offline operation, click <span class="click">Add policy</span> and explicitly set:</p>
+    <table><thead><tr><th>Policy field</th><th>What HQ decides</th><th>Safe first offline UAT position</th></tr></thead><tbody>
+      <tr><td>Authorization window</td><td>How long a signed grant remains authorized.</td><td><span class="value">480 minutes</span></td></tr>
+      <tr><td>Maximum offline age</td><td>Maximum age accepted when an offline mutation synchronizes.</td><td><span class="value">480 minutes</span></td></tr>
+      <tr><td>Per transaction limit</td><td>Maximum amount for one offline transaction.</td><td>Use an approved low UAT limit.</td></tr>
+      <tr><td>Aggregate limit</td><td>Maximum total amount under one grant.</td><td>Use an approved low UAT limit.</td></tr>
+      <tr><td>Transaction count limit</td><td>Maximum number of commands under one grant.</td><td>Use a small approved test count.</td></tr>
+      <tr><td>Permitted operations</td><td>Cash sale, cash receipt, partial payment, return and reversal switches.</td><td>Enable cash sale/receipt only; leave return/reversal disabled initially.</td></tr>
+      <tr><td>Electronic tender reference</td><td>Whether an external authorization reference is mandatory.</td><td>Require it whenever an electronic tender is permitted.</td></tr>
+      <tr><td>Pending-sync day end</td><td>Whether day-end can proceed with retained pending mutations.</td><td>Keep disabled for the first UAT.</td></tr>
+    </tbody></table>
+
+    <h2 id="store">4. Create the Mobile POS store</h2>
+    <p><span class="route">Settings → Administration &amp; Governance → General Administration → Mobile POS → Stores</span><a class="url" href="https://63.141.230.56/administration/mobile-pos">https://63.141.230.56/administration/mobile-pos</a></p>
+    <table><thead><tr><th class="check">Done</th><th>Click and enter</th><th>Required value</th><th>Expected result</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td>Click <span class="click">Add store</span>.</td><td>Store code and store name.</td><td>The create-store dialog opens.</td></tr>
+      <tr><td class="check">☐</td><td>Set <strong>Status</strong>.</td><td><span class="value">Active</span></td><td>The store can accept an active till.</td></tr>
+      <tr><td class="check">☐</td><td>Select <strong>Operating location</strong>.</td><td>The active location from step 1.1.</td><td>The physical site is retained.</td></tr>
+      <tr><td class="check">☐</td><td>Select <strong>Warehouse default</strong>.</td><td>The store warehouse from step 1.8, if inventory applies.</td><td>Catalogue/stock reads use the intended warehouse.</td></tr>
+      <tr><td class="check">☐</td><td>Select <strong>Company profile</strong>.</td><td>Optional profile from step 1.2.</td><td>The selected company identity is retained.</td></tr>
+      <tr><td class="check">☐</td><td>Select <strong>Default walk-in customer</strong>.</td><td>The approved customer role from step 1.3.</td><td class="pass">The mandatory walk-in mapping is retained.</td></tr>
+      <tr><td class="check">☐</td><td>Select <strong>Offline policy</strong>.</td><td><span class="value">Online only</span> for first UAT, or the approved policy.</td><td>No offline authority is issued unless a policy is explicitly attached.</td></tr>
+      <tr><td class="check">☐</td><td>Enter currency and time zone.</td><td><span class="value">GHS</span> and <span class="value">Africa/Accra</span></td><td>Store currency/time calculations are correct.</td></tr>
+      <tr><td class="check">☐</td><td>Select dimension defaults and save.</td><td>Any mandatory active Finance dimensions.</td><td>The new store is listed as Active with its location, default customer and offline status.</td></tr>
+    </tbody></table>
+
+    <h2 id="till">5. Create the Mobile POS till</h2>
+    <p><span class="route">Settings → Administration &amp; Governance → General Administration → Mobile POS → Tills</span><a class="url" href="https://63.141.230.56/administration/mobile-pos">https://63.141.230.56/administration/mobile-pos</a></p>
+    <ol>
+      <li>Click <span class="click">Add till</span>.</li>
+      <li>Select the active Mobile POS store.</li>
+      <li>Select the active <strong>CashTill liquidity account</strong> created in step 1.5.</li>
+      <li>Enter a unique till number and name.</li>
+      <li>Set status to <span class="value">Active</span>.</li>
+      <li>Under <strong>Accepted payment methods</strong>, tick every tender the till may accept.</li>
+      <li>For each selected tender, set <strong>Online</strong>, <strong>Offline</strong>, and <strong>External reference</strong> deliberately.</li>
+      <li>Click <span class="click">Save till</span>.</li>
+    </ol>
+    <aside class="callout"><strong>Validation rules.</strong> Store and till currency must match. A CashTill liquidity account can belong to only one non-retired Mobile POS till. The store must be Active before its till can be Active.</aside>
+
+    <h2 id="assignment">6. Assign the operator to the store</h2>
+    <p><span class="route">Settings → Administration &amp; Governance → General Administration → Mobile POS → User assignments</span><a class="url" href="https://63.141.230.56/administration/mobile-pos">https://63.141.230.56/administration/mobile-pos</a></p>
+    <ol>
+      <li>Click <span class="click">Assign user</span>.</li>
+      <li>Search for and select the active tenant user.</li>
+      <li>Select the active store.</li>
+      <li>Set <strong>Effective from</strong> to the approved start time.</li>
+      <li>Set <strong>Effective to</strong> only if the assignment must expire automatically.</li>
+      <li>Enter an assignment reason and save.</li>
+    </ol>
+    <p class="pass">PASS: The assignment is current, not expired, and points to the same store that will be assigned to the device. Saving a new current assignment closes the prior current store assignment.</p>
+
+    <h2 id="device">7. Enroll and approve the Android device</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Actor</th><th>Where and what to do</th><th>Expected result</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">Operator</td><td>Open the installed APK, enter the deployed server address when prompted, sign in with the tenant account, and submit the device enrollment request. The user needs <code>MobilePOS.Device.Enroll</code>.</td><td>The app reports that device approval is pending.</td></tr>
+      <tr><td class="check">☐</td><td class="step">HQ administrator</td><td><span class="route">Settings → Administration &amp; Governance → General Administration → Mobile POS → Devices</span><a class="url" href="https://63.141.230.56/administration/mobile-pos">https://63.141.230.56/administration/mobile-pos</a>Open the pending device, select the active store and active till, enter an approval reason, and click <span class="click">Approve assignment</span>.</td><td>The device becomes approved and shows the intended store and till.</td></tr>
+      <tr><td class="check">☐</td><td class="step">Operator</td><td>Return to the app and refresh or sign in again.</td><td>The bootstrap completes and shows the assigned store/till instead of the approval-pending screen.</td></tr>
+    </tbody></table>
+    <aside class="callout warnbox"><strong>Reassignment effect.</strong> Reassigning an approved device increments its revocation epoch and invalidates earlier offline grants. The operator must refresh and obtain new authority.</aside>
+
+    <h2 id="first-use">8. Open the till and perform the first online test</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Test</th><th>Operator action</th><th>Expected result</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">8.1 Bootstrap</td><td>Open the app while online and confirm the displayed store, till, cashier and allowed payment methods.</td><td>They match the HQ store, till, user assignment and device approval.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.2 Open till</td><td>Open a till session and enter the authorized UAT opening float.</td><td>One open cashier-owned session is created for the assigned CashTill.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.3 Walk-in sale</td><td>Start a sale without selecting another customer.</td><td>The store's default walk-in customer is selected automatically.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.4 Approved customer</td><td>Search for an approved customer and select it for a separate preview.</td><td>The selected approved customer replaces the walk-in customer; the app does not create customers.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.5 Catalogue</td><td>Search for an item. Optionally scan or type its configured barcode.</td><td>The correct item, selling UOM, governed price and tax appear.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.6 Complete sale</td><td>Use an allowed online payment method and complete one small UAT sale.</td><td>A canonical posted AR invoice, customer payment/allocation and Mobile POS receipt are returned without duplicate documents.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.7 Receipt</td><td>Open the receipt and test view/share or Android system print. Reprint only if the role has permission.</td><td>The receipt shows tenant, store, till, cashier, customer, items, totals, tender and document references. Hardware absence does not stop the sale.</td></tr>
+    </tbody></table>
+
+    <h2 id="day-end">9. HQ day-end and reporting configuration check</h2>
+    <table><thead><tr><th class="check">Done</th><th>Where</th><th>What to verify</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td><span class="route">Mobile app → Till session</span></td><td>Cashier reconciles, enters the closing count and submits the close evidence.</td></tr>
+      <tr><td class="check">☐</td><td><span class="route">Settings → Administration &amp; Governance → General Administration → Mobile POS → Day end</span></td><td>An independent reviewer can see expected versus counted amount, variance and retained synchronization evidence, then approve or return for recount.</td></tr>
+      <tr><td class="check">☐</td><td><span class="route">Settings → Administration &amp; Governance → General Administration → Mobile POS → Till reports</span></td><td>The finalized session appears with its Finance bank-deposit status. Export CSV is available to an authorized reviewer.</td></tr>
+      <tr><td class="check">☐</td><td><span class="route">Day end → Create deposit proposal</span></td><td>If required, the authorized reviewer selects the destination bank account and records the deposit slip/preparation reference. Finance submission, approval, posting and bank confirmation continue in the canonical Finance process.</td></tr>
+    </tbody></table>
+
+    <h2 id="problems">10. If the app still cannot start</h2>
+    <table><thead><tr><th>Visible problem</th><th>HQ check</th></tr></thead><tbody>
+      <tr><td>Mobile POS menu/page is missing</td><td>Grant at least <code>MobilePOS.Store.View</code>, <code>MobilePOS.Store.Manage</code>, <code>MobilePOS.Device.Approve</code> or <code>MobilePOS.Till.Review</code> as appropriate. Do not rely on the role name.</td></tr>
+      <tr><td>User can sign in but bootstrap says no store assignment</td><td>Open <strong>User assignments</strong>; confirm the assignment is current and its effective-to date has not passed.</td></tr>
+      <tr><td>Device is pending or denied</td><td>Open <strong>Devices</strong>; approve it and assign an Active store and Active till. Confirm the user/device stores match.</td></tr>
+      <tr><td>Default walk-in customer is missing</td><td>Recheck Business Partner status, Customer role and effective approved AR profile, then edit the store mapping.</td></tr>
+      <tr><td>Cannot open a till session</td><td>Confirm the till and CashTill are active; confirm no other open/pending-review session owns that physical till; grant both Mobile POS and Finance till-operation permissions.</td></tr>
+      <tr><td>Item is absent or cannot be sold</td><td>Check item active/saleable status, selling UOM, effective price, warehouse assignment, stock and identifier mapping.</td></tr>
+      <tr><td>Payment method is absent</td><td>Check it is active under Payment Methods and selected under the till's Accepted payment methods with Online enabled.</td></tr>
+      <tr><td>Sale returns forbidden/unauthorized</td><td>Recheck all Mobile POS and canonical Finance permissions in section 2. Signing out and back in may be required after role changes.</td></tr>
+      <tr><td>Offline option is unavailable</td><td>Confirm the user has <code>MobilePOS.Offline.Use</code>, the store has an active offline policy, the till is open and the approved device has a valid grant.</td></tr>
+    </tbody></table>
+
+    <h2 id="signoff">11. HQ readiness sign-off</h2>
+    <table><thead><tr><th class="check">Done</th><th>Readiness condition</th><th>Evidence/reference</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td>Deployment succeeded and Mobile POS administration loads.</td><td>&nbsp;</td></tr>
+      <tr><td class="check">☐</td><td>Approved default walk-in customer is mapped to the active store.</td><td>&nbsp;</td></tr>
+      <tr><td class="check">☐</td><td>Location, warehouse, CashTill, payment methods, catalogue and prices are ready.</td><td>&nbsp;</td></tr>
+      <tr><td class="check">☐</td><td>Cashier role has all required Mobile POS and Finance permissions.</td><td>&nbsp;</td></tr>
+      <tr><td class="check">☐</td><td>User has a current assignment to the store.</td><td>&nbsp;</td></tr>
+      <tr><td class="check">☐</td><td>Device is approved and assigned to the same store and active till.</td><td>&nbsp;</td></tr>
+      <tr><td class="check">☐</td><td>Cashier opened the till and completed one online UAT sale and receipt.</td><td>&nbsp;</td></tr>
+      <tr><td class="check">☐</td><td>Independent HQ reviewer completed the day-end review path.</td><td>&nbsp;</td></tr>
+    </tbody></table>
+    <p><strong>Configured by:</strong> ____________________ &nbsp; <strong>Date:</strong> ____________________ &nbsp; <strong>Tenant:</strong> ____________________</p>
+    <p><strong>Verified by:</strong> ____________________ &nbsp; <strong>Date:</strong> ____________________ &nbsp; <strong>Store/Till:</strong> ____________________</p>
+  </main>
+  <footer>TDC ERP Mobile POS · HQ configuration and first-use UAT guide</footer>
+</body>
+</html>

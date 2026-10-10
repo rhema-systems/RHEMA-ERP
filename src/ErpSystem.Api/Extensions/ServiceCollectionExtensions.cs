@@ -1744,14 +1744,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
 
-            // Store managers and device approvers need the same tenant-scoped reference and
-            // store/till reads as a viewer. These remain capabilities assigned to dynamic roles;
-            // no role name is embedded in the policy.
+            // Store managers, device approvers, and HQ till reviewers need the same tenant-scoped
+            // reference and store/till reads as a viewer. These remain capabilities assigned to
+            // dynamic roles; no role name is embedded in the policy.
             authorizationBuilder.AddPolicy(MobilePosPermissions.ViewStore, policy =>
                 policy.Requirements.Add(new PermissionRequirement(
                     MobilePosPermissions.ViewStore,
                     MobilePosPermissions.ManageStore,
-                    MobilePosPermissions.ApproveDevice)));
+                    MobilePosPermissions.ApproveDevice,
+                    MobilePosPermissions.ReviewTill)));
 
             // CRM follows the same capability ladder as the other governed modules. Roles are
             // dynamic and are authorized by their assigned permissions; no Sales role name is

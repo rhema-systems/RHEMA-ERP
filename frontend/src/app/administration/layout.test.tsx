@@ -112,6 +112,7 @@ describe('QS administration route grants', () => {
     'MobilePOS.Store.View',
     'MobilePOS.Store.Manage',
     'MobilePOS.Device.Approve',
+    'MobilePOS.Till.Review',
   ])('admits Mobile POS administration with %s', permission => {
     state.path = '/administration/mobile-pos';
     state.permissions = [permission];
