@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `1a3d0ad98ec`
+- Current implementation checkpoint: `7c172f8f47f8a90ddc1d7a6cd7dfa8246843f3b7`
 - Pull request: not created
 
 ## Source baselines
@@ -84,6 +84,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `f157ad02fe8` - Canonical Mobile POS till-session workflow, mobile UI, authorization, and focused tests.
 - `ad635847819` - Server-derived Mobile POS till reconciliation and client presentation.
 - `1a3d0ad98ec` - Cash declaration, pending-sync finalization controls, HQ day-end workflow/reporting, and canonical bank-deposit proposal integration.
+- `7c172f8f47f` - Z92S printer/scanner capability contracts, Expo/Kotlin bridge, controlled external SDK packaging, sale-screen integration, and focused tests.
 
 ## Phase 2 application foundation
 
