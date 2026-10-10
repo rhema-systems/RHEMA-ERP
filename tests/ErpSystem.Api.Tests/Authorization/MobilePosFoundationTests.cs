@@ -119,6 +119,21 @@ public sealed class MobilePosFoundationTests
     }
 
     [Fact]
+    public void CompleteCollectionEndpoint_ShouldRequireTillCollectionAndUnderlyingFinancePermissions()
+    {
+        var action = typeof(MobilePosRuntimeController).GetMethod(nameof(MobilePosRuntimeController.CompleteCollection));
+
+        action.Should().NotBeNull();
+        action!.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .Should().BeEquivalentTo(
+                MobilePosPermissions.OperateTill,
+                MobilePosPermissions.CollectPayment,
+                FinancePermissions.ReceiveCustomerPayments);
+    }
+
+    [Fact]
     public void CatalogueAndPreviewEndpoints_ShouldRequireTillAndInvoicePermissions()
     {
         var catalogue = typeof(MobilePosRuntimeController).GetMethod(nameof(MobilePosRuntimeController.SearchCatalogue));

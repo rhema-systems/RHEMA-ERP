@@ -23,6 +23,8 @@ import type {
   MobilePosCatalogueChangePage,
   MobilePosBankAccountOption,
   MobilePosCompleteSaleRequest,
+  MobilePosCompleteCollectionRequest,
+  MobilePosCollectionResult,
   MobilePosSalePreview,
   MobilePosSalePreviewRequest,
   MobilePosSaleResult,
@@ -231,6 +233,10 @@ export const mobileApi = {
   ),
   completeSale: (request: MobilePosCompleteSaleRequest) => authorizedRequest<MobilePosSaleResult>(
     "/api/mobile-pos/v1/sales",
+    { method: "POST", body: JSON.stringify(request) },
+  ),
+  completeCollection: (request: MobilePosCompleteCollectionRequest) => authorizedRequest<MobilePosCollectionResult>(
+    "/api/mobile-pos/v1/collections",
     { method: "POST", body: JSON.stringify(request) },
   ),
   pushOfflineCommand: (request: MobilePosSyncPushRequest) => authorizedRequest<MobilePosSyncPushResult>(

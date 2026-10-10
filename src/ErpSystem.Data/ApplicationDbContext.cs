@@ -249,6 +249,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<MobilePosSale> MobilePosSales { get; set; }
     public DbSet<MobilePosSaleLine> MobilePosSaleLines { get; set; }
     public DbSet<MobilePosTender> MobilePosTenders { get; set; }
+    public DbSet<MobilePosCollection> MobilePosCollections { get; set; }
+    public DbSet<MobilePosCollectionAllocation> MobilePosCollectionAllocations { get; set; }
+    public DbSet<MobilePosCollectionTender> MobilePosCollectionTenders { get; set; }
     public DbSet<MobileMutationReceipt> MobileMutationReceipts { get; set; }
     public DbSet<MobilePosTillCloseSubmission> MobilePosTillCloseSubmissions { get; set; }
     public DbSet<CashierTillCountLine> CashierTillCountLines { get; set; }
@@ -1327,6 +1330,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new MobilePosSaleConfiguration());
         builder.ApplyConfiguration(new MobilePosSaleLineConfiguration());
         builder.ApplyConfiguration(new MobilePosTenderConfiguration());
+        builder.ApplyConfiguration(new MobilePosCollectionConfiguration());
+        builder.ApplyConfiguration(new MobilePosCollectionAllocationConfiguration());
+        builder.ApplyConfiguration(new MobilePosCollectionTenderConfiguration());
         builder.ApplyConfiguration(new MobileMutationReceiptConfiguration());
         builder.ApplyConfiguration(new MobilePosTillCloseSubmissionConfiguration());
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyEnquiryProspectConfiguration());

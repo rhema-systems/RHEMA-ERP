@@ -318,6 +318,35 @@ describe("Mobile POS API client", () => {
     });
   });
 
+  it("posts customer collections to the governed Mobile POS collection endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse({
+      collectionId: "collection-1",
+      allocations: [],
+      tenders: [],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mobileApi.completeCollection({
+      installationId: "install/01",
+      clientMutationId: "collection-mutation-1",
+      localReference: "COL-1",
+      businessPartnerId: "partner-1",
+      businessPartnerRoleId: "role-1",
+      occurredAtUtc: "2026-10-10T10:00:00.000Z",
+      allocations: [{ invoiceId: "invoice-1", amount: 75 }],
+      tenders: [{ paymentMethodId: "cash-1", amount: 50 }, { paymentMethodId: "card-1", amount: 25 }],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url.toString()).toBe("https://erp.example.com/api/mobile-pos/v1/collections");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      clientMutationId: "collection-mutation-1",
+      allocations: [{ invoiceId: "invoice-1", amount: 75 }],
+      tenders: [{ paymentMethodId: "cash-1", amount: 50 }, { paymentMethodId: "card-1", amount: 25 }],
+    });
+  });
+
   it("encodes catalogue watermark and continuation cursor requests", async () => {
     const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse({
       snapshotAtUtc: "2026-10-09T10:00:00.000Z",

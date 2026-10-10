@@ -223,6 +223,77 @@ public sealed class MobilePosTenderConfiguration : IEntityTypeConfiguration<Mobi
     }
 }
 
+public sealed class MobilePosCollectionConfiguration : IEntityTypeConfiguration<MobilePosCollection>
+{
+    public void Configure(EntityTypeBuilder<MobilePosCollection> entity)
+    {
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosDeviceId, item.ClientMutationId })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosDeviceId, item.LocalReference })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosStoreId, item.BusinessDate, item.Status });
+        entity.Property(item => item.CurrencyCode).IsUnicode(false);
+
+        entity.HasOne(item => item.MobilePosStore).WithMany()
+            .HasForeignKey(item => item.MobilePosStoreId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosTill).WithMany()
+            .HasForeignKey(item => item.MobilePosTillId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.CashierTillSession).WithMany()
+            .HasForeignKey(item => item.CashierTillSessionId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosDevice).WithMany()
+            .HasForeignKey(item => item.MobilePosDeviceId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.OperatorUser).WithMany()
+            .HasForeignKey(item => item.OperatorUserId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.BusinessPartner).WithMany()
+            .HasForeignKey(item => item.BusinessPartnerId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.BusinessPartnerRole).WithMany()
+            .HasForeignKey(item => item.BusinessPartnerRoleId).OnDelete(DeleteBehavior.Restrict);
+
+        entity.ToTable(table => table.HasCheckConstraint(
+            "CK_MobilePosCollections_TotalAmount", "[TotalAmount] > 0"));
+    }
+}
+
+public sealed class MobilePosCollectionAllocationConfiguration : IEntityTypeConfiguration<MobilePosCollectionAllocation>
+{
+    public void Configure(EntityTypeBuilder<MobilePosCollectionAllocation> entity)
+    {
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosCollectionId, item.Sequence })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosCollectionId, item.InvoiceId })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasOne(item => item.MobilePosCollection).WithMany(item => item.Allocations)
+            .HasForeignKey(item => item.MobilePosCollectionId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(item => item.Invoice).WithMany()
+            .HasForeignKey(item => item.InvoiceId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table => table.HasCheckConstraint(
+            "CK_MobilePosCollectionAllocations_Values", "[Sequence] > 0 AND [Amount] > 0"));
+    }
+}
+
+public sealed class MobilePosCollectionTenderConfiguration : IEntityTypeConfiguration<MobilePosCollectionTender>
+{
+    public void Configure(EntityTypeBuilder<MobilePosCollectionTender> entity)
+    {
+        entity.HasIndex(item => new { item.TenantId, item.MobilePosCollectionId, item.Sequence })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.CustomerPaymentId })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasOne(item => item.MobilePosCollection).WithMany(item => item.Tenders)
+            .HasForeignKey(item => item.MobilePosCollectionId).OnDelete(DeleteBehavior.Cascade);
+        entity.HasOne(item => item.PaymentMethod).WithMany()
+            .HasForeignKey(item => item.PaymentMethodId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.LiquidityAccount).WithMany()
+            .HasForeignKey(item => item.LiquidityAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.BankAccount).WithMany()
+            .HasForeignKey(item => item.BankAccountId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.CustomerPayment).WithMany()
+            .HasForeignKey(item => item.CustomerPaymentId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table => table.HasCheckConstraint(
+            "CK_MobilePosCollectionTenders_Values", "[Sequence] > 0 AND [Amount] > 0"));
+    }
+}
+
 public sealed class MobileMutationReceiptConfiguration : IEntityTypeConfiguration<MobileMutationReceipt>
 {
     public void Configure(EntityTypeBuilder<MobileMutationReceipt> entity)
@@ -236,6 +307,8 @@ public sealed class MobileMutationReceiptConfiguration : IEntityTypeConfiguratio
             .HasForeignKey(item => item.MobilePosDeviceId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(item => item.MobilePosSale).WithMany()
             .HasForeignKey(item => item.MobilePosSaleId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosCollection).WithMany()
+            .HasForeignKey(item => item.MobilePosCollectionId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(item => item.CanonicalInvoice).WithMany()
             .HasForeignKey(item => item.CanonicalInvoiceId).OnDelete(DeleteBehavior.Restrict);
         entity.ToTable(table =>

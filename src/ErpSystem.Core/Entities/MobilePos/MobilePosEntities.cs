@@ -438,6 +438,114 @@ public sealed class MobilePosTender : TenantEntity
 }
 
 /// <summary>
+/// Server-side source and audit envelope for a Mobile POS receipt collected against one or more
+/// existing AR invoices. CustomerPayment and PaymentAllocation remain the accounting authority.
+/// </summary>
+public sealed class MobilePosCollection : TenantEntity
+{
+    public Guid MobilePosStoreId { get; set; }
+    public MobilePosStore MobilePosStore { get; set; } = null!;
+
+    public Guid MobilePosTillId { get; set; }
+    public MobilePosTill MobilePosTill { get; set; } = null!;
+
+    public Guid CashierTillSessionId { get; set; }
+    public CashierTillSession CashierTillSession { get; set; } = null!;
+
+    public Guid MobilePosDeviceId { get; set; }
+    public MobilePosDevice MobilePosDevice { get; set; } = null!;
+
+    public Guid OperatorUserId { get; set; }
+    public ApplicationUser OperatorUser { get; set; } = null!;
+
+    [Required, MaxLength(100)]
+    public string ClientMutationId { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string LocalReference { get; set; } = string.Empty;
+
+    public Guid BusinessPartnerId { get; set; }
+    public BusinessPartner BusinessPartner { get; set; } = null!;
+
+    public Guid BusinessPartnerRoleId { get; set; }
+    public BusinessPartnerRole BusinessPartnerRole { get; set; } = null!;
+
+    public DateTime BusinessDate { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+
+    [Required, MaxLength(3)]
+    public string CurrencyCode { get; set; } = "GHS";
+
+    [Column(TypeName = "decimal(20,4)")]
+    public decimal TotalAmount { get; set; }
+
+    public MobilePosCollectionStatus Status { get; set; } = MobilePosCollectionStatus.Pending;
+    public DateTime? SynchronizedAtUtc { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
+    public ICollection<MobilePosCollectionAllocation> Allocations { get; set; } =
+        new List<MobilePosCollectionAllocation>();
+    public ICollection<MobilePosCollectionTender> Tenders { get; set; } =
+        new List<MobilePosCollectionTender>();
+}
+
+/// <summary>Immutable invoice allocation requested and completed by one Mobile POS collection.</summary>
+public sealed class MobilePosCollectionAllocation : TenantEntity
+{
+    public Guid MobilePosCollectionId { get; set; }
+    public MobilePosCollection MobilePosCollection { get; set; } = null!;
+
+    public int Sequence { get; set; }
+    public Guid InvoiceId { get; set; }
+    public Invoice Invoice { get; set; } = null!;
+
+    [Required, MaxLength(50)]
+    public string InvoiceNumber { get; set; } = string.Empty;
+
+    [Column(TypeName = "decimal(20,4)")]
+    public decimal Amount { get; set; }
+}
+
+/// <summary>
+/// One tender in a Mobile POS collection. Each row links to one canonical CustomerPayment whose
+/// Finance allocations identify the invoices settled by that tender.
+/// </summary>
+public sealed class MobilePosCollectionTender : TenantEntity
+{
+    public Guid MobilePosCollectionId { get; set; }
+    public MobilePosCollection MobilePosCollection { get; set; } = null!;
+
+    public int Sequence { get; set; }
+    public Guid PaymentMethodId { get; set; }
+    public ErpSystem.Core.Entities.Finance.PaymentMethod PaymentMethod { get; set; } = null!;
+
+    [Column(TypeName = "decimal(20,4)")]
+    public decimal Amount { get; set; }
+
+    [MaxLength(150)]
+    public string? ExternalReference { get; set; }
+
+    public Guid? LiquidityAccountId { get; set; }
+    public LiquidityAccount? LiquidityAccount { get; set; }
+    public Guid? BankAccountId { get; set; }
+    public BankAccount? BankAccount { get; set; }
+
+    public Guid CustomerPaymentId { get; set; }
+    public CustomerPayment CustomerPayment { get; set; } = null!;
+
+    [Required, MaxLength(50)]
+    public string PaymentNumber { get; set; } = string.Empty;
+
+    [MaxLength(50)]
+    public string? PaymentStatus { get; set; }
+
+    public bool WasRecordedOffline { get; set; }
+    public MobilePosTenderStatus Status { get; set; } = MobilePosTenderStatus.Pending;
+}
+
+/// <summary>
 /// Durable server idempotency decision for one device/client mutation pair. A completed or rejected
 /// request is replayed only when the command type, schema version, and server-computed request hash
 /// match exactly.
@@ -477,6 +585,9 @@ public sealed class MobileMutationReceipt : TenantEntity
 
     public Guid? MobilePosSaleId { get; set; }
     public MobilePosSale? MobilePosSale { get; set; }
+
+    public Guid? MobilePosCollectionId { get; set; }
+    public MobilePosCollection? MobilePosCollection { get; set; }
 
     public Guid? CanonicalInvoiceId { get; set; }
     public Invoice? CanonicalInvoice { get; set; }

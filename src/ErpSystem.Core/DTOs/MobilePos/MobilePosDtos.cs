@@ -635,6 +635,65 @@ public sealed class MobilePosSaleTenderResultDto
     public string PaymentStatus { get; set; } = string.Empty;
 }
 
+public sealed class MobilePosCompleteCollectionRequestDto
+{
+    [Required, MaxLength(200)]
+    public string InstallationId { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string ClientMutationId { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string LocalReference { get; set; } = string.Empty;
+
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public DateTime? OccurredAtUtc { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public List<MobilePosCollectionAllocationInputDto> Allocations { get; set; } = [];
+    public List<MobilePosTenderInputDto> Tenders { get; set; } = [];
+}
+
+public sealed class MobilePosCollectionAllocationInputDto
+{
+    public Guid InvoiceId { get; set; }
+    public decimal Amount { get; set; }
+}
+
+public sealed class MobilePosCollectionResultDto
+{
+    public Guid CollectionId { get; set; }
+    public Guid MutationReceiptId { get; set; }
+    public bool IsReplay { get; set; }
+    public string LocalReference { get; set; } = string.Empty;
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public string CustomerCode { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public DateTime BusinessDate { get; set; }
+    public IReadOnlyList<MobilePosCollectionAllocationResultDto> Allocations { get; set; } = [];
+    public IReadOnlyList<MobilePosCollectionTenderResultDto> Tenders { get; set; } = [];
+}
+
+public sealed class MobilePosCollectionAllocationResultDto
+{
+    public Guid InvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+}
+
+public sealed class MobilePosCollectionTenderResultDto
+{
+    public Guid TenderId { get; set; }
+    public Guid PaymentMethodId { get; set; }
+    public decimal Amount { get; set; }
+    public Guid CustomerPaymentId { get; set; }
+    public string PaymentNumber { get; set; } = string.Empty;
+    public string PaymentStatus { get; set; } = string.Empty;
+}
+
 public sealed class MobilePosReceiptReprintRequestDto
 {
     [Required, StringLength(200, MinimumLength = 16)]

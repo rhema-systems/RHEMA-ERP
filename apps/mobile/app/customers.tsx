@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Link, Redirect } from "expo-router";
+import { Link, Redirect, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ApiProblem, mobileApi } from "@/src/api/client";
@@ -10,6 +10,7 @@ import { colors } from "@/src/ui/theme";
 
 export default function CustomersScreen() {
   const session = useSession();
+  const router = useRouter();
   const defaultCustomer = useMemo<MobilePosCustomerSearchResult | null>(() => session.bootstrap ? ({
     businessPartnerId: session.bootstrap.store.defaultWalkInBusinessPartnerId,
     businessPartnerRoleId: session.bootstrap.store.defaultWalkInBusinessPartnerRoleId,
@@ -36,6 +37,10 @@ export default function CustomersScreen() {
   if (session.status !== "ready" || !session.bootstrap) return <Redirect href="/" />;
 
   const permitted = session.user?.permissions.includes("MobilePOS.Customer.View") === true;
+  const canCollect = session.user?.permissions.includes("MobilePOS.Till.Operate") === true
+    && session.user.permissions.includes("MobilePOS.Payment.Collect")
+    && session.user.permissions.includes("Finance.AR.Payments.Receive")
+    && Boolean(session.bootstrap.currentTillSessionId);
 
   const search = async () => {
     const term = query.trim();
@@ -163,6 +168,23 @@ export default function CustomersScreen() {
                   </View>
                   <Text style={styles.invoiceMeta}>Invoice {date(invoice.invoiceDate)} · Due {invoice.dueDate ? date(invoice.dueDate) : "not set"}</Text>
                   {invoice.daysOverdue > 0 && <Text style={styles.overdue}>{invoice.daysOverdue} day(s) overdue</Text>}
+                  {canCollect && <Pressable
+                    accessibilityRole="button"
+                    onPress={() => router.push({
+                      pathname: "/collection",
+                      params: {
+                        businessPartnerId: selected.businessPartnerId,
+                        businessPartnerRoleId: selected.businessPartnerRoleId,
+                        customerCode: selected.code,
+                        customerName: selected.name,
+                        initialInvoiceId: invoice.id,
+                      },
+                    })}
+                    style={styles.collectButton}
+                  >
+                    <Ionicons name="cash-outline" size={17} color={colors.white} />
+                    <Text style={styles.collectButtonText}>Collect payment</Text>
+                  </Pressable>}
                 </View>
               ))}
             </View>
@@ -228,4 +250,6 @@ const styles = StyleSheet.create({
   invoiceAmount: { color: colors.navy, fontSize: 14, fontWeight: "800" },
   invoiceMeta: { marginTop: 8, color: colors.slate, fontSize: 11 },
   overdue: { marginTop: 6, color: colors.danger, fontSize: 11, fontWeight: "700" },
+  collectButton: { minHeight: 40, marginTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, borderRadius: 10, backgroundColor: colors.blue },
+  collectButtonText: { color: colors.white, fontSize: 12, fontWeight: "800" },
 });

@@ -14,7 +14,8 @@ public sealed record MobilePosMutationCompletion<TResult>(
     TResult Result,
     Guid? MobilePosSaleId = null,
     Guid? CanonicalInvoiceId = null,
-    IReadOnlyCollection<Guid>? CanonicalCustomerPaymentIds = null);
+    IReadOnlyCollection<Guid>? CanonicalCustomerPaymentIds = null,
+    Guid? MobilePosCollectionId = null);
 
 public sealed record MobilePosMutationExecution<TResult>(
     Guid ReceiptId,
@@ -213,6 +214,7 @@ public sealed class MobilePosMutationExecutionService : IMobilePosMutationExecut
         receipt.ResultJson = resultJson;
         receipt.ResultHash = ComputeHash(resultJson);
         receipt.MobilePosSaleId = completion.MobilePosSaleId;
+        receipt.MobilePosCollectionId = completion.MobilePosCollectionId;
         receipt.CanonicalInvoiceId = completion.CanonicalInvoiceId;
         receipt.CanonicalCustomerPaymentIdsJson = completion.CanonicalCustomerPaymentIds is null
             ? null

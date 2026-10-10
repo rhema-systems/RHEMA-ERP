@@ -19,6 +19,7 @@ public sealed class MobilePosRuntimeController : ControllerBase
     private readonly IMobilePosFinanceReadService _financeReads;
     private readonly IMobilePosCheckoutReadService _checkout;
     private readonly IMobilePosSaleService _sales;
+    private readonly IMobilePosCollectionService _collections;
     private readonly IMobilePosSyncService _sync;
     private readonly IMobilePosReceiptService _receipts;
     private readonly IMobilePosTillSessionService _tillSessions;
@@ -29,6 +30,7 @@ public sealed class MobilePosRuntimeController : ControllerBase
         IMobilePosFinanceReadService financeReads,
         IMobilePosCheckoutReadService checkout,
         IMobilePosSaleService sales,
+        IMobilePosCollectionService collections,
         IMobilePosSyncService sync,
         IMobilePosReceiptService receipts,
         IMobilePosTillSessionService tillSessions)
@@ -38,6 +40,7 @@ public sealed class MobilePosRuntimeController : ControllerBase
         _financeReads = financeReads;
         _checkout = checkout;
         _sales = sales;
+        _collections = collections;
         _sync = sync;
         _receipts = receipts;
         _tillSessions = tillSessions;
@@ -253,6 +256,33 @@ public sealed class MobilePosRuntimeController : ControllerBase
         catch (MobilePosCommandRejectedException exception)
         {
             return RejectedSale(exception, "Mobile POS sale rejected");
+        }
+    }
+
+    [HttpPost("collections")]
+    [Authorize(Policy = MobilePosPermissions.OperateTill)]
+    [Authorize(Policy = MobilePosPermissions.CollectPayment)]
+    [Authorize(Policy = FinancePermissions.ReceiveCustomerPayments)]
+    public async Task<ActionResult<MobilePosCollectionResultDto>> CompleteCollection(
+        [FromBody] MobilePosCompleteCollectionRequestDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _collections.CompleteAsync(dto, cancellationToken));
+        }
+        catch (MobilePosMutationConflictException exception)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Mobile POS request conflict",
+                Detail = exception.Message
+            });
+        }
+        catch (MobilePosCommandRejectedException exception)
+        {
+            return RejectedSale(exception, "Mobile POS collection rejected");
         }
     }
 

@@ -501,6 +501,53 @@ export interface MobilePosSaleResult {
   tenders: MobilePosSaleTenderResult[];
 }
 
+export interface MobilePosCollectionAllocationInput {
+  invoiceId: string;
+  amount: number;
+}
+
+export interface MobilePosCompleteCollectionRequest {
+  installationId: string;
+  clientMutationId: string;
+  localReference: string;
+  businessPartnerId: string;
+  businessPartnerRoleId: string;
+  occurredAtUtc: string;
+  allocations: MobilePosCollectionAllocationInput[];
+  tenders: MobilePosTenderInput[];
+}
+
+export interface MobilePosCollectionAllocationResult {
+  invoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+}
+
+export interface MobilePosCollectionTenderResult {
+  tenderId: string;
+  paymentMethodId: string;
+  amount: number;
+  customerPaymentId: string;
+  paymentNumber: string;
+  paymentStatus: string;
+}
+
+export interface MobilePosCollectionResult {
+  collectionId: string;
+  mutationReceiptId: string;
+  isReplay: boolean;
+  localReference: string;
+  businessPartnerId: string;
+  businessPartnerRoleId: string;
+  customerCode: string;
+  customerName: string;
+  currencyCode: string;
+  totalAmount: number;
+  businessDate: string;
+  allocations: MobilePosCollectionAllocationResult[];
+  tenders: MobilePosCollectionTenderResult[];
+}
+
 export interface MobilePosSyncPushRequest {
   offlineGrantToken: string;
   offlineGrantId: string;

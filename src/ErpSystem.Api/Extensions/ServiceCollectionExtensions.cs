@@ -1018,6 +1018,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosMutationExecutionService, ErpSystem.Api.Services.MobilePos.MobilePosMutationExecutionService>();
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosOfflineGrantValidationService, ErpSystem.Api.Services.MobilePos.MobilePosOfflineGrantValidationService>();
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosSaleService, ErpSystem.Api.Services.MobilePos.MobilePosSaleService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosCollectionService, ErpSystem.Api.Services.MobilePos.MobilePosCollectionService>();
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosSyncService, ErpSystem.Api.Services.MobilePos.MobilePosSyncService>();
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosReceiptService, ErpSystem.Api.Services.MobilePos.MobilePosReceiptService>();
             services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosTillSessionService, ErpSystem.Api.Services.MobilePos.MobilePosTillSessionService>();

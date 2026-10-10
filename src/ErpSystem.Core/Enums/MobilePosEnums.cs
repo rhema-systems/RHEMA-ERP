@@ -41,6 +41,14 @@ public enum MobilePosSaleStatus
     Reversed = 4
 }
 
+public enum MobilePosCollectionStatus
+{
+    Pending = 1,
+    Completed = 2,
+    Rejected = 3,
+    Reversed = 4
+}
+
 public enum MobilePosTenderStatus
 {
     Pending = 1,
