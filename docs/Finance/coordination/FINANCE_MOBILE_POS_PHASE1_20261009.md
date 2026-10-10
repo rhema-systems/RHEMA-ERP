@@ -8,12 +8,14 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 
 ## Branch and worktree
 
-- Branch: `codex/mobile-pos-phase1`
-- Worktree: `.worktrees/mobile-pos-phase1`
+- Implementation branch: `codex/mobile-pos-phase1`
+- Release candidate branch: `codex/mobile-project-qs-release`
+- Release candidate worktree: `.worktrees/mobile-project-qs-release`
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `35ceebc3cb9e8227e098e43bed2b904d9efad7a1`
+- Current Mobile POS checkpoint: `084ccfe7789c52d3a1854cc638efa4b53035b783`
+- Current release-candidate checkpoint before publication: `53c949e4332`
 - Pull request: not created
 
 ## Source baselines
@@ -363,6 +365,8 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - A portable UAT smoke prebuild from a real short Windows path completed `app:assembleDebug`: 201/201 Gradle tasks passed in 6m31s and produced a 177,881,408-byte APK with SHA-256 `98A4842170F30B80EAF877DAD6861F82B95B35D9F0C443984261F01074E162FA`. The generated project contained no SmartPos JAR, JNI library, or ZCS Gradle dependency. The long primary path failed at CMake/Ninja object-path generation, and a substituted drive failed React Native code generation because dependencies resolved to the physical drive; the runbook now requires a real short-path native checkout.
 - The portable-profile source passed Mobile TypeScript and all 99 mobile tests. Both PowerShell build scripts parse cleanly. The dependency restore now requests development tooling explicitly so an inherited `NODE_ENV=production` cannot omit TypeScript or Vitest, and the focused API test stage restores its own project graph instead of assuming a pre-existing `obj/project.assets.json` from another checkout.
 - The signed UAT build produced both APK and AAB and passed Android `apksigner`. JDK `jarsigner -strict` returned exit code 4 solely for Android App Bundle stream-order warnings while the same archive returned exit code 0 and `jar verified.` under full certificate verification. The release gate now requires successful non-strict verification plus a trimmed exact `jar verified.` output line, accommodating the extra carriage return PowerShell can preserve from native Windows output without accepting a missing verification marker.
+- The exact-commit portable acceptance gate passed on checkpoint `084ccfe7789c52d3a1854cc638efa4b53035b783`. It passed Mobile and HQ TypeScript, all 99 mobile tests, Expo Doctor, Android Hermes export, the migration-aware API Release build, 83/83 focused Mobile POS API tests, idempotent SQL for all six server migrations, all 15 migration markers, hardened Android manifest/signing controls, proprietary ZCS exclusion, and native portable Android compilation. Evidence SHA-256 is `CAF8C664297527860BF35919C79B2595AD5610F14507E2230D8447DD745AC29C`.
+- The signed portable UAT release `uat-portable-v0.1.0-1-084ccfe7789c` passed APK certificate verification and AAB JAR signature verification. The APK SHA-256 is `BADE89C74B047A27D94F72EDAD1B41E20EE4D19FA98FE17C5DB358B81CAF983E`; the AAB SHA-256 is `42418CF6F8144F46DB0A338704366668A3E9BB081DC027A122DB9503458973DD`. Its declared hardware profile is `PortableFallback`, with Android system printing/PDF sharing and camera/manual/keyboard-wedge scanning.
 
 ## Known failures and constraints
 
@@ -374,7 +378,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - MPOS-0802 remains open for dependency remediation/acceptance, an opaque MFA challenge contract decision, screenshot and certificate-pinning decisions, signed-APK inspection, authorized API penetration checks, and physical root/TLS/revoke testing.
 - MPOS-0803 remains open until the committed reconciliation runs with nonzero completed sales against an authorized UAT copy and Finance reviews the same invoice, receipt, journal, liquidity, till-close and deposit sample.
 - MPOS-0805 remains open for signed-Z92S timing and resource measurements, controlled real-network loss, process/device restart, APK upgrade preservation, API/SQL queue-drain evidence, hardware fault recovery, and an eight-hour battery run.
-- MPOS-0806 remains open until the organization supplies and registers the secure signing identity, stores CI/build credentials, records written SDK redistribution approval, produces and verifies signed APK/AAB artifacts, and completes physical Z92S install, upgrade, and higher-version-code rollback rehearsal.
+- MPOS-0806 has a local UAT-only signing identity and verified portable APK/AAB artifacts. It remains open for organization-controlled production signing custody and CI credentials, written SDK redistribution approval, and physical Z92S install, upgrade, and higher-version-code rollback rehearsal.
 - MPOS-0807 remains open until management assigns named primary/backup owners, approves support hours/SLA/RPO/RTO/alert thresholds, configures environment monitoring and fleet tooling, completes role training and rehearsals, and signs the environment-specific production-readiness checklist.
 - MPOS-0308 source-level accounting contract and relational rollback coverage are complete, but production-provider SQL Server/UAT execution and the authorized nonzero accounting certification remain open.
 - Signed offline customer collection is implemented for the management-approved `CashReceipt` and `PartialPayment` capabilities. A queued collection offers a visibly provisional printable/shareable slip only when the signed policy permits one; canonical output follows successful synchronization. Physical-device acceptance remains open.
