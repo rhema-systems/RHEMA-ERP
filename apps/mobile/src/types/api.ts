@@ -230,6 +230,38 @@ export interface MobilePosTillReconciliation {
   tenders: MobilePosTillTenderReconciliation[];
 }
 
+export interface MobilePosSubmitTillCloseRequest {
+  installationId: string;
+  countLines: Array<{ denomination: number; quantity: number }>;
+  varianceReason?: string;
+  closingEvidenceFileId?: string;
+  sessionRowVersion: string;
+  pendingClientMutationIds: string[];
+}
+
+export interface MobilePosTillCloseSubmission {
+  id: string;
+  cashierTillSessionId: string;
+  mobilePosStoreId: string;
+  mobilePosTillId: string;
+  mobilePosDeviceId: string;
+  mobilePosOfflinePolicyId?: string;
+  submittedByUserId: string;
+  submittedAtUtc: string;
+  policyAllowedPendingSync: boolean;
+  pendingMutationCount: number;
+  pendingClientMutationIds: string[];
+  pendingMutationDigest: string;
+  status: string | number;
+  syncExceptionResolvedAtUtc?: string;
+  syncExceptionResolvedByUserId?: string;
+  syncExceptionResolutionReason?: string;
+  finalizedAtUtc?: string;
+  finalizedByUserId?: string;
+  rowVersion: string;
+  session: MobilePosTillSession;
+}
+
 export interface MobilePosOfflinePaymentMethodSnapshot {
   paymentMethodId: string;
   code: string;

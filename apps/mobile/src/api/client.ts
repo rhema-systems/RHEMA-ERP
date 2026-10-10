@@ -11,6 +11,8 @@ import type {
   MobilePosBootstrap,
   MobilePosOpenTillSessionRequest,
   MobilePosTillReconciliation,
+  MobilePosSubmitTillCloseRequest,
+  MobilePosTillCloseSubmission,
   MobilePosTillSession,
   MobilePosDevice,
   MobilePosOfflineGrant,
@@ -178,6 +180,13 @@ export const mobileApi = {
   ),
   getTillReconciliation: (sessionId: string, installationId: string) => authorizedRequest<MobilePosTillReconciliation>(
     `/api/mobile-pos/v1/till-sessions/${encodeURIComponent(sessionId)}/reconciliation?installationId=${encodeURIComponent(installationId)}`,
+  ),
+  getTillCloseSubmission: (sessionId: string, installationId: string) => authorizedRequest<MobilePosTillCloseSubmission | undefined>(
+    `/api/mobile-pos/v1/till-sessions/${encodeURIComponent(sessionId)}/close-submission?installationId=${encodeURIComponent(installationId)}`,
+  ),
+  submitTillClose: (sessionId: string, request: MobilePosSubmitTillCloseRequest) => authorizedRequest<MobilePosTillCloseSubmission>(
+    `/api/mobile-pos/v1/till-sessions/${encodeURIComponent(sessionId)}/close-submission`,
+    { method: "POST", body: JSON.stringify(request) },
   ),
   issueOfflineGrant: (installationId: string) => authorizedRequest<MobilePosOfflineGrant>(
     "/api/mobile-pos/v1/offline-grants",

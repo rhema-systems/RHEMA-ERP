@@ -246,3 +246,33 @@ public sealed class MobileMutationReceiptConfiguration : IEntityTypeConfiguratio
         });
     }
 }
+
+public sealed class MobilePosTillCloseSubmissionConfiguration : IEntityTypeConfiguration<MobilePosTillCloseSubmission>
+{
+    public void Configure(EntityTypeBuilder<MobilePosTillCloseSubmission> entity)
+    {
+        entity.HasIndex(item => new { item.TenantId, item.CashierTillSessionId })
+            .IsUnique().HasFilter("[IsDeleted] = 0");
+        entity.HasIndex(item => new { item.TenantId, item.Status, item.SubmittedAtUtc });
+        entity.Property(item => item.PendingMutationDigest).IsUnicode(false);
+        entity.HasOne(item => item.CashierTillSession).WithMany()
+            .HasForeignKey(item => item.CashierTillSessionId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosStore).WithMany()
+            .HasForeignKey(item => item.MobilePosStoreId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosTill).WithMany()
+            .HasForeignKey(item => item.MobilePosTillId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosDevice).WithMany()
+            .HasForeignKey(item => item.MobilePosDeviceId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosOfflinePolicy).WithMany()
+            .HasForeignKey(item => item.MobilePosOfflinePolicyId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.BankDepositBatch).WithMany()
+            .HasForeignKey(item => item.BankDepositBatchId).OnDelete(DeleteBehavior.Restrict);
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_MobilePosTillCloseSubmissions_PendingCount",
+                "[PendingMutationCount] >= 0");
+            table.HasCheckConstraint("CK_MobilePosTillCloseSubmissions_Digest",
+                "LEN([PendingMutationDigest]) = 64");
+        });
+    }
+}

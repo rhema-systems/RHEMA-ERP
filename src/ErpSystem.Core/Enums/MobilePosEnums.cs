@@ -55,3 +55,12 @@ public enum MobileMutationReceiptStatus
     Completed = 2,
     Rejected = 3
 }
+
+public enum MobilePosTillCloseSubmissionStatus
+{
+    ReadyForReview = 1,
+    PendingSync = 2,
+    SyncExceptionResolved = 3,
+    Finalized = 4,
+    ReturnedForRecount = 5
+}

@@ -188,6 +188,29 @@ describe("Mobile POS API client", () => {
     );
   });
 
+  it("loads and submits governed till-close evidence", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => jsonResponse({ id: "close-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mobileApi.getTillCloseSubmission("session-1", "installation-1");
+    await mobileApi.submitTillClose("session-1", {
+      installationId: "installation-1",
+      countLines: [{ denomination: 20, quantity: 3 }],
+      varianceReason: "Counted twice",
+      sessionRowVersion: "AQID",
+      pendingClientMutationIds: ["mutation-123456"],
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0].toString()).toContain("/till-sessions/session-1/close-submission?installationId=installation-1");
+    const [url, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(url).toContain("/till-sessions/session-1/close-submission");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      sessionRowVersion: "AQID",
+      pendingClientMutationIds: ["mutation-123456"],
+    });
+  });
+
   it("encodes approved-customer search and outstanding-invoice request context", async () => {
     const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);

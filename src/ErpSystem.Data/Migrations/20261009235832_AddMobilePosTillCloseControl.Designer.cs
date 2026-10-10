@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261009235832_AddMobilePosTillCloseControl")]
+    partial class AddMobilePosTillCloseControl
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -123957,15 +123960,6 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("BankDepositBatchId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("BankDepositProposedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("BankDepositProposedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid>("CashierTillSessionId")
                         .HasColumnType("uniqueidentifier");
 
@@ -124059,8 +124053,6 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("BankDepositBatchId");
 
                     b.HasIndex("CashierTillSessionId");
 
@@ -227100,11 +227092,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.MobilePos.MobilePosTillCloseSubmission", b =>
                 {
-                    b.HasOne("ErpSystem.Core.Entities.Finance.BankDepositBatch", "BankDepositBatch")
-                        .WithMany()
-                        .HasForeignKey("BankDepositBatchId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("ErpSystem.Core.Entities.Finance.CashierTillSession", "CashierTillSession")
                         .WithMany()
                         .HasForeignKey("CashierTillSessionId")
@@ -227139,8 +227126,6 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("BankDepositBatch");
 
                     b.Navigation("CashierTillSession");
 

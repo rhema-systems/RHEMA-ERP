@@ -1,5 +1,6 @@
 using System.Data;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.MobilePos;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -26,17 +27,20 @@ public sealed class CashierTillService : ICashierTillService
     private readonly ICurrentUserService _currentUser;
     private readonly IDocumentNumberingService _numbering;
     private readonly IFinanceAuditService? _audit;
+    private readonly IMobilePosTillFinalizationGuard? _mobilePosFinalization;
 
     public CashierTillService(
         ApplicationDbContext context,
         ICurrentUserService currentUser,
         IDocumentNumberingService numbering,
-        IFinanceAuditService? audit = null)
+        IFinanceAuditService? audit = null,
+        IMobilePosTillFinalizationGuard? mobilePosFinalization = null)
     {
         _context = context;
         _currentUser = currentUser;
         _numbering = numbering;
         _audit = audit;
+        _mobilePosFinalization = mobilePosFinalization;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -410,6 +414,13 @@ public sealed class CashierTillService : ICashierTillService
         {
             throw new InvalidOperationException("Reviewer comments are required when the variance exceeds the tenant threshold.");
         }
+        if (_mobilePosFinalization != null)
+        {
+            await _mobilePosFinalization.PrepareFinalizationAsync(
+                session.Id,
+                session.LiquidityAccountId,
+                cancellationToken);
+        }
 
         var now = DateTime.UtcNow;
         session.Status = CashierTillSessionStatus.Closed;
@@ -455,6 +466,13 @@ public sealed class CashierTillService : ICashierTillService
         session.ReviewedById = UserId;
         session.ReviewComments = comments;
         StampModified(session, now);
+        if (_mobilePosFinalization != null)
+        {
+            await _mobilePosFinalization.PrepareReturnForRecountAsync(
+                session.Id,
+                session.LiquidityAccountId,
+                cancellationToken);
+        }
         await _context.SaveChangesAsync(cancellationToken);
         await RecordAuditAsync("Finance.CashTill.ReturnedForRecount", session, null, new { comments }, cancellationToken);
         return await GetRequiredSessionDtoAsync(id, cancellationToken);

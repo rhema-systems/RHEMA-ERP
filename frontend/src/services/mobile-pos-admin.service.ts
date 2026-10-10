@@ -1,8 +1,10 @@
 import { apiService } from './api.service';
+import type { CashierTillSession } from '@/types/cash-management';
 
 export type MobilePosStoreStatus = 1 | 2 | 3 | 4;
 export type MobilePosTillStatus = 1 | 2 | 3 | 4;
 export type MobilePosDeviceStatus = 1 | 2 | 3 | 4 | 5;
+export type MobilePosTillCloseSubmissionStatus = 1 | 2 | 3 | 4 | 5;
 
 export interface MobilePosReferenceOption {
   id: string;
@@ -31,6 +33,7 @@ export interface MobilePosAdministrationReferences {
   warehouses: MobilePosReferenceOption[];
   companyProfiles: MobilePosReferenceOption[];
   cashTills: MobilePosReferenceOption[];
+  bankAccounts: MobilePosReferenceOption[];
   paymentMethods: MobilePosReferenceOption[];
   users: MobilePosReferenceOption[];
   dimensions: MobilePosDimensionReference[];
@@ -179,6 +182,34 @@ export interface MobilePosDevice {
   rowVersion: string;
 }
 
+export interface MobilePosTillCloseSubmission {
+  id: string;
+  cashierTillSessionId: string;
+  mobilePosStoreId: string;
+  mobilePosTillId: string;
+  mobilePosDeviceId: string;
+  mobilePosOfflinePolicyId?: string;
+  submittedByUserId: string;
+  submittedAtUtc: string;
+  policyAllowedPendingSync: boolean;
+  pendingMutationCount: number;
+  pendingClientMutationIds: string[];
+  pendingMutationDigest: string;
+  status: MobilePosTillCloseSubmissionStatus;
+  syncExceptionResolvedAtUtc?: string;
+  syncExceptionResolvedByUserId?: string;
+  syncExceptionResolutionReason?: string;
+  finalizedAtUtc?: string;
+  finalizedByUserId?: string;
+  bankDepositBatchId?: string;
+  bankDepositNumber?: string;
+  bankDepositStatus?: number;
+  bankDepositProposedAtUtc?: string;
+  bankDepositProposedByUserId?: string;
+  rowVersion: string;
+  session: CashierTillSession;
+}
+
 const base = '/administration/mobile-pos/v1';
 
 export const mobilePosAdminService = {
@@ -212,4 +243,21 @@ export const mobilePosAdminService = {
   ) => apiService.post<MobilePosDevice>(`${base}/devices/${id}/approve`, input),
   revokeDevice: (id: string, input: { reason: string; rowVersion: string }) =>
     apiService.post<MobilePosDevice>(`${base}/devices/${id}/revoke`, input),
+  tillCloseSubmissions: () =>
+    apiService.get<MobilePosTillCloseSubmission[]>(`${base}/till-close-submissions`),
+  tillCloseReport: () =>
+    apiService.get<MobilePosTillCloseSubmission[]>(`${base}/till-close-report`),
+  resolvePendingSync: (id: string, input: { reason: string; rowVersion: string }) =>
+    apiService.post<MobilePosTillCloseSubmission>(`${base}/till-close-submissions/${id}/resolve-pending-sync`, input),
+  approveTillClose: (sessionId: string, input: { comments: string; rowVersion: string }) =>
+    apiService.post<CashierTillSession>(`/finance/cashier-tills/sessions/${sessionId}/approve-closure`, input),
+  returnTillClose: (sessionId: string, input: { comments: string; rowVersion: string }) =>
+    apiService.post<CashierTillSession>(`/finance/cashier-tills/sessions/${sessionId}/return-for-recount`, input),
+  createBankDepositProposal: (id: string, input: {
+    bankAccountId: string;
+    depositDate: string;
+    depositReference: string;
+    notes?: string;
+    rowVersion: string;
+  }) => apiService.post<{ id: string; depositNumber: string; status: number }>(`${base}/till-close-submissions/${id}/bank-deposit-proposal`, input),
 };

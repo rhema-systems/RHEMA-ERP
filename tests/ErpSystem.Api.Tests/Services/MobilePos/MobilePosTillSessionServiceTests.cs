@@ -36,6 +36,78 @@ public sealed class MobilePosTillSessionServiceTests
             FinancePermissions.OperateCashTills);
     }
 
+    [Theory]
+    [InlineData(nameof(MobilePosRuntimeController.GetTillCloseSubmission))]
+    [InlineData(nameof(MobilePosRuntimeController.SubmitTillClose))]
+    public void TillCloseEndpoints_ShouldRequireMobileCloseAndFinanceTillPermissions(string actionName)
+    {
+        var policies = typeof(MobilePosRuntimeController).GetMethod(actionName)!
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy);
+
+        policies.Should().BeEquivalentTo(
+            MobilePosPermissions.CloseTill,
+            FinancePermissions.OperateCashTills);
+    }
+
+    [Fact]
+    public void TillReviewQueue_ShouldRequireMobileAndFinanceReviewPermissions()
+    {
+        var policies = typeof(MobilePosAdministrationController)
+            .GetMethod(nameof(MobilePosAdministrationController.GetTillCloseSubmissions))!
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy);
+
+        policies.Should().BeEquivalentTo(
+            MobilePosPermissions.ReviewTill,
+            FinancePermissions.ReviewCashTillClosures);
+    }
+
+    [Fact]
+    public void TillCloseReport_ShouldRequireMobileAndFinanceReviewPermissions()
+    {
+        var policies = typeof(MobilePosAdministrationController)
+            .GetMethod(nameof(MobilePosAdministrationController.GetTillCloseReport))!
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy);
+
+        policies.Should().BeEquivalentTo(
+            MobilePosPermissions.ReviewTill,
+            FinancePermissions.ReviewCashTillClosures);
+    }
+
+    [Fact]
+    public void BankDepositProposal_ShouldRequireMobileReviewAndFinanceDepositPermissions()
+    {
+        var policies = typeof(MobilePosAdministrationController)
+            .GetMethod(nameof(MobilePosAdministrationController.CreateBankDepositProposal))!
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy);
+
+        policies.Should().BeEquivalentTo(
+            MobilePosPermissions.ReviewTill,
+            FinancePermissions.CreateBankDeposits);
+    }
+
+    [Fact]
+    public void PendingSyncResolution_ShouldRequireResolveAndReviewPermissions()
+    {
+        var policies = typeof(MobilePosAdministrationController)
+            .GetMethod(nameof(MobilePosAdministrationController.ResolvePendingSync))!
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy);
+
+        policies.Should().BeEquivalentTo(
+            MobilePosPermissions.ResolveSync,
+            MobilePosPermissions.ReviewTill,
+            FinancePermissions.ReviewCashTillClosures);
+    }
+
     [Fact]
     public async Task OpenAsync_ShouldUseAssignedLiquidityAccountAndStoreLocalBusinessDate()
     {
@@ -166,6 +238,283 @@ public sealed class MobilePosTillSessionServiceTests
         });
     }
 
+    [Fact]
+    public async Task SubmitCloseAsync_ShouldRejectPendingMutationsWhenPolicyDisallowsThem()
+    {
+        var fixture = CreateCloseFixture(allowPendingSync: false);
+        var service = new MobilePosTillSessionService(
+            fixture.Foundation.Object,
+            fixture.CashierTills.Object,
+            fixture.Db,
+            fixture.CurrentUser.Object);
+
+        var action = () => service.SubmitCloseAsync(
+            fixture.SessionId,
+            CloseRequest("pending-mutation-001"),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*does not allow a pending-sync submission*");
+        fixture.CashierTills.Verify(value => value.SubmitCountAsync(
+            It.IsAny<Guid>(), It.IsAny<SubmitCashierTillCountDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitCloseAsync_ShouldPersistDeterministicPendingSyncEvidence()
+    {
+        var fixture = CreateCloseFixture(allowPendingSync: true);
+        var service = new MobilePosTillSessionService(
+            fixture.Foundation.Object,
+            fixture.CashierTills.Object,
+            fixture.Db,
+            fixture.CurrentUser.Object);
+
+        var result = await service.SubmitCloseAsync(
+            fixture.SessionId,
+            CloseRequest("pending-mutation-002", "pending-mutation-001", "pending-mutation-002"),
+            CancellationToken.None);
+
+        result.Status.Should().Be(MobilePosTillCloseSubmissionStatus.PendingSync);
+        result.PendingClientMutationIds.Should().Equal("pending-mutation-001", "pending-mutation-002");
+        result.PendingMutationCount.Should().Be(2);
+        result.PendingMutationDigest.Should().Be(
+            MobilePosTillSessionService.HashPendingMutationIds(result.PendingClientMutationIds.ToArray()));
+        (await fixture.Db.MobilePosTillCloseSubmissions.SingleAsync())
+            .PolicyAllowedPendingSync.Should().BeTrue();
+        fixture.CashierTills.Verify(value => value.SubmitCountAsync(
+            fixture.SessionId,
+            It.Is<SubmitCashierTillCountDto>(request =>
+                request.CountLines.Count == 1
+                && request.CountLines[0].Denomination == 20m
+                && request.CountLines[0].Quantity == 3),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SubmitCloseAsync_ShouldBeReadyForReviewWhenNothingIsPending()
+    {
+        var fixture = CreateCloseFixture(allowPendingSync: false);
+        var service = new MobilePosTillSessionService(
+            fixture.Foundation.Object,
+            fixture.CashierTills.Object,
+            fixture.Db,
+            fixture.CurrentUser.Object);
+
+        var result = await service.SubmitCloseAsync(
+            fixture.SessionId,
+            CloseRequest(),
+            CancellationToken.None);
+
+        result.Status.Should().Be(MobilePosTillCloseSubmissionStatus.ReadyForReview);
+        result.PendingMutationCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ResolvePendingSyncAsync_ShouldEnforceMakerChecker()
+    {
+        var fixture = CreateCloseFixture(allowPendingSync: true);
+        fixture.Db.MobilePosTillCloseSubmissions.Add(CloseSubmission(
+            fixture, MobilePosTillCloseSubmissionStatus.PendingSync, "pending-mutation-001"));
+        await fixture.Db.SaveChangesAsync();
+        var service = new MobilePosTillSessionService(
+            fixture.Foundation.Object,
+            fixture.CashierTills.Object,
+            fixture.Db,
+            fixture.CurrentUser.Object);
+        var submission = await fixture.Db.MobilePosTillCloseSubmissions.SingleAsync();
+
+        var action = () => service.ResolvePendingSyncAsync(
+            submission.Id,
+            new MobilePosResolvePendingSyncRequestDto
+            {
+                Reason = "Cashier is attempting to approve their own exception.",
+                RowVersion = Convert.ToBase64String(submission.RowVersion)
+            },
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<UnauthorizedAccessException>()
+            .WithMessage("*cannot resolve their own*");
+    }
+
+    [Fact]
+    public async Task FinalizationGuard_ShouldBlockUnresolvedPendingMutations()
+    {
+        var fixture = CreateCloseFixture(allowPendingSync: true);
+        fixture.Db.MobilePosTills.Add(new MobilePosTill
+        {
+            Id = fixture.TillId,
+            TenantId = fixture.TenantId,
+            MobilePosStoreId = fixture.StoreId,
+            TillNumber = "TILL-01",
+            Name = "Main till",
+            Status = MobilePosTillStatus.Active,
+            LiquidityAccountId = fixture.LiquidityAccountId
+        });
+        fixture.Db.MobilePosTillCloseSubmissions.Add(CloseSubmission(
+            fixture, MobilePosTillCloseSubmissionStatus.PendingSync, "pending-mutation-001"));
+        await fixture.Db.SaveChangesAsync();
+        var guard = new MobilePosTillFinalizationGuard(fixture.Db, fixture.CurrentUser.Object);
+
+        var action = () => guard.PrepareFinalizationAsync(
+            fixture.SessionId, fixture.LiquidityAccountId, CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*1 unresolved Mobile POS mutation*");
+    }
+
+    [Fact]
+    public async Task FinalizationGuard_ShouldFinalizeWhenPendingMutationsHaveSynchronized()
+    {
+        var fixture = CreateCloseFixture(allowPendingSync: true, reviewerUser: true);
+        fixture.Db.MobilePosTills.Add(new MobilePosTill
+        {
+            Id = fixture.TillId,
+            TenantId = fixture.TenantId,
+            MobilePosStoreId = fixture.StoreId,
+            TillNumber = "TILL-01",
+            Name = "Main till",
+            Status = MobilePosTillStatus.Active,
+            LiquidityAccountId = fixture.LiquidityAccountId
+        });
+        fixture.Db.MobilePosTillCloseSubmissions.Add(CloseSubmission(
+            fixture, MobilePosTillCloseSubmissionStatus.PendingSync, "pending-mutation-001"));
+        fixture.Db.MobileMutationReceipts.Add(new MobileMutationReceipt
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            MobilePosDeviceId = fixture.DeviceId,
+            ClientMutationId = "pending-mutation-001",
+            CommandType = "CompleteSale",
+            SchemaVersion = 1,
+            RequestHash = new string('A', 64),
+            Status = MobileMutationReceiptStatus.Completed,
+            StartedAtUtc = DateTime.UtcNow,
+            CompletedAtUtc = DateTime.UtcNow,
+            LastAttemptAtUtc = DateTime.UtcNow
+        });
+        await fixture.Db.SaveChangesAsync();
+        var guard = new MobilePosTillFinalizationGuard(fixture.Db, fixture.CurrentUser.Object);
+
+        await guard.PrepareFinalizationAsync(
+            fixture.SessionId, fixture.LiquidityAccountId, CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        var submission = await fixture.Db.MobilePosTillCloseSubmissions.SingleAsync();
+        submission.Status.Should().Be(MobilePosTillCloseSubmissionStatus.Finalized);
+        submission.FinalizedByUserId.Should().Be(fixture.UserId);
+        submission.FinalizedAtUtc.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task FinalizationGuard_ShouldMarkReturnedSubmissionForRecount()
+    {
+        var fixture = CreateCloseFixture(allowPendingSync: false, reviewerUser: true);
+        fixture.Db.MobilePosTills.Add(new MobilePosTill
+        {
+            Id = fixture.TillId,
+            TenantId = fixture.TenantId,
+            MobilePosStoreId = fixture.StoreId,
+            TillNumber = "TILL-01",
+            Name = "Main till",
+            Status = MobilePosTillStatus.Active,
+            LiquidityAccountId = fixture.LiquidityAccountId
+        });
+        fixture.Db.MobilePosTillCloseSubmissions.Add(CloseSubmission(
+            fixture, MobilePosTillCloseSubmissionStatus.ReadyForReview));
+        await fixture.Db.SaveChangesAsync();
+        var guard = new MobilePosTillFinalizationGuard(fixture.Db, fixture.CurrentUser.Object);
+
+        await guard.PrepareReturnForRecountAsync(
+            fixture.SessionId, fixture.LiquidityAccountId, CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        var submission = await fixture.Db.MobilePosTillCloseSubmissions.SingleAsync();
+        submission.Status.Should().Be(MobilePosTillCloseSubmissionStatus.ReturnedForRecount);
+        submission.UpdatedBy.Should().Be("HQ Reviewer");
+    }
+
+    [Fact]
+    public async Task CreateBankDepositProposalAsync_ShouldUseFinalizedSessionEntriesAndLinkFinanceDeposit()
+    {
+        var fixture = CreateCloseFixture(allowPendingSync: false, reviewerUser: true);
+        var bankAccountId = Guid.NewGuid();
+        var depositId = Guid.NewGuid();
+        var openedAt = DateTime.UtcNow.AddHours(-8);
+        var cutoff = DateTime.UtcNow.AddMinutes(5);
+        fixture.Db.CashierTillSessions.Add(new CashierTillSession
+        {
+            Id = fixture.SessionId,
+            TenantId = fixture.TenantId,
+            SessionNumber = "CTS-001",
+            LiquidityAccountId = fixture.LiquidityAccountId,
+            BusinessDate = DateTime.UtcNow.Date,
+            Currency = "GHS",
+            CashierUserId = fixture.CashierUserId,
+            CashierName = "Cashier",
+            Status = CashierTillSessionStatus.Closed,
+            OpenedAt = openedAt,
+            OpenedById = fixture.CashierUserId,
+            ActivityCutoffAt = cutoff
+        });
+        var submission = CloseSubmission(fixture, MobilePosTillCloseSubmissionStatus.Finalized);
+        fixture.Db.MobilePosTillCloseSubmissions.Add(submission);
+        var entry = new LiquidityAccountEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            LiquidityAccountId = fixture.LiquidityAccountId,
+            EntryNumber = "LE-001",
+            EntryDate = DateTime.UtcNow.Date,
+            EntryType = LiquidityEntryType.CustomerReceipt,
+            Direction = LiquidityEntryDirection.Increase,
+            Amount = 250m,
+            AllocatedAmount = 50m,
+            Currency = "GHS",
+            SourceDocumentType = "CustomerPayment",
+            SourceDocumentId = Guid.NewGuid(),
+            CreatedAt = openedAt.AddHours(1)
+        };
+        fixture.Db.LiquidityAccountEntries.Add(entry);
+        await fixture.Db.SaveChangesAsync();
+        var banking = new Mock<IBankingSettlementService>();
+        banking.Setup(value => value.CreateDepositAsync(
+                It.IsAny<CreateBankDepositDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BankDepositDto { Id = depositId, DepositNumber = "BD-001" });
+        var service = new MobilePosTillSessionService(
+            fixture.Foundation.Object,
+            fixture.CashierTills.Object,
+            fixture.Db,
+            fixture.CurrentUser.Object,
+            banking.Object);
+
+        var result = await service.CreateBankDepositProposalAsync(
+            submission.Id,
+            new MobilePosCreateDepositProposalRequestDto
+            {
+                BankAccountId = bankAccountId,
+                DepositDate = DateTime.UtcNow.Date,
+                DepositReference = "SLIP-001",
+                RowVersion = Convert.ToBase64String(submission.RowVersion)
+            },
+            CancellationToken.None);
+
+        result.Id.Should().Be(depositId);
+        banking.Verify(value => value.CreateDepositAsync(
+            It.Is<CreateBankDepositDto>(request =>
+                request.BankAccountId == bankAccountId
+                && request.DepositReference == "SLIP-001"
+                && request.Notes!.Contains($"[MobilePosTillClose:{submission.Id:N}]", StringComparison.Ordinal)
+                && request.Allocations.Count == 1
+                && request.Allocations[0].LiquidityAccountEntryId == entry.Id
+                && request.Allocations[0].AllocationType == BankDepositAllocationType.Receipt
+                && request.Allocations[0].Amount == 200m),
+            It.IsAny<CancellationToken>()), Times.Once);
+        var persisted = await fixture.Db.MobilePosTillCloseSubmissions.SingleAsync();
+        persisted.BankDepositBatchId.Should().Be(depositId);
+        persisted.BankDepositProposedByUserId.Should().Be(fixture.UserId);
+    }
+
     private static MobilePosBootstrapDto Bootstrap(Guid liquidityAccountId) => new()
     {
         ServerTimeUtc = new DateTime(2026, 10, 9, 23, 30, 0, DateTimeKind.Utc),
@@ -183,6 +532,114 @@ public sealed class MobilePosTillSessionServiceTests
             .UseInMemoryDatabase($"mobile-pos-till-session-{Guid.NewGuid():N}")
             .Options);
         return new MobilePosTillSessionService(foundation, cashierTills, db, CurrentUser(tenantId, userId).Object);
+    }
+
+    private static CloseFixture CreateCloseFixture(bool allowPendingSync, bool reviewerUser = false)
+    {
+        var fixture = new CloseFixture
+        {
+            TenantId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            CashierUserId = Guid.NewGuid(),
+            StoreId = Guid.NewGuid(),
+            TillId = Guid.NewGuid(),
+            DeviceId = Guid.NewGuid(),
+            SessionId = Guid.NewGuid(),
+            LiquidityAccountId = Guid.NewGuid()
+        };
+        if (!reviewerUser)
+            fixture.CashierUserId = fixture.UserId;
+        fixture.Db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"mobile-pos-close-{Guid.NewGuid():N}")
+            .Options);
+        fixture.CurrentUser = CurrentUser(fixture.TenantId, fixture.UserId);
+        fixture.CurrentUser.SetupGet(value => value.UserName).Returns(reviewerUser ? "HQ Reviewer" : "Cashier");
+        var bootstrap = new MobilePosBootstrapDto
+        {
+            Store = new MobilePosStoreDto
+            {
+                Id = fixture.StoreId,
+                OfflinePolicyId = allowPendingSync ? Guid.NewGuid() : null
+            },
+            Till = new MobilePosTillDto
+            {
+                Id = fixture.TillId,
+                LiquidityAccountId = fixture.LiquidityAccountId
+            },
+            Device = new MobilePosDeviceDto { Id = fixture.DeviceId },
+            OfflinePolicy = new MobilePosOfflinePolicyDto
+            {
+                Id = Guid.NewGuid(),
+                AllowDayEndSubmissionWithPendingSync = allowPendingSync
+            }
+        };
+        fixture.Foundation.Setup(value => value.GetBootstrapAsync(
+                "installation-123456", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(bootstrap);
+        fixture.CashierTills.Setup(value => value.GetSessionAsync(
+                fixture.SessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => fixture.Session());
+        fixture.CashierTills.Setup(value => value.SubmitCountAsync(
+                fixture.SessionId, It.IsAny<SubmitCashierTillCountDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => fixture.Session());
+        return fixture;
+    }
+
+    private static MobilePosSubmitTillCloseRequestDto CloseRequest(params string[] pendingIds) => new()
+    {
+        InstallationId = "installation-123456",
+        SessionRowVersion = Convert.ToBase64String([1]),
+        CountLines =
+        [
+            new CashierTillCountLineInputDto { Denomination = 20m, Quantity = 3 }
+        ],
+        PendingClientMutationIds = pendingIds
+    };
+
+    private static MobilePosTillCloseSubmission CloseSubmission(
+        CloseFixture fixture,
+        MobilePosTillCloseSubmissionStatus status,
+        params string[] pendingIds) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = fixture.TenantId,
+        CashierTillSessionId = fixture.SessionId,
+        MobilePosStoreId = fixture.StoreId,
+        MobilePosTillId = fixture.TillId,
+        MobilePosDeviceId = fixture.DeviceId,
+        SubmittedByUserId = fixture.CashierUserId,
+        SubmittedAtUtc = DateTime.UtcNow,
+        PolicyAllowedPendingSync = true,
+        PendingMutationCount = pendingIds.Length,
+        PendingMutationIdsJson = System.Text.Json.JsonSerializer.Serialize(pendingIds),
+        PendingMutationDigest = MobilePosTillSessionService.HashPendingMutationIds(pendingIds),
+        Status = status,
+        RowVersion = [1]
+    };
+
+    private sealed class CloseFixture
+    {
+        public Guid TenantId { get; set; }
+        public Guid UserId { get; set; }
+        public Guid CashierUserId { get; set; }
+        public Guid StoreId { get; set; }
+        public Guid TillId { get; set; }
+        public Guid DeviceId { get; set; }
+        public Guid SessionId { get; set; }
+        public Guid LiquidityAccountId { get; set; }
+        public ApplicationDbContext Db { get; set; } = null!;
+        public Mock<IMobilePosFoundationService> Foundation { get; } = new();
+        public Mock<ICashierTillService> CashierTills { get; } = new();
+        public Mock<ICurrentUserService> CurrentUser { get; set; } = null!;
+
+        public CashierTillSessionDto Session() => new()
+        {
+            Id = SessionId,
+            LiquidityAccountId = LiquidityAccountId,
+            CashierUserId = CashierUserId,
+            Currency = "GHS",
+            RowVersion = Convert.ToBase64String([1])
+        };
     }
 
     private static Mock<ICurrentUserService> CurrentUser(Guid tenantId, Guid userId)

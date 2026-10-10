@@ -295,6 +295,68 @@ public sealed class MobilePosTillReconciliationDto
     public IReadOnlyList<MobilePosTillTenderReconciliationDto> Tenders { get; set; } = [];
 }
 
+public sealed class MobilePosSubmitTillCloseRequestDto
+{
+    [Required, StringLength(200, MinimumLength = 16)]
+    public string InstallationId { get; set; } = string.Empty;
+    public IReadOnlyList<CashierTillCountLineInputDto> CountLines { get; set; } = [];
+    [MaxLength(1000)]
+    public string? VarianceReason { get; set; }
+    public Guid? ClosingEvidenceFileId { get; set; }
+    [Required]
+    public string SessionRowVersion { get; set; } = string.Empty;
+    public IReadOnlyList<string> PendingClientMutationIds { get; set; } = [];
+}
+
+public sealed class MobilePosResolvePendingSyncRequestDto
+{
+    [Required, StringLength(1000, MinimumLength = 20)]
+    public string Reason { get; set; } = string.Empty;
+    [Required]
+    public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class MobilePosCreateDepositProposalRequestDto
+{
+    public Guid BankAccountId { get; set; }
+    public DateTime DepositDate { get; set; }
+    [Required, StringLength(100, MinimumLength = 3)]
+    public string DepositReference { get; set; } = string.Empty;
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+    [Required]
+    public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class MobilePosTillCloseSubmissionDto
+{
+    public Guid Id { get; set; }
+    public Guid CashierTillSessionId { get; set; }
+    public Guid MobilePosStoreId { get; set; }
+    public Guid MobilePosTillId { get; set; }
+    public Guid MobilePosDeviceId { get; set; }
+    public Guid? MobilePosOfflinePolicyId { get; set; }
+    public Guid SubmittedByUserId { get; set; }
+    public DateTime SubmittedAtUtc { get; set; }
+    public bool PolicyAllowedPendingSync { get; set; }
+    public int PendingMutationCount { get; set; }
+    public IReadOnlyList<string> PendingClientMutationIds { get; set; } = [];
+    public string PendingMutationDigest { get; set; } = string.Empty;
+    public MobilePosTillCloseSubmissionStatus Status { get; set; }
+    public DateTime? SyncExceptionResolvedAtUtc { get; set; }
+    public Guid? SyncExceptionResolvedByUserId { get; set; }
+    public string? SyncExceptionResolutionReason { get; set; }
+    public DateTime? FinalizedAtUtc { get; set; }
+    public Guid? FinalizedByUserId { get; set; }
+    public Guid? BankDepositBatchId { get; set; }
+    public string? BankDepositNumber { get; set; }
+    public BankDepositStatus? BankDepositStatus { get; set; }
+    public DateTime? BankDepositProposedAtUtc { get; set; }
+    public Guid? BankDepositProposedByUserId { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
+    public CashierTillSessionDto Session { get; set; } = new();
+}
+
 public sealed class MobilePosCustomerSearchResultDto
 {
     public Guid BusinessPartnerId { get; set; }
@@ -494,6 +556,7 @@ public sealed class MobilePosAdministrationReferencesDto
     public IReadOnlyList<MobilePosReferenceOptionDto> Warehouses { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> CompanyProfiles { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> CashTills { get; set; } = [];
+    public IReadOnlyList<MobilePosReferenceOptionDto> BankAccounts { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> PaymentMethods { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> Users { get; set; } = [];
     public IReadOnlyList<MobilePosDimensionReferenceDto> Dimensions { get; set; } = [];

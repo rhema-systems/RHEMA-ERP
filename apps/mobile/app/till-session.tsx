@@ -3,20 +3,28 @@ import { Link, Redirect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ApiProblem, mobileApi } from "@/src/api/client";
+import { loadSessionOutboxSummary } from "@/src/offline/sync-runtime";
 import { getInstallationId } from "@/src/storage/secure-session";
-import type { MobilePosTillReconciliation, MobilePosTillSession } from "@/src/types/api";
+import type { MobilePosTillCloseSubmission, MobilePosTillReconciliation, MobilePosTillSession } from "@/src/types/api";
 import { useSession } from "@/src/session/session-context";
 import { colors } from "@/src/ui/theme";
+
+const denominations = [200, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1] as const;
 
 export default function TillSessionScreen() {
   const session = useSession();
   const [tillSession, setTillSession] = useState<MobilePosTillSession | null>(null);
   const [reconciliation, setReconciliation] = useState<MobilePosTillReconciliation | null>(null);
+  const [closeSubmission, setCloseSubmission] = useState<MobilePosTillCloseSubmission | null>(null);
+  const [counts, setCounts] = useState<Record<string, string>>({});
+  const [varianceReason, setVarianceReason] = useState("");
   const [openingFloat, setOpeningFloat] = useState("0");
   const [openingNotes, setOpeningNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiProblem | null>(null);
   const canOperate = session.user?.permissions.includes("MobilePOS.Till.Operate")
+    && session.user.permissions.includes("Finance.CashTills.Operate");
+  const canClose = session.user?.permissions.includes("MobilePOS.Till.Close")
     && session.user.permissions.includes("Finance.CashTills.Operate");
 
   const refresh = useCallback(async () => {
@@ -29,6 +37,9 @@ export default function TillSessionScreen() {
       setTillSession(current);
       setReconciliation(current
         ? await mobileApi.getTillReconciliation(current.id, installationId)
+        : null);
+      setCloseSubmission(current
+        ? await mobileApi.getTillCloseSubmission(current.id, installationId) ?? null
         : null);
     } catch (caught) {
       setError(problem(caught));
@@ -55,6 +66,40 @@ export default function TillSessionScreen() {
       });
       setTillSession(opened);
       setReconciliation(await mobileApi.getTillReconciliation(opened.id, await getInstallationId()));
+      await session.refreshBootstrap();
+    } catch (caught) {
+      setError(problem(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitClose = async () => {
+    if (!tillSession || !session.user || !session.bootstrap) return;
+    const countLines = denominations
+      .map(denomination => ({ denomination, quantity: Math.trunc(Number(counts[String(denomination)] ?? "0")) }))
+      .filter(line => Number.isFinite(line.quantity) && line.quantity > 0);
+    if (countLines.length === 0) {
+      setError(new ApiProblem("Enter at least one denomination count.", 0, "TILL_COUNT_REQUIRED"));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const outbox = await loadSessionOutboxSummary(session.user, session.bootstrap);
+      const pendingClientMutationIds = outbox.messages
+        .filter(message => message.tillSessionId === tillSession.id)
+        .map(message => message.clientMutationId);
+      const result = await mobileApi.submitTillClose(tillSession.id, {
+        installationId: await getInstallationId(),
+        countLines,
+        varianceReason: varianceReason.trim() || undefined,
+        sessionRowVersion: tillSession.rowVersion,
+        pendingClientMutationIds,
+      });
+      setTillSession(result.session);
+      setCloseSubmission(result);
+      setReconciliation(await mobileApi.getTillReconciliation(result.session.id, await getInstallationId()));
       await session.refreshBootstrap();
     } catch (caught) {
       setError(problem(caught));
@@ -117,6 +162,43 @@ export default function TillSessionScreen() {
               )}
             </View>
           )}
+          {closeSubmission ? (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Day-end submitted</Text>
+              <Row label="Review state" value={closeStatusLabel(closeSubmission.status)} />
+              <Row label="Counted cash" value={money(closeSubmission.session.countedClosingAmount, tillSession.currency)} />
+              <Row label="Variance" value={money(closeSubmission.session.varianceAmount, tillSession.currency)} />
+              <Row label="Pending sync evidence" value={String(closeSubmission.pendingMutationCount)} />
+              <Text style={styles.note}>Finance must independently review the count. Final approval remains blocked until every retained mutation synchronizes or an authorized HQ reviewer records a reasoned exception.</Text>
+            </View>
+          ) : statusLabel(tillSession.status) === "Open" ? (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Declare closing cash</Text>
+              <Text style={styles.note}>Enter the physical quantity of each denomination. The server calculates counted cash and variance from this evidence.</Text>
+              <View style={styles.denominationList}>
+                {denominations.map(denomination => (
+                  <View key={denomination} style={styles.denominationRow}>
+                    <Text style={styles.denominationLabel}>{money(denomination, tillSession.currency)}</Text>
+                    <TextInput
+                      accessibilityLabel={`${denomination} denomination quantity`}
+                      keyboardType="number-pad"
+                      value={counts[String(denomination)] ?? ""}
+                      onChangeText={value => setCounts(current => ({ ...current, [String(denomination)]: value.replace(/[^0-9]/g, "") }))}
+                      placeholder="0"
+                      style={styles.quantityInput}
+                    />
+                  </View>
+                ))}
+              </View>
+              <Row label="Counted total" value={money(countedTotal(counts), tillSession.currency)} />
+              <Text style={styles.inputLabel}>Variance reason (required if non-zero)</Text>
+              <TextInput accessibilityLabel="Variance reason" value={varianceReason} onChangeText={setVarianceReason} multiline style={[styles.input, styles.notes]} />
+              <Pressable accessibilityRole="button" disabled={!canClose || busy} onPress={() => void submitClose()} style={[styles.primary, (!canClose || busy) && styles.disabled]}>
+                {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>Submit day end for review</Text>}
+              </Pressable>
+              {!canClose && <Text style={styles.permission}>Your role needs Mobile POS till-close and Finance cash-till operation permissions.</Text>}
+            </View>
+          ) : null}
           <Text style={styles.note}>Expected cash is calculated by Finance from the opening float, canonical custody entries, and posted deposit allocations.</Text>
         </>
       ) : (
@@ -148,6 +230,18 @@ function money(value: number, currency: string): string {
 function statusLabel(value: string | number): string {
   if (typeof value === "string") return value;
   return ({ 1: "Open", 2: "Pending review", 3: "Closed", 4: "Cancelled" } as Record<number, string>)[value] ?? `Status ${value}`;
+}
+
+function closeStatusLabel(value: string | number): string {
+  if (typeof value === "string") return value;
+  return ({ 1: "Ready for review", 2: "Pending sync", 3: "HQ exception resolved", 4: "Finalized" } as Record<number, string>)[value] ?? `Status ${value}`;
+}
+
+function countedTotal(counts: Record<string, string>): number {
+  return denominations.reduce((sum, denomination) => {
+    const quantity = Math.trunc(Number(counts[String(denomination)] ?? "0"));
+    return sum + (Number.isFinite(quantity) && quantity > 0 ? denomination * quantity : 0);
+  }, 0);
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -192,6 +286,10 @@ const styles = StyleSheet.create({
   tenderMeta: { marginTop: 3, color: colors.muted, fontSize: 9 },
   tenderAmount: { color: colors.ink, fontSize: 12, fontWeight: "700" },
   warning: { marginTop: 12, color: colors.warning, fontSize: 11, lineHeight: 16 },
+  denominationList: { marginTop: 12, gap: 8 },
+  denominationRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  denominationLabel: { color: colors.ink, fontSize: 12, fontWeight: "600" },
+  quantityInput: { width: 92, minHeight: 40, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: "#D0D5DD", backgroundColor: colors.white, color: colors.ink, textAlign: "right" },
   inputLabel: { marginTop: 18, marginBottom: 7, color: colors.navy, fontSize: 12, fontWeight: "700" },
   input: { minHeight: 48, paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: "#D0D5DD", backgroundColor: colors.white, color: colors.ink, fontSize: 14 },
   notes: { minHeight: 82, paddingTop: 12, textAlignVertical: "top" },

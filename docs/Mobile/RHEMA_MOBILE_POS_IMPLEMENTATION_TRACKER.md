@@ -116,11 +116,11 @@
 | --- | --- | --- |
 | MPOS-0601 | Mobile till-session open/current views | In progress - the authenticated device/store/till bootstrap now opens and loads the operator's canonical Finance cashier session, derives the store-local business date, enforces both dynamic Mobile POS and Finance till permissions, and exposes a mobile opening/current-session screen; live API, database, and Android acceptance remain |
 | MPOS-0602 | Server reconciliation by till/session/tender | In progress - the server derives completed, offline, pending, and rejected sale counts plus subtotal/tax/discount, sales-versus-tender balance, incomplete tenders, canonical payment counts, and payment-method groupings for the operator's assigned Finance till session; live SQL/accounting evidence remains |
-| MPOS-0603 | Cash declaration and count evidence | Planned |
-| MPOS-0604 | Variance HQ workflow and segregation of duties | Planned |
-| MPOS-0605 | Pending-sync submit/finalization control | Planned |
-| MPOS-0606 | Bank deposit proposal integration | Planned |
-| MPOS-0607 | HQ till/mobile reports | Planned |
+| MPOS-0603 | Cash declaration and count evidence | In progress - the mobile close flow captures Ghana denomination counts, variance reason/evidence, and delegates the authoritative count to `ICashierTillService.SubmitCountAsync`; live device and SQL evidence remain |
+| MPOS-0604 | Variance HQ workflow and segregation of duties | In progress - the HQ Mobile POS day-end queue uses the canonical Finance approval/return actions, blocks the cashier from resolving their own sync exception, and synchronizes returned/finalized evidence states; authenticated browser and live workflow evidence remain |
+| MPOS-0605 | Pending-sync submit/finalization control | In progress - pending mutation IDs are normalized, hashed, persisted with the snapshotted policy, and rechecked against completed mutation receipts before the shared Finance transaction can finalize; an independent HQ resolution is required for unresolved work; relational concurrency and live device evidence remain |
+| MPOS-0606 | Bank deposit proposal integration | In progress - only a finalized and closed till session can propose its unallocated custody entries through the canonical Finance banking service; the linkage is retry recoverable through an immutable source marker and retains the Finance deposit lifecycle; live Finance approval/posting evidence remains |
+| MPOS-0607 | HQ till/mobile reports | In progress - the HQ administration page exposes current review work and a historical till-close report with close, sync, variance and deposit states plus CSV export; authenticated browser and live database evidence remain |
 
 ## Phase 7 - hardware
 

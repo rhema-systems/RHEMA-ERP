@@ -185,7 +185,11 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Migration tables: stores, store dimension defaults, tills, till payment methods, user-store assignments, devices, device assignment histories, offline policies, and offline grants.
 - Migration created: `20261009114817_AddMobilePosTransactionFoundation`.
 - Transaction migration tables: Mobile POS sales, sale lines, tenders, and mutation receipts, including tenant/device idempotency identities and canonical Finance-document links.
-- Neither Mobile POS migration was applied to a database.
+- Migration created: `20261009235832_AddMobilePosTillCloseControl`.
+- Till-close migration adds the policy-snapshotted Mobile POS close submission, pending-mutation integrity evidence, sync-exception resolution, finalization state, and tenant/session uniqueness controls.
+- Migration created: `20261010003147_LinkMobilePosTillCloseBankDeposit`.
+- Deposit-link migration adds the optional canonical Finance bank-deposit link and proposal audit fields to the till-close submission.
+- No Mobile POS migration was applied to a database.
 - No production deployment, service restart, live device enrollment, or provider call was performed.
 
 ## Phase 6 till and day-end implementation
@@ -195,6 +199,11 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Both endpoints require the dynamic `MobilePOS.Till.Operate` permission and the canonical `Finance.CashTills.Operate` permission. The service rejects a Finance session returned for any liquidity account other than the assigned Mobile POS till.
 - Added the mobile till screen and dashboard link with current session status, opening float, expected cash, transaction movements, deposits, count, variance, and denomination evidence. The app does not calculate or maintain a second custody balance.
 - Added a server-derived session reconciliation for the current operator and assigned till. It groups completed tenders by configured payment method, identifies offline tenders, counts linked canonical CustomerPayments, reports pending/rejected/incomplete exceptions, and explicitly compares completed sales with completed tender totals. The mobile screen displays this explanation alongside the Finance custody balance.
+- Added the device day-end declaration using the canonical Finance denomination count, variance reason/evidence, store/till/device scope, and the device's retained pending mutation IDs. Pending IDs are normalized, deduplicated, deterministically hashed, and persisted with the applicable pending-sync policy snapshot.
+- Added a shared Finance finalization guard. It verifies the retained pending evidence, requires completed mutation receipts or an independent HQ exception resolution, stages finalization in the same DbContext transaction as Finance till approval, and records a return-for-recount state when Finance returns the session.
+- Added an HQ day-end queue with permission-gated approval, return, and sync-exception controls. Maker/checker enforcement prevents the cashier from resolving or approving their own close.
+- Added a historical till-close report and CSV export showing cashier/session, close state, sync evidence, variance, and canonical bank-deposit status.
+- Added bank-deposit proposal creation only after the Mobile POS evidence is finalized and the Finance till session is closed. Eligible unallocated custody entries are delegated to the canonical `IBankingSettlementService`; retries recover the same Finance deposit through an immutable source marker and the existing destination-account/reference uniqueness control.
 
 ## Verification evidence
 
@@ -236,19 +245,23 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The fresh Release Mobile POS API build and focused test run passed 43/43 tests after unifying online and offline cash-sale mutation identity for safe response-loss replay. The build preserved 90 EF models, compiled 355,610 ordered migration statements and 9,047 distinct statements, and completed with existing repository warnings only.
 - The Phase 6 till-session slice passed the Expo TypeScript check and all 54 mobile tests. A fresh Release API/test build passed 4/4 focused till-session tests covering dual permission enforcement, assigned-liquidity routing, store-local business date calculation, and cross-till rejection. Existing repository warnings and ImageSharp advisories remained warnings.
 - The Phase 6 server-reconciliation slice passed the Expo TypeScript check and all 55 mobile tests. The fresh Release API/test build passed 6/6 focused tests, including exact completed-sale/tender totals, online/offline grouping, canonical-payment counts, rejected-sale exclusion, and sales-to-tender balance. Existing repository warnings and ImageSharp advisories remained warnings.
+- The completed Phase 6 source passed a migration-aware Release build with zero errors after compiling 92 preserved EF models and 9,053 distinct statements. Existing repository warnings and ImageSharp advisories remained warnings.
+- Idempotent SQL generation from `20261009114817_AddMobilePosTransactionFoundation` through `20261010003147_LinkMobilePosTillCloseBankDeposit` passed. The 14,621-byte script contains the till-close table, canonical bank-deposit link, and both migration-history markers.
+- Twenty focused till/day-end tests passed. Coverage includes dual endpoint permissions, cash declaration policy, deterministic pending evidence, maker/checker controls, unresolved-sync blocking, completed-sync finalization, return-for-recount propagation, report/deposit permissions, canonical custody-entry proposal mapping, and deposit linkage.
+- The Expo TypeScript check and all 56 mobile tests passed after the cash declaration and close-submission API/UI work. The HQ frontend TypeScript check also passed after the day-end queue, report, CSV export, and bank-deposit proposal controls.
 - The supplied ZCS archive hash, entry count, JAR/JNI hashes, documented public printer/scanner APIs, ABIs, sample target, and absence of detected licence files were checked read-only. No vendor binary was added to the application at this stage.
 
 ## Known failures and constraints
 
 - The Flash ERP reference checkout is intentionally dirty. Read committed files through Git object paths and do not clean, reset, stash, or commit that checkout.
-- The ZCS SmartPos 1.8.1 printer/scanner SDK is supplied and audited, but its package has no detected redistribution terms and its Android 14 behavior has not been certified on a physical Z92S. The SDK stays outside application source until the planned Phase 7 adapter work.
+- The ZCS SmartPos 1.8.1 printer/scanner SDK is supplied and audited, but its package has no detected redistribution terms and its Android 14 behavior has not been certified on a physical Z92S. Phase 7 can commit adapter source and an external-SDK build hook; vendor binaries remain outside source control until redistribution is approved.
 - Native Android keystore behavior, visible device enrollment/remote-disable flow, and physical Z92S behavior require an Android device and later acceptance stages.
 - Offline grant consumption and cash-sale Finance orchestration are implemented for schema version 1. Physical disconnect/reconnect, concurrent SQL Server aggregate consumption, and process/APK persistence remain unverified outside the automated in-memory and client test boundaries.
 - The repository currently reports pre-existing ImageSharp package advisories and compiler warnings; the verified Mobile POS builds completed with zero errors.
 
 ## Remaining work
 
-Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, receipt, and mobile checkout paths. Continue Phase 4 with SQL Server concurrency/failure-injection coverage, end-to-end Finance reconciliation evidence, and visible Android checkout/receipt acceptance. Finish Phase 5 with operator exception UI plus forced disconnect/retry/process-restart and signed APK upgrade preservation evidence. Then complete Phase 6 till/day-end controls before integrating the supplied ZCS native printer/scanner adapters in Phase 7. Z92S adapter acceptance also requires written redistribution approval and a physical Android 14 unit.
+Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, receipt, and mobile checkout paths. Continue Phase 4 with SQL Server concurrency/failure-injection coverage, end-to-end Finance reconciliation evidence, and visible Android checkout/receipt acceptance. Finish Phase 5 with forced disconnect/retry/process-restart and signed APK upgrade preservation evidence. Apply and exercise the Phase 6 migrations in an authorized test database and capture authenticated browser/device/Finance workflow evidence. Proceed with the Phase 7 Z92S native printer/scanner adapters; physical acceptance still requires written redistribution approval and an Android 14 Z92S unit.
 
 ## Authorization boundaries
 

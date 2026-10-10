@@ -121,6 +121,19 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
                 Id = item.Id, Code = item.Code, Name = item.Name, Secondary = item.Currency
             }).ToListAsync(cancellationToken);
 
+        var bankAccounts = await _db.BankAccounts.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.IsActive)
+            .OrderBy(item => item.BankName).ThenBy(item => item.AccountName)
+            .Select(item => new MobilePosReferenceOptionDto
+            {
+                Id = item.Id,
+                Code = item.BankName,
+                Name = item.AccountName,
+                Secondary = item.Currency + " · " + (item.AccountNumber.Length > 4
+                    ? item.AccountNumber.Substring(item.AccountNumber.Length - 4)
+                    : item.AccountNumber)
+            }).ToListAsync(cancellationToken);
+
         var paymentMethods = await _db.PaymentMethods.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.IsActive)
             .OrderBy(item => item.Name)
@@ -173,6 +186,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             Warehouses = warehouses,
             CompanyProfiles = companyProfiles,
             CashTills = cashTills,
+            BankAccounts = bankAccounts,
             PaymentMethods = paymentMethods,
             Users = users,
             Dimensions = definitions.Select(definition => new MobilePosDimensionReferenceDto

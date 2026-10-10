@@ -486,3 +486,57 @@ public sealed class MobileMutationReceipt : TenantEntity
     [Timestamp]
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 }
+
+/// <summary>
+/// Mobile day-end evidence attached to the canonical Finance cashier session. Counted cash remains
+/// on CashierTillSession; this record preserves device, policy and unresolved local-work evidence
+/// needed to prevent final approval while Mobile POS work is ambiguous.
+/// </summary>
+public sealed class MobilePosTillCloseSubmission : TenantEntity
+{
+    public Guid CashierTillSessionId { get; set; }
+    public CashierTillSession CashierTillSession { get; set; } = null!;
+
+    public Guid MobilePosStoreId { get; set; }
+    public MobilePosStore MobilePosStore { get; set; } = null!;
+
+    public Guid MobilePosTillId { get; set; }
+    public MobilePosTill MobilePosTill { get; set; } = null!;
+
+    public Guid MobilePosDeviceId { get; set; }
+    public MobilePosDevice MobilePosDevice { get; set; } = null!;
+
+    public Guid? MobilePosOfflinePolicyId { get; set; }
+    public MobilePosOfflinePolicy? MobilePosOfflinePolicy { get; set; }
+
+    public Guid SubmittedByUserId { get; set; }
+    public DateTime SubmittedAtUtc { get; set; }
+    public bool PolicyAllowedPendingSync { get; set; }
+    public int PendingMutationCount { get; set; }
+
+    [Required]
+    public string PendingMutationIdsJson { get; set; } = "[]";
+
+    [Required, MaxLength(64)]
+    public string PendingMutationDigest { get; set; } = string.Empty;
+
+    public MobilePosTillCloseSubmissionStatus Status { get; set; } =
+        MobilePosTillCloseSubmissionStatus.ReadyForReview;
+
+    public DateTime? SyncExceptionResolvedAtUtc { get; set; }
+    public Guid? SyncExceptionResolvedByUserId { get; set; }
+
+    [MaxLength(1000)]
+    public string? SyncExceptionResolutionReason { get; set; }
+
+    public DateTime? FinalizedAtUtc { get; set; }
+    public Guid? FinalizedByUserId { get; set; }
+
+    public Guid? BankDepositBatchId { get; set; }
+    public BankDepositBatch? BankDepositBatch { get; set; }
+    public DateTime? BankDepositProposedAtUtc { get; set; }
+    public Guid? BankDepositProposedByUserId { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+}

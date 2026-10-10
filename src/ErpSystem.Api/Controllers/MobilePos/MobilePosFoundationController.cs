@@ -92,6 +92,27 @@ public sealed class MobilePosRuntimeController : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await _tillSessions.GetReconciliationAsync(sessionId, installationId, cancellationToken));
 
+    [HttpGet("till-sessions/{sessionId:guid}/close-submission")]
+    [Authorize(Policy = MobilePosPermissions.CloseTill)]
+    [Authorize(Policy = FinancePermissions.OperateCashTills)]
+    public async Task<ActionResult<MobilePosTillCloseSubmissionDto>> GetTillCloseSubmission(
+        Guid sessionId,
+        [FromQuery] string installationId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _tillSessions.GetCloseSubmissionAsync(sessionId, installationId, cancellationToken);
+        return result == null ? NoContent() : Ok(result);
+    }
+
+    [HttpPost("till-sessions/{sessionId:guid}/close-submission")]
+    [Authorize(Policy = MobilePosPermissions.CloseTill)]
+    [Authorize(Policy = FinancePermissions.OperateCashTills)]
+    public async Task<ActionResult<MobilePosTillCloseSubmissionDto>> SubmitTillClose(
+        Guid sessionId,
+        [FromBody] MobilePosSubmitTillCloseRequestDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _tillSessions.SubmitCloseAsync(sessionId, dto, cancellationToken));
+
     [HttpPost("offline-grants")]
     [Authorize(Policy = MobilePosPermissions.UseOffline)]
     [Authorize(Policy = MobilePosPermissions.OperateTill)]
@@ -300,8 +321,48 @@ public sealed class MobilePosRuntimeController : ControllerBase
 public sealed class MobilePosAdministrationController : ControllerBase
 {
     private readonly IMobilePosFoundationService _service;
+    private readonly IMobilePosTillSessionService _tillSessions;
 
-    public MobilePosAdministrationController(IMobilePosFoundationService service) => _service = service;
+    public MobilePosAdministrationController(
+        IMobilePosFoundationService service,
+        IMobilePosTillSessionService tillSessions)
+    {
+        _service = service;
+        _tillSessions = tillSessions;
+    }
+
+    [HttpGet("till-close-submissions")]
+    [Authorize(Policy = MobilePosPermissions.ReviewTill)]
+    [Authorize(Policy = FinancePermissions.ReviewCashTillClosures)]
+    public async Task<ActionResult<IReadOnlyList<MobilePosTillCloseSubmissionDto>>> GetTillCloseSubmissions(
+        CancellationToken cancellationToken)
+        => Ok(await _tillSessions.GetReviewQueueAsync(cancellationToken));
+
+    [HttpGet("till-close-report")]
+    [Authorize(Policy = MobilePosPermissions.ReviewTill)]
+    [Authorize(Policy = FinancePermissions.ReviewCashTillClosures)]
+    public async Task<ActionResult<IReadOnlyList<MobilePosTillCloseSubmissionDto>>> GetTillCloseReport(
+        CancellationToken cancellationToken)
+        => Ok(await _tillSessions.GetTillCloseReportAsync(cancellationToken));
+
+    [HttpPost("till-close-submissions/{submissionId:guid}/resolve-pending-sync")]
+    [Authorize(Policy = MobilePosPermissions.ResolveSync)]
+    [Authorize(Policy = MobilePosPermissions.ReviewTill)]
+    [Authorize(Policy = FinancePermissions.ReviewCashTillClosures)]
+    public async Task<ActionResult<MobilePosTillCloseSubmissionDto>> ResolvePendingSync(
+        Guid submissionId,
+        [FromBody] MobilePosResolvePendingSyncRequestDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _tillSessions.ResolvePendingSyncAsync(submissionId, dto, cancellationToken));
+
+    [HttpPost("till-close-submissions/{submissionId:guid}/bank-deposit-proposal")]
+    [Authorize(Policy = MobilePosPermissions.ReviewTill)]
+    [Authorize(Policy = FinancePermissions.CreateBankDeposits)]
+    public async Task<ActionResult<BankDepositDto>> CreateBankDepositProposal(
+        Guid submissionId,
+        [FromBody] MobilePosCreateDepositProposalRequestDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _tillSessions.CreateBankDepositProposalAsync(submissionId, dto, cancellationToken));
 
     [HttpGet("references")]
     [Authorize(Policy = MobilePosPermissions.ViewStore)]
