@@ -4,6 +4,7 @@ import {
   loadTokens,
   saveTokens,
 } from "@/src/storage/secure-session";
+import { validateServerProfile } from "@/src/config/environment";
 import type {
   DeviceEnrollmentRequest,
   LoginRequest,
@@ -97,8 +98,9 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 async function rawRequest<T>(path: string, init: RequestInit, accessToken?: string): Promise<T> {
-  const profile = await loadServerProfile();
-  if (!profile) throw new ApiProblem("Configure the RHEMA ERP server before signing in.", 0, "SERVER_NOT_CONFIGURED");
+  const storedProfile = await loadServerProfile();
+  if (!storedProfile) throw new ApiProblem("Configure the RHEMA ERP server before signing in.", 0, "SERVER_NOT_CONFIGURED");
+  const profile = validateServerProfile(storedProfile);
 
   const response = await fetch(`${profile.apiBaseUrl}${path}`, {
     ...init,

@@ -27,6 +27,7 @@
         }
       ],
       "expo-font",
+      "./plugins/with-mobile-security",
       [
         "expo-camera",
         {

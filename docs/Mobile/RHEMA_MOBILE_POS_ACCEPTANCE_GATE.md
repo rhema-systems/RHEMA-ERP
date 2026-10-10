@@ -32,7 +32,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -ZcsSdkDirectory 'C:\secure-sdk\SmartPos_1.8.1_R231213_SDK'
 ```
 
-This mode performs a clean Expo Android prebuild and rejects missing or hash-altered SDK artifacts. Vendor JAR/JNI files are copied only into the ignored generated Android project.
+This mode performs a clean production Expo Android prebuild, requires backup and cleartext traffic to be disabled in the generated manifest, and rejects missing or hash-altered SDK artifacts. Vendor JAR/JNI files are copied only into the ignored generated Android project.
 
 Add `-BuildNativeAndroid` only on a controlled host with the required Java and Android SDK toolchains. That option compiles a debug APK after the audited packaging check; it still does not certify printer output, scanner decode behavior, Android 14 firmware compatibility, signing, or upgrade behavior on a physical Z92S.
 

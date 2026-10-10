@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const storage = vi.hoisted(() => ({
   tokens: { accessToken: "old-access", refreshToken: "old-refresh" } as { accessToken: string; refreshToken: string } | null,
+  profile: { environment: "TEST", apiBaseUrl: "https://erp.example.com" },
   saveTokens: vi.fn(),
   clearTokens: vi.fn(),
 }));
 
 vi.mock("@/src/storage/secure-session", () => ({
-  loadServerProfile: vi.fn(async () => ({ environment: "TEST", apiBaseUrl: "https://erp.example.com" })),
+  loadServerProfile: vi.fn(async () => storage.profile),
   loadTokens: vi.fn(async () => storage.tokens),
   saveTokens: storage.saveTokens,
   clearTokens: storage.clearTokens,
@@ -23,12 +24,25 @@ const jsonResponse = (body: unknown, status = 200, headers?: Record<string, stri
 describe("Mobile POS API client", () => {
   beforeEach(() => {
     storage.tokens = { accessToken: "old-access", refreshToken: "old-refresh" };
+    storage.profile = { environment: "TEST", apiBaseUrl: "https://erp.example.com" };
     storage.saveTokens.mockImplementation(async (accessToken: string, refreshToken: string) => {
       storage.tokens = { accessToken, refreshToken };
     });
     storage.clearTokens.mockImplementation(async () => {
       storage.tokens = null;
     });
+  });
+
+  it("revalidates the stored server origin before exposing credentials", async () => {
+    storage.profile = { environment: "PRODUCTION", apiBaseUrl: "http://attacker.example.com" };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await mobileApi.me().catch(caught => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("Use HTTPS for remote servers");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

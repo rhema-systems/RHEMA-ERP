@@ -272,10 +272,20 @@ try {
         $resolvedSdk = (Resolve-Path -LiteralPath $ZcsSdkDirectory).Path
         $priorEnabled = [Environment]::GetEnvironmentVariable('RHEMA_ZCS_ENABLED', 'Process')
         $priorDirectory = [Environment]::GetEnvironmentVariable('RHEMA_ZCS_SDK_DIR', 'Process')
+        $priorEnvironment = [Environment]::GetEnvironmentVariable('EXPO_PUBLIC_RHEMA_ENVIRONMENT', 'Process')
         try {
             [Environment]::SetEnvironmentVariable('RHEMA_ZCS_ENABLED', 'true', 'Process')
             [Environment]::SetEnvironmentVariable('RHEMA_ZCS_SDK_DIR', $resolvedSdk, 'Process')
+            [Environment]::SetEnvironmentVariable('EXPO_PUBLIC_RHEMA_ENVIRONMENT', 'PRODUCTION', 'Process')
             Invoke-CheckedCommand 'Z92S audited SDK packaging and clean prebuild' $npm @('run', 'prebuild:android') $mobileRoot
+
+            Invoke-AssertionStage 'Production Android manifest security contract' {
+                [xml]$manifest = Get-Content -LiteralPath (Join-Path $mobileRoot 'android\app\src\main\AndroidManifest.xml')
+                $application = $manifest.manifest.application
+                if ($application.allowBackup -cne 'false') { throw 'Production Android backup must be disabled.' }
+                if ($application.usesCleartextTraffic -cne 'false') { throw 'Production Android cleartext traffic must be disabled.' }
+                'Android backup and cleartext traffic are disabled in the production prebuild.'
+            }
 
             Invoke-AssertionStage 'Z92S packaged artifact hash contract' {
                 $expected = [ordered]@{
@@ -310,6 +320,7 @@ try {
         finally {
             [Environment]::SetEnvironmentVariable('RHEMA_ZCS_ENABLED', $priorEnabled, 'Process')
             [Environment]::SetEnvironmentVariable('RHEMA_ZCS_SDK_DIR', $priorDirectory, 'Process')
+            [Environment]::SetEnvironmentVariable('EXPO_PUBLIC_RHEMA_ENVIRONMENT', $priorEnvironment, 'Process')
         }
     }
 }

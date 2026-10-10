@@ -11,7 +11,18 @@ describe("Mobile POS server profile", () => {
 
   it("requires HTTPS for production", () => {
     expect(() => validateServerProfile({ environment: "PRODUCTION", apiBaseUrl: "http://erp.example.com" }))
-      .toThrow("Production Mobile POS connections require HTTPS.");
+      .toThrow("Use HTTPS for remote servers.");
+  });
+
+  it("allows cleartext HTTP only for a local TEST target", () => {
+    expect(validateServerProfile({ environment: "TEST", apiBaseUrl: "http://10.0.2.2:5000/" })).toEqual({
+      environment: "TEST",
+      apiBaseUrl: "http://10.0.2.2:5000",
+    });
+    expect(() => validateServerProfile({ environment: "UAT", apiBaseUrl: "http://localhost:5000" }))
+      .toThrow("Use HTTPS for remote servers.");
+    expect(() => validateServerProfile({ environment: "TEST", apiBaseUrl: "http://test.example.com" }))
+      .toThrow("Use HTTPS for remote servers.");
   });
 
   it.each([

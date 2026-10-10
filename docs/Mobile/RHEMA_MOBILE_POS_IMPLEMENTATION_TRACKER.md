@@ -137,7 +137,7 @@
 | ID | Work item | Status |
 | --- | --- | --- |
 | MPOS-0801 | Complete `acceptance:mobile-pos` gate | Complete - the committed gate restores both lockfiles, rejects tracked mobile binaries, validates mobile and HQ TypeScript, runs mobile tests/Expo Doctor/Hermes export, performs a migration-aware API Release build, requires a nonempty all-passing focused API TRX, verifies idempotent SQL for all four Mobile POS migrations, and optionally hash-verifies the externally supplied Z92S SDK packaging; the release-form run passed on 2026-10-10 with 63/63 focused API tests and all SDK hashes |
-| MPOS-0802 | Mobile threat review and penetration checks | Planned |
+| MPOS-0802 | Mobile threat review and penetration checks | In progress - source threat model, per-request origin validation, remote cleartext rejection, production Android backup/cleartext controls, 74/74 mobile security/regression tests, production manifest prebuild evidence, and current npm/.NET advisory scans are complete; coordinated dependency remediation, MFA challenge-token change/acceptance, screenshot and pinning decisions, signed-APK analysis, authorized API penetration testing, and physical Z92S/root/TLS/revoke testing remain |
 | MPOS-0803 | Accounting reconciliation certification | Planned |
 | MPOS-0804 | Provider sandbox certification | Blocked pending provider selection |
 | MPOS-0805 | Performance, battery, network, and recovery tests | Planned |
