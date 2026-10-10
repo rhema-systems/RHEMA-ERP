@@ -1,3 +1,18 @@
+---
+integration_cycle: FIN-UAT-2026-10-10-A
+integration_status: ready
+integration_decision: include
+candidate_branch: codex/ar-profile-replacement-credit-authority
+candidate_head: cfd5ab2ecb1a8c386dd3118f6ad711c6ff36933c
+base_commit: c44cd6156237d3398f0f9da46ca6f17098c7cf07
+target_ref: origin/master
+depends_on: merged PR #384
+migration_status: no-new-migration; existing repository migrations applied locally only
+verification_status: focused checks passed; browser UAT and full type-check environment follow-up remain
+integration_commit: pending
+pull_request: pending
+---
+
 # AR Profile Replacement and Credit Authority
 
 ## Objective
@@ -66,14 +81,13 @@ Resolve the UAT `PROFILE_EFFECTIVE_PERIOD_OVERLAP` failure when approving a late
 
 ## Remaining work
 
-- Complete review and merge pull request #384.
-- Push the customer-register follow-up commit to pull request #384 after user authorization.
+- Integrate the four post-#384 Customer Register and local-UAT evidence commits into cycle `FIN-UAT-2026-10-10-A`.
 - Deploy only after merge through the normal deployment process, then retry approval of the submitted version-2 AR profile.
 - After updating the local API process, verify that the Customer Register returns rows or a genuine empty result rather than HTTP 400.
 - Complete browser UAT against `http://localhost:3000` and API `http://localhost:5050`, including login and Customer Register loading.
 
 ## Authorization boundaries
 
-- Push and pull-request creation were authorized and completed on 08 Oct 2026.
+- Push and pull-request creation were authorized for the outstanding consolidated changes on 10 Oct 2026.
 - Backup plus application of the eight already-pending repository migrations to the named local BOOKV2 UAT database was authorized and completed on 09 Oct 2026.
 - Merge, deployment, any further database mutation, and remote-server changes remain unauthorized.
