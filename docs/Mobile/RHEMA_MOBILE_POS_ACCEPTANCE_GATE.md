@@ -22,6 +22,20 @@ The standard gate restores both lockfiles, rejects committed mobile binaries, ch
 
 Evidence is written beneath the ignored `.artifacts/mobile-pos/acceptance/<UTC timestamp>/` directory. The JSON record contains the commit, stage status, timings, test result, and log paths.
 
+On Windows, run native Android gates from a real checkout with a short absolute path such as `C:\rhema-mobile-release`. A substituted drive that points to a long checkout can make React Native code generation observe two different roots; a deeply nested checkout can also exceed CMake/Ninja object-path limits.
+
+## Portable Android native gate
+
+When the Z92S device or redistribution approval is unavailable, the ordinary Android profile remains a supported UAT path. It preserves the full sale, collection, offline, till, customer, and receipt workflows while selecting Android system print/PDF/share and camera/manual/keyboard-wedge barcode input.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts/acceptance/Invoke-MobilePosAcceptance.ps1 `
+  -BuildNativeAndroid
+```
+
+This mode performs a clean UAT prebuild with `RHEMA_ZCS_ENABLED=false`, verifies the hardened manifest and release-signing guard, proves the ZCS JAR/JNI files and Gradle dependency are absent, and compiles a debug APK. Evidence records `HardwareProfile: PortableFallback`, `ZcsSdkPackagingRequested: false`, and `NativeAndroidBuildRequested: true`.
+
 ## Z92S SDK packaging gate
 
 Keep the vendor SDK outside the repository. Point the gate at the extracted directory that directly contains `libs/SmartPos_1.8.1_R231213.jar` and the two supported JNI ABI directories:

@@ -272,8 +272,70 @@ try {
     }
 
     if ([string]::IsNullOrWhiteSpace($ZcsSdkDirectory)) {
-        Add-SkippedStage 'Z92S proprietary SDK packaging' 'No SDK directory supplied; portable fallback build was verified.'
-        Add-SkippedStage 'Z92S native Android compile' 'Requires -ZcsSdkDirectory and -BuildNativeAndroid plus Java/Android SDK.'
+        Add-SkippedStage 'Z92S proprietary SDK packaging' 'Portable fallback profile selected; no proprietary SDK artifact may be packaged.'
+
+        if ($BuildNativeAndroid) {
+            $priorEnabled = [Environment]::GetEnvironmentVariable('RHEMA_ZCS_ENABLED', 'Process')
+            $priorDirectory = [Environment]::GetEnvironmentVariable('RHEMA_ZCS_SDK_DIR', 'Process')
+            $priorEnvironment = [Environment]::GetEnvironmentVariable('EXPO_PUBLIC_RHEMA_ENVIRONMENT', 'Process')
+            try {
+                [Environment]::SetEnvironmentVariable('RHEMA_ZCS_ENABLED', 'false', 'Process')
+                [Environment]::SetEnvironmentVariable('RHEMA_ZCS_SDK_DIR', $null, 'Process')
+                [Environment]::SetEnvironmentVariable('EXPO_PUBLIC_RHEMA_ENVIRONMENT', 'UAT', 'Process')
+                Invoke-CheckedCommand 'Portable fallback clean Android prebuild' $npm @('run', 'prebuild:android') $mobileRoot
+
+                Invoke-AssertionStage 'Portable fallback Android manifest security contract' {
+                    [xml]$manifest = Get-Content -LiteralPath (Join-Path $mobileRoot 'android\app\src\main\AndroidManifest.xml')
+                    $application = $manifest.manifest.application
+                    if ($application.allowBackup -cne 'false') { throw 'UAT Android backup must be disabled.' }
+                    if ($application.usesCleartextTraffic -cne 'false') { throw 'UAT Android cleartext traffic must be disabled.' }
+                    'Android backup and cleartext traffic are disabled in the portable UAT prebuild.'
+                }
+
+                Invoke-AssertionStage 'Portable fallback Android release signing guard contract' {
+                    $gradle = Get-Content -LiteralPath (Join-Path $mobileRoot 'android\app\build.gradle') -Raw
+                    $requiredMarkers = @(
+                        'RHEMA_ANDROID_RELEASE_SIGNING_START',
+                        'RHEMA_ANDROID_SIGNING_ENABLED',
+                        'RHEMA_ANDROID_KEYSTORE_PATH',
+                        'releaseRequested',
+                        'signingConfig signingConfigs.rhemaRelease'
+                    )
+                    $missing = @($requiredMarkers | Where-Object { $gradle.IndexOf($_, [StringComparison]::Ordinal) -lt 0 })
+                    if ($missing.Count -gt 0) { throw "Generated Android release signing guard is missing: $($missing -join ', ')" }
+                    'Release tasks require externally supplied signing values and override the generated debug signing configuration.'
+                }
+
+                Invoke-AssertionStage 'Portable fallback excludes proprietary Z92S artifacts' {
+                    $forbidden = @(
+                        'android\app\libs\zcs-smartpos-1.8.1.jar',
+                        'android\app\src\main\jniLibs\arm64-v8a\libSmartPosJni.so',
+                        'android\app\src\main\jniLibs\armeabi-v7a\libSmartPosJni.so'
+                    )
+                    $present = @($forbidden | Where-Object { Test-Path -LiteralPath (Join-Path $mobileRoot $_) })
+                    if ($present.Count -gt 0) { throw "Portable fallback contains proprietary SDK artifacts: $($present -join ', ')" }
+                    $gradle = Get-Content -LiteralPath (Join-Path $mobileRoot 'android\app\build.gradle') -Raw
+                    if ($gradle.IndexOf("implementation files('libs/zcs-smartpos-1.8.1.jar')", [StringComparison]::Ordinal) -ge 0) {
+                        throw 'Portable fallback unexpectedly references the proprietary Z92S JAR.'
+                    }
+                    'No Z92S JAR, native library, or Gradle dependency is packaged.'
+                }
+
+                $java = Get-Command java -ErrorAction SilentlyContinue
+                if (-not $java) { throw 'Java is required for -BuildNativeAndroid but was not found.' }
+                $gradleWrapper = Join-Path $mobileRoot 'android\gradlew.bat'
+                if (-not (Test-Path -LiteralPath $gradleWrapper)) { throw 'The generated Gradle wrapper was not found.' }
+                Invoke-CheckedCommand 'Portable fallback native Android debug compile' $gradleWrapper @('app:assembleDebug', '--no-daemon') (Join-Path $mobileRoot 'android')
+            }
+            finally {
+                [Environment]::SetEnvironmentVariable('RHEMA_ZCS_ENABLED', $priorEnabled, 'Process')
+                [Environment]::SetEnvironmentVariable('RHEMA_ZCS_SDK_DIR', $priorDirectory, 'Process')
+                [Environment]::SetEnvironmentVariable('EXPO_PUBLIC_RHEMA_ENVIRONMENT', $priorEnvironment, 'Process')
+            }
+        }
+        else {
+            Add-SkippedStage 'Portable fallback native Android compile' 'Native compile was not requested.'
+        }
     }
     else {
         $resolvedSdk = (Resolve-Path -LiteralPath $ZcsSdkDirectory).Path
@@ -357,6 +419,7 @@ finally {
         FinishedUtc = [DateTime]::UtcNow.ToString('o')
         Repository = $repoRoot
         Commit = if ($head) { [string]$head[0] } else { $null }
+        HardwareProfile = if ([string]::IsNullOrWhiteSpace($ZcsSdkDirectory)) { 'PortableFallback' } else { 'Z92S' }
         ZcsSdkPackagingRequested = -not [string]::IsNullOrWhiteSpace($ZcsSdkDirectory)
         NativeAndroidBuildRequested = [bool]$BuildNativeAndroid
         Failure = $failure

@@ -7,7 +7,6 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ApiBaseUrl,
 
-    [Parameter(Mandatory = $true)]
     [string]$ZcsSdkDirectory,
 
     [Parameter(Mandatory = $true)]
@@ -17,6 +16,7 @@ param(
     [string]$AcceptanceEvidencePath,
 
     [switch]$VendorRedistributionApproved,
+    [switch]$PortableFallback,
     [switch]$SkipInstall,
     [string]$OutputDirectory
 )
@@ -28,12 +28,24 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $mobileRoot = Join-Path $repoRoot 'apps\mobile'
 $appConfigPath = Join-Path $mobileRoot 'app.json'
 $acceptancePath = (Resolve-Path -LiteralPath $AcceptanceEvidencePath).Path
-$sdkPath = (Resolve-Path -LiteralPath $ZcsSdkDirectory).Path
 $resolvedKeystore = (Resolve-Path -LiteralPath $KeystorePath).Path
 
-if (-not $VendorRedistributionApproved) {
-    throw 'A Z92S release cannot be built until written vendor redistribution approval is recorded. Pass -VendorRedistributionApproved only after that approval exists.'
+$sdkPath = $null
+if ($PortableFallback) {
+    if (-not [string]::IsNullOrWhiteSpace($ZcsSdkDirectory)) {
+        throw 'PortableFallback cannot be combined with ZcsSdkDirectory because the portable build must exclude proprietary vendor artifacts.'
+    }
 }
+else {
+    if ([string]::IsNullOrWhiteSpace($ZcsSdkDirectory)) {
+        throw 'A Z92S release requires ZcsSdkDirectory. Use -PortableFallback to build without the proprietary printer/scanner SDK.'
+    }
+    $sdkPath = (Resolve-Path -LiteralPath $ZcsSdkDirectory).Path
+    if (-not $VendorRedistributionApproved) {
+        throw 'A Z92S release cannot be built until written vendor redistribution approval is recorded. Pass -VendorRedistributionApproved only after that approval exists.'
+    }
+}
+$hardwareProfile = if ($PortableFallback) { 'PortableFallback' } else { 'Z92S' }
 
 $repoPrefix = $repoRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
 if ($resolvedKeystore.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -157,8 +169,17 @@ if ($acceptance.Gate -cne 'acceptance:mobile-pos' -or -not [bool]$acceptance.Pas
 if ([string]$acceptance.Commit -cne $commit) {
     throw "Acceptance evidence commit $($acceptance.Commit) does not match release commit $commit."
 }
-if (-not [bool]$acceptance.ZcsSdkPackagingRequested -or -not [bool]$acceptance.NativeAndroidBuildRequested) {
-    throw 'Release evidence must include hash-verified Z92S packaging and a native Android compile.'
+if (-not [bool]$acceptance.NativeAndroidBuildRequested) {
+    throw 'Release evidence must include a native Android compile.'
+}
+if ([string]$acceptance.HardwareProfile -cne $hardwareProfile) {
+    throw "Acceptance evidence hardware profile $($acceptance.HardwareProfile) does not match requested release profile $hardwareProfile."
+}
+if ($PortableFallback -and [bool]$acceptance.ZcsSdkPackagingRequested) {
+    throw 'Portable fallback release evidence must prove that Z92S SDK packaging was not requested.'
+}
+if (-not $PortableFallback -and -not [bool]$acceptance.ZcsSdkPackagingRequested) {
+    throw 'Z92S release evidence must include hash-verified Z92S packaging.'
 }
 
 $appConfig = Get-Content -LiteralPath $appConfigPath -Raw | ConvertFrom-Json
@@ -171,7 +192,8 @@ if ([string]::IsNullOrWhiteSpace($versionName) -or $versionCode -lt 1) {
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repoRoot '.artifacts\mobile-pos\releases'
 }
-$releaseId = "{0}-v{1}-{2}-{3}" -f $Environment.ToLowerInvariant(), $versionName, $versionCode, $commit.Substring(0, 12)
+$profileSlug = if ($PortableFallback) { 'portable' } else { 'z92s' }
+$releaseId = "{0}-{1}-v{2}-{3}-{4}" -f $Environment.ToLowerInvariant(), $profileSlug, $versionName, $versionCode, $commit.Substring(0, 12)
 $releaseDirectory = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) $releaseId
 if (Test-Path -LiteralPath $releaseDirectory) { throw "Release directory already exists: $releaseDirectory" }
 New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
@@ -193,7 +215,7 @@ $stages = [Collections.Generic.List[object]]::new()
 try {
     [Environment]::SetEnvironmentVariable('EXPO_PUBLIC_RHEMA_ENVIRONMENT', $Environment, 'Process')
     [Environment]::SetEnvironmentVariable('EXPO_PUBLIC_API_BASE_URL', $apiOrigin, 'Process')
-    [Environment]::SetEnvironmentVariable('RHEMA_ZCS_ENABLED', 'true', 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_ZCS_ENABLED', $(if ($PortableFallback) { 'false' } else { 'true' }), 'Process')
     [Environment]::SetEnvironmentVariable('RHEMA_ZCS_SDK_DIR', $sdkPath, 'Process')
     [Environment]::SetEnvironmentVariable('RHEMA_ANDROID_SIGNING_ENABLED', 'true', 'Process')
     [Environment]::SetEnvironmentVariable('RHEMA_ANDROID_KEYSTORE_PATH', $resolvedKeystore, 'Process')
@@ -201,7 +223,24 @@ try {
     if (-not $SkipInstall) {
         $stages.Add((Invoke-LoggedCommand 'Restore locked mobile dependencies' $npm @('ci', '--no-audit', '--no-fund') $mobileRoot (Join-Path $releaseDirectory 'npm-ci.log')))
     }
-    $stages.Add((Invoke-LoggedCommand 'Clean Android prebuild with audited Z92S SDK' $npm @('run', 'prebuild:android') $mobileRoot (Join-Path $releaseDirectory 'prebuild.log')))
+    $prebuildName = if ($PortableFallback) { 'Clean Android prebuild without proprietary SDK' } else { 'Clean Android prebuild with audited Z92S SDK' }
+    $stages.Add((Invoke-LoggedCommand $prebuildName $npm @('run', 'prebuild:android') $mobileRoot (Join-Path $releaseDirectory 'prebuild.log')))
+
+    if ($PortableFallback) {
+        $forbiddenSdkArtifacts = @(
+            (Join-Path $mobileRoot 'android\app\libs\zcs-smartpos-1.8.1.jar'),
+            (Join-Path $mobileRoot 'android\app\src\main\jniLibs\arm64-v8a\libSmartPosJni.so'),
+            (Join-Path $mobileRoot 'android\app\src\main\jniLibs\armeabi-v7a\libSmartPosJni.so')
+        )
+        $presentSdkArtifacts = @($forbiddenSdkArtifacts | Where-Object { Test-Path -LiteralPath $_ })
+        if ($presentSdkArtifacts.Count -gt 0) {
+            throw "Portable fallback unexpectedly contains proprietary Z92S artifacts: $($presentSdkArtifacts -join ', ')"
+        }
+        $generatedGradle = Get-Content -LiteralPath (Join-Path $mobileRoot 'android\app\build.gradle') -Raw
+        if ($generatedGradle.IndexOf("implementation files('libs/zcs-smartpos-1.8.1.jar')", [StringComparison]::Ordinal) -ge 0) {
+            throw 'Portable fallback unexpectedly references the proprietary Z92S JAR.'
+        }
+    }
 
     $gradleWrapper = Join-Path $mobileRoot 'android\gradlew.bat'
     if (-not (Test-Path -LiteralPath $gradleWrapper)) { throw 'The clean prebuild did not produce gradlew.bat.' }
@@ -236,12 +275,14 @@ try {
         ReleaseId = $releaseId
         CreatedAtUtc = [DateTime]::UtcNow.ToString('o')
         Environment = $Environment
+        HardwareProfile = $hardwareProfile
         ApiOrigin = $apiOrigin
         GitCommit = $commit
         VersionName = $versionName
         VersionCode = $versionCode
         AndroidPackage = [string]$appConfig.expo.android.package
-        VendorRedistributionApprovalConfirmedByOperator = $true
+        VendorRedistributionApprovalConfirmedByOperator = [bool](-not $PortableFallback -and $VendorRedistributionApproved)
+        FallbackCapabilities = if ($PortableFallback) { @('AndroidSystemPrint', 'RetainedPdfShare', 'CameraBarcode', 'ManualBarcode', 'KeyboardWedge') } else { @() }
         AcceptanceEvidence = [ordered]@{
             Path = $acceptancePath
             Sha256 = (Get-FileHash -LiteralPath $acceptancePath -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -251,11 +292,11 @@ try {
             [ordered]@{ File = $apkName; Sha256 = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash.ToUpperInvariant(); Bytes = (Get-Item -LiteralPath $apkPath).Length },
             [ordered]@{ File = $aabName; Sha256 = (Get-FileHash -LiteralPath $aabPath -Algorithm SHA256).Hash.ToUpperInvariant(); Bytes = (Get-Item -LiteralPath $aabPath).Length }
         )
-        ZcsSdkArtifacts = @(
-            [ordered]@{ File = 'SmartPos_1.8.1_R231213.jar'; Sha256 = '3A65BF1A26D59730C014D79BA7B5AA8744BAB6E0B5275A2C055B996F4A7277E9' },
-            [ordered]@{ File = 'arm64-v8a/libSmartPosJni.so'; Sha256 = 'DE5CBF76EAFC3D0FBF1767BD0E8007E6217A2C81A6FDACE02FBD511A1D9FF9BF' },
-            [ordered]@{ File = 'armeabi-v7a/libSmartPosJni.so'; Sha256 = '7D8821DD051F83072023744019F1EDD86AB7CF0B0EAE2D7FD674DF7ED844A090' }
-        )
+        ZcsSdkArtifacts = if ($PortableFallback) { @() } else { @(
+                [ordered]@{ File = 'SmartPos_1.8.1_R231213.jar'; Sha256 = '3A65BF1A26D59730C014D79BA7B5AA8744BAB6E0B5275A2C055B996F4A7277E9' },
+                [ordered]@{ File = 'arm64-v8a/libSmartPosJni.so'; Sha256 = 'DE5CBF76EAFC3D0FBF1767BD0E8007E6217A2C81A6FDACE02FBD511A1D9FF9BF' },
+                [ordered]@{ File = 'armeabi-v7a/libSmartPosJni.so'; Sha256 = '7D8821DD051F83072023744019F1EDD86AB7CF0B0EAE2D7FD674DF7ED844A090' }
+            ) }
         Stages = @($stages)
     }
     $manifestPath = Join-Path $releaseDirectory 'mobile-pos-release-manifest.json'

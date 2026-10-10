@@ -3,4 +3,5 @@
 /ios/
 dist/
 node_modules/
+modules/*/android/build/
 npm-debug.log*

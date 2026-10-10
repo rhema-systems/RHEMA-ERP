@@ -2,7 +2,7 @@
 
 ## Release boundary
 
-This runbook governs signed UAT and production Android releases of `com.rhemasystems.fieldpos`, including the externally supplied ZCS SmartPos SDK used by the Z92S adapter. It does not deploy the RHEMA API or HQ web application, apply database migrations, enroll a device, or approve vendor redistribution rights.
+This runbook governs signed UAT and production Android releases of `com.rhemasystems.fieldpos`. Two explicit hardware profiles are supported: `PortableFallback`, which excludes proprietary ZCS files and uses Android system print/PDF/share plus camera/manual/keyboard-wedge input, and `Z92S`, which packages the externally supplied audited SmartPos SDK. It does not deploy the RHEMA API or HQ web application, apply database migrations, enroll a device, or approve vendor redistribution rights.
 
 The generated Android release task fails unless external signing is explicitly enabled and all four signing values are present. Keystore bytes, passwords, vendor JAR/JNI files, generated Android source, APKs, AABs, and local evidence remain outside Git.
 
@@ -11,14 +11,16 @@ The generated Android release task fails unless external signing is explicitly e
 Before a release candidate is built, record:
 
 1. the approved Git commit;
-2. written permission to redistribute the supplied ZCS SmartPos JAR and JNI libraries in the application;
+2. the selected hardware profile; a Z92S build additionally requires written permission to redistribute the supplied SmartPos JAR and JNI libraries;
 3. the target environment and exact HTTPS API origin;
 4. the approved `version` and strictly increasing Android `versionCode` in `apps/mobile/app.json`;
-5. a passing `acceptance:mobile-pos` evidence file from the same commit with Z92S SDK packaging and native Android compilation requested;
+5. a passing `acceptance:mobile-pos` evidence file from the same commit and hardware profile with native Android compilation requested;
 6. the release signing certificate owner, expiry, secure backup location, and recovery custodians;
 7. the target device ring and named release approver.
 
-The build host requires Node/npm, the repository-required .NET SDK, Java/JDK, Android SDK/build-tools, PowerShell, Git, and the externally retained ZCS SDK directory. The signing keystore must be outside the repository.
+The build host requires Node/npm, the repository-required .NET SDK, Java/JDK, Android SDK/build-tools, PowerShell, and Git. A Z92S build additionally requires the externally retained ZCS SDK directory. The signing keystore must be outside the repository.
+
+On Windows, use a real short-path checkout such as `C:\rhema-mobile-release` for native builds. Do not rely on `subst` against a deeply nested checkout: React Native code generation can retain the physical dependency path while Gradle uses the mapped drive, and long physical paths can exceed CMake/Ninja limits.
 
 ## Signing secret preparation
 
@@ -38,6 +40,15 @@ Keep at least two access-controlled, tested backups of the keystore. Losing the 
 
 Run the complete gate from a clean checkout of the candidate commit. Do not use `-SkipInstall` for release evidence.
 
+Portable fallback:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/Invoke-MobilePosAcceptance.ps1 `
+  -BuildNativeAndroid
+```
+
+Z92S:
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/Invoke-MobilePosAcceptance.ps1 `
   -ZcsSdkDirectory 'C:\secure-sdk\SmartPos_1.8.1_R231213_SDK' `
@@ -48,13 +59,27 @@ The resulting `acceptance-mobile-pos.json` must report:
 
 - `Passed: true`;
 - the exact candidate commit;
-- `ZcsSdkPackagingRequested: true`;
+- the requested `HardwareProfile`;
+- `ZcsSdkPackagingRequested: false` for portable fallback or `true` for Z92S;
 - `NativeAndroidBuildRequested: true`;
 - all required mobile, HQ, API, test, migration, manifest, SDK hash, and native build stages passed.
 
 ## Signed APK and AAB build
 
-Build from the same clean commit and supply the acceptance result. Pass the redistribution switch only when the written approval is already held.
+Build from the same clean commit and supply the matching acceptance result.
+
+Portable fallback:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/mobile/Build-MobilePosAndroidRelease.ps1 `
+  -Environment UAT `
+  -ApiBaseUrl 'https://uat.example.com' `
+  -PortableFallback `
+  -KeystorePath 'C:\secure-signing\rhema-field-pos.jks' `
+  -AcceptanceEvidencePath 'C:\release-evidence\acceptance-mobile-pos.json'
+```
+
+Z92S, only after written redistribution approval:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/mobile/Build-MobilePosAndroidRelease.ps1 `
@@ -68,7 +93,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/mobile/Build-MobileP
 
 For production, change `-Environment` and the API origin. The script rejects HTTP, URL paths/query strings/credentials, an in-repository keystore, a dirty Git tree, stale or incomplete acceptance evidence, missing Android tools, missing signing values, missing SDK artifacts, and reused output directories.
 
-The script performs a clean prebuild, packages only the hash-pinned ZCS artifacts, builds the release APK and AAB, verifies both signatures, and writes a release manifest under `.artifacts/mobile-pos/releases/<release-id>/`. The manifest records the exact commit, version, version code, environment, public API origin, signing certificate digest, acceptance evidence hash, artifact hashes/sizes, SDK hashes, and stage results. It never records signing passwords.
+The script performs a clean profile-specific prebuild, builds the release APK and AAB, verifies both signatures, and writes a release manifest under `.artifacts/mobile-pos/releases/<release-id>/`. Portable fallback builds fail if proprietary ZCS artifacts appear. Z92S builds package only the hash-pinned SDK artifacts. The manifest records the exact commit, hardware profile, version, version code, environment, public API origin, signing certificate digest, acceptance evidence hash, artifact hashes/sizes, applicable SDK hashes, fallback capabilities, and stage results. It never records signing passwords.
 
 ## Release review
 
