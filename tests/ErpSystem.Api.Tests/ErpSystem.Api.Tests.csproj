@@ -47,6 +47,7 @@
     <Compile Include="Services\MobilePos\MobilePosFinanceReadServiceTests.cs" />
     <Compile Include="Services\MobilePos\MobilePosCheckoutReadServiceTests.cs" />
     <Compile Include="Services\MobilePos\MobilePosMutationExecutionServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosMutationExecutionRelationalTests.cs" />
     <Compile Include="Services\MobilePos\MobilePosSaleServiceTests.cs" />
     <Compile Include="Services\MobilePos\MobilePosReceiptServiceTests.cs" />
     <Compile Include="Services\MobilePos\MobilePosTillSessionServiceTests.cs" />

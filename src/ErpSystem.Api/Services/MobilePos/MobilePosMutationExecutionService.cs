@@ -161,6 +161,15 @@ public sealed class MobilePosMutationExecutionService : IMobilePosMutationExecut
                 cancellationToken);
             throw;
         }
+        catch
+        {
+            // The relational transaction has already rolled back while unwinding the
+            // execution-strategy delegate. Remove entries whose in-memory state still
+            // reflects rolled-back SaveChanges calls so an exact retry starts from the
+            // durable database state instead of a phantom owner or receipt row.
+            _db.ChangeTracker.Clear();
+            throw;
+        }
     }
 
     private async Task<MobilePosMutationExecution<TResult>> ExecuteCoreAsync<TResult>(
