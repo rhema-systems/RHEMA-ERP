@@ -28,6 +28,7 @@
       ],
       "expo-font",
       "./plugins/with-mobile-security",
+      "./plugins/with-android-release-signing",
       [
         "expo-camera",
         {

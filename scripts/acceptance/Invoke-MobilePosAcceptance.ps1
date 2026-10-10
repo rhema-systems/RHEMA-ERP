@@ -287,6 +287,20 @@ try {
                 'Android backup and cleartext traffic are disabled in the production prebuild.'
             }
 
+            Invoke-AssertionStage 'Android release signing guard contract' {
+                $gradle = Get-Content -LiteralPath (Join-Path $mobileRoot 'android\app\build.gradle') -Raw
+                $requiredMarkers = @(
+                    'RHEMA_ANDROID_RELEASE_SIGNING_START',
+                    'RHEMA_ANDROID_SIGNING_ENABLED',
+                    'RHEMA_ANDROID_KEYSTORE_PATH',
+                    'releaseRequested',
+                    'signingConfig signingConfigs.rhemaRelease'
+                )
+                $missing = @($requiredMarkers | Where-Object { $gradle.IndexOf($_, [StringComparison]::Ordinal) -lt 0 })
+                if ($missing.Count -gt 0) { throw "Generated Android release signing guard is missing: $($missing -join ', ')" }
+                'Release tasks require externally supplied signing values and override the generated debug signing configuration.'
+            }
+
             Invoke-AssertionStage 'Z92S packaged artifact hash contract' {
                 $expected = [ordered]@{
                     'app\libs\zcs-smartpos-1.8.1.jar' = '3A65BF1A26D59730C014D79BA7B5AA8744BAB6E0B5275A2C055B996F4A7277E9'
