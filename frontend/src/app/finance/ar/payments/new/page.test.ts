@@ -41,4 +41,10 @@ describe('AR receipt destination contract', () => {
     expect(paymentMethod).toBeLessThan(bankDestination);
     expect(paymentMethod).toBeLessThan(holdingDestination);
   });
+
+  it('labels the displayed invoice date as the due date', () => {
+    expect(pageSource).toContain('<th className="p-3 text-left">Due date</th>');
+    expect(pageSource).toContain("inv.dueDate ? format(new Date(inv.dueDate), 'MMM dd, yyyy') : '-'");
+    expect(pageSource).not.toContain('<th className="p-3 text-left">Date</th>');
+  });
 });

@@ -1094,7 +1094,7 @@ export default function NewReceiptPage() {
                                         <thead className="bg-muted text-muted-foreground">
                                             <tr>
                                                 <th className="p-3 text-left">Invoice</th>
-                                                <th className="p-3 text-left">Date</th>
+                                                <th className="p-3 text-left">Due date</th>
                                                 <th className="p-3 text-right">Balance Due</th>
                                                 <th className="p-3 text-right w-[150px]">Invoice Cash</th>
                                                 <th className="p-3 text-right w-[150px]">Receipt Cash</th>

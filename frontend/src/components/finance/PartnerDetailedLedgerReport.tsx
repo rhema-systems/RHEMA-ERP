@@ -27,8 +27,18 @@ export function formatLedgerDateTime(value: string): string {
     });
 }
 
-export function resolveLedgerDisplayDateTime(line: Pick<DetailedLedgerLine, 'transactionDate' | 'postedAt'>): string {
-    return formatLedgerDateTime(line.postedAt || line.transactionDate);
+export function formatLedgerBusinessDate(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    });
+}
+
+export function resolveLedgerPostedDateTime(line: Pick<DetailedLedgerLine, 'postedAt'>): string {
+    return line.postedAt ? formatLedgerDateTime(line.postedAt) : '-';
 }
 
 export interface LedgerPartnerOption {
@@ -208,7 +218,8 @@ export function PartnerDetailedLedgerReport({
             [
                 `${partnerLabel} Code`,
                 `${partnerLabel} Name`,
-                'Date',
+                'Business Date',
+                'Posted Date / Time',
                 'Transaction Type',
                 'Document Number',
                 'Reference',
@@ -226,6 +237,7 @@ export function PartnerDetailedLedgerReport({
                 account.code,
                 account.name,
                 report.fromDate,
+                '',
                 'Opening Balance',
                 '',
                 '',
@@ -242,6 +254,7 @@ export function PartnerDetailedLedgerReport({
                     account.code,
                     account.name,
                     line.transactionDate,
+                    line.postedAt ?? '',
                     line.transactionType,
                     line.documentNumber,
                     line.reference ?? '',
@@ -258,6 +271,7 @@ export function PartnerDetailedLedgerReport({
                 account.code,
                 account.name,
                 report.toDate,
+                '',
                 'Closing Balance',
                 '',
                 '',
@@ -465,6 +479,7 @@ export function PartnerDetailedLedgerReport({
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
+                                                    <TableHead className="min-w-[120px]">Business date</TableHead>
                                                     <TableHead className="min-w-[155px]">Posted date / time</TableHead>
                                                     <TableHead className="min-w-[150px]">Type</TableHead>
                                                     <TableHead className="min-w-[140px]">Document</TableHead>
@@ -480,6 +495,7 @@ export function PartnerDetailedLedgerReport({
                                             <TableBody>
                                                 <TableRow className="bg-muted/40">
                                                     <TableCell>{report.fromDate}</TableCell>
+                                                    <TableCell>-</TableCell>
                                                     <TableCell className="font-medium">Opening Balance</TableCell>
                                                     <TableCell />
                                                     <TableCell />
@@ -492,8 +508,11 @@ export function PartnerDetailedLedgerReport({
                                                 </TableRow>
                                                 {account.lines.map((line, index) => (
                                                     <TableRow key={`${line.sourceDocumentId}-${line.transactionType}-${index}`}>
-                                                        <TableCell className="whitespace-nowrap" title={`Business date: ${line.transactionDate.slice(0, 10)}`}>
-                                                            {resolveLedgerDisplayDateTime(line)}
+                                                        <TableCell className="whitespace-nowrap">
+                                                            {formatLedgerBusinessDate(line.transactionDate)}
+                                                        </TableCell>
+                                                        <TableCell className="whitespace-nowrap">
+                                                            {resolveLedgerPostedDateTime(line)}
                                                         </TableCell>
                                                         <TableCell>{line.transactionType}</TableCell>
                                                         <TableCell className="font-medium">{line.documentNumber}</TableCell>
