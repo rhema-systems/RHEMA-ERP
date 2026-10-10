@@ -53,15 +53,50 @@ public sealed class MobilePosSaleServiceTests
             It.Is<FinancePostingProducerContext>(producer => producer.RouteId == FinanceDimensionRouteId.MobilePosCustomerPayment),
             It.IsAny<CancellationToken>()), Times.Exactly(2));
 
+        var invoiceCommand = (InvoiceCreateDto)fixture.Invoices.Invocations
+            .Single(invocation => invocation.Method.Name == nameof(IInvoiceService.CreateAsync))
+            .Arguments[0];
+        invoiceCommand.CurrencyCode.Should().Be("GHS");
+        invoiceCommand.LineItems.Should().ContainSingle();
+        invoiceCommand.LineItems[0].GLAccountId.Should().NotBeEmpty();
+        invoiceCommand.LineItems[0].Unit.Should().Be("EA");
+
+        var paymentCommands = fixture.Payments.Invocations
+            .Where(invocation => invocation.Method.Name == nameof(IPaymentService.CreateAsync))
+            .Select(invocation => (PaymentCreateDto)invocation.Arguments[0])
+            .ToArray();
+        paymentCommands.Should().HaveCount(2);
+        paymentCommands.Sum(payment => payment.TotalAmount).Should().Be(100m);
+        paymentCommands.Select(payment => payment.PaymentMethodId).Should()
+            .BeEquivalentTo(first.Tenders.Select(tender => tender.PaymentMethodId));
+        paymentCommands.Should().OnlyContain(payment =>
+            payment.CurrencyCode == "GHS"
+            && payment.LiquidityAccountId == fixture.LiquidityAccountId
+            && payment.Allocations != null
+            && payment.Allocations.Count == 1
+            && payment.Allocations[0].InvoiceId == first.InvoiceId
+            && payment.Allocations[0].AllocatedAmount == payment.TotalAmount
+            && payment.Allocations[0].PaymentCurrencyAmount == payment.TotalAmount);
+
         var sale = await fixture.Db.MobilePosSales
             .Include(item => item.Lines)
             .Include(item => item.Tenders)
             .SingleAsync();
         sale.UsedStoreDefaultCustomer.Should().BeTrue();
         sale.Status.Should().Be(MobilePosSaleStatus.Completed);
+        sale.InvoiceId.Should().Be(first.InvoiceId);
         sale.Lines.Should().ContainSingle();
         sale.Tenders.Should().HaveCount(2);
-        (await fixture.Db.MobileMutationReceipts.SingleAsync()).ReplayCount.Should().Be(1);
+        sale.Tenders.Should().OnlyContain(tender =>
+            tender.Status == MobilePosTenderStatus.Completed
+            && tender.CustomerPaymentId != null
+            && !string.IsNullOrWhiteSpace(tender.PaymentNumber));
+        sale.Tenders.Select(tender => tender.CustomerPaymentId).Should().OnlyHaveUniqueItems();
+        var mutation = await fixture.Db.MobileMutationReceipts.SingleAsync();
+        mutation.ReplayCount.Should().Be(1);
+        mutation.CanonicalInvoiceId.Should().Be(first.InvoiceId);
+        foreach (var paymentId in sale.Tenders.Select(tender => tender.CustomerPaymentId!.Value))
+            mutation.CanonicalCustomerPaymentIdsJson.Should().Contain(paymentId.ToString());
     }
 
     [Fact]
@@ -193,6 +228,7 @@ public sealed class MobilePosSaleServiceTests
             Guid firstMethodId,
             Guid secondMethodId,
             Guid bankAccountId,
+            Guid liquidityAccountId,
             bool firstMethodRequiresBankAccount)
         {
             Db = db;
@@ -203,6 +239,7 @@ public sealed class MobilePosSaleServiceTests
             _firstMethodId = firstMethodId;
             _secondMethodId = secondMethodId;
             BankAccountId = bankAccountId;
+            LiquidityAccountId = liquidityAccountId;
             _firstMethodRequiresBankAccount = firstMethodRequiresBankAccount;
         }
 
@@ -211,6 +248,7 @@ public sealed class MobilePosSaleServiceTests
         public Mock<IInvoiceService> Invoices { get; }
         public Mock<IPaymentService> Payments { get; }
         public Guid BankAccountId { get; }
+        public Guid LiquidityAccountId { get; }
 
         public static async Task<Fixture> CreateAsync(
             decimal invoiceTotal = 100m,
@@ -501,7 +539,7 @@ public sealed class MobilePosSaleServiceTests
                 db, currentUser.Object, foundation.Object, mutations, invoices.Object, payments.Object,
                 financeAccess.Object);
             return new Fixture(db, service, invoices, payments, itemId, firstMethodId, secondMethodId,
-                bankAccountId, firstMethodRequiresBankAccount);
+                bankAccountId, liquidityAccountId, firstMethodRequiresBankAccount);
         }
 
         public MobilePosCompleteSaleRequestDto ValidRequest() => new()
