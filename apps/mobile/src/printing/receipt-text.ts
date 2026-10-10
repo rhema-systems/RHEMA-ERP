@@ -5,8 +5,8 @@ const defaultWidth = 32;
 export function buildReceiptText(receipt: MobilePosPrintableReceipt, width = defaultWidth): string {
   if (!Number.isInteger(width) || width < 24 || width > 48) throw new Error("Receipt width must be an integer between 24 and 48 characters.");
 
-  const isSale = receipt.receiptKind === "SALE";
-  const isProvisional = receipt.receiptKind === "COLLECTION_PROVISIONAL";
+  const isSale = receipt.receiptKind === "SALE" || receipt.receiptKind === "SALE_PROVISIONAL";
+  const isProvisional = receipt.receiptKind === "SALE_PROVISIONAL" || receipt.receiptKind === "COLLECTION_PROVISIONAL";
   const lines: string[] = [];
   if (isProvisional) {
     lines.push(center("PROVISIONAL", width), center("PENDING SYNCHRONIZATION", width));
@@ -18,7 +18,7 @@ export function buildReceiptText(receipt: MobilePosPrintableReceipt, width = def
   lines.push(...wrap(receipt.storeName, width).map(line => center(line, width)));
   lines.push(center(`${receipt.tillNumber} / ${receipt.tillSessionNumber}`, width));
   lines.push(separator(width));
-  if (isSale) lines.push(...labelValue("Invoice", receipt.invoiceNumber, width));
+  if (receipt.receiptKind === "SALE") lines.push(...labelValue("Invoice", receipt.invoiceNumber, width));
   lines.push(...labelValue("Customer", `${receipt.customerName} (${receipt.customerCode})`, width));
   lines.push(...labelValue("Cashier", receipt.cashierName, width));
   lines.push(...labelValue("Date", formatReceiptDate(receipt.occurredAtUtc), width));

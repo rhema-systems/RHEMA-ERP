@@ -646,6 +646,55 @@ export interface MobilePosReceipt {
   tenders: MobilePosReceiptTender[];
 }
 
+export interface MobilePosProvisionalSaleReceiptTender {
+  sequence: number;
+  paymentMethodCode: string;
+  paymentMethodName: string;
+  amount: number;
+  externalReference?: string;
+}
+
+export interface MobilePosProvisionalSaleReceipt {
+  receiptKind: "SALE_PROVISIONAL";
+  receiptId: string;
+  copyType: "PROVISIONAL";
+  copyNumber: 0;
+  reprintCount: 0;
+  generatedAtUtc: string;
+  qrReference: string;
+  tenantId: string;
+  tenantCode: string;
+  tenantName: string;
+  storeId: string;
+  storeCode: string;
+  storeName: string;
+  locationName: string;
+  tillId: string;
+  tillNumber: string;
+  tillName: string;
+  tillSessionId: string;
+  tillSessionNumber: string;
+  businessDate: string;
+  deviceId: string;
+  deviceName: string;
+  cashierUserId: string;
+  cashierName: string;
+  businessPartnerId: string;
+  businessPartnerRoleId: string;
+  customerCode: string;
+  customerName: string;
+  usedStoreDefaultCustomer: boolean;
+  localReference: string;
+  occurredAtUtc: string;
+  currencyCode: string;
+  subTotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  lines: MobilePosReceiptLine[];
+  tenders: MobilePosProvisionalSaleReceiptTender[];
+}
+
 export interface MobilePosCollectionReceiptAllocation {
   sequence: number;
   invoiceId: string;
@@ -741,5 +790,6 @@ export interface MobilePosProvisionalCollectionReceipt {
 
 export type MobilePosPrintableReceipt =
   | MobilePosReceipt
+  | MobilePosProvisionalSaleReceipt
   | MobilePosCollectionReceipt
   | MobilePosProvisionalCollectionReceipt;

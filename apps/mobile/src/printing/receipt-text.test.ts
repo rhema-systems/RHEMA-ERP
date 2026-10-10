@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildReceiptText } from "@/src/printing/receipt-text";
-import type { MobilePosCollectionReceipt, MobilePosReceipt } from "@/src/types/api";
+import type { MobilePosCollectionReceipt, MobilePosProvisionalSaleReceipt, MobilePosReceipt } from "@/src/types/api";
 
 const receipt = {
   receiptKind: "SALE",
@@ -61,6 +61,18 @@ const collectionReceipt = {
   }],
 } as unknown as MobilePosCollectionReceipt;
 
+const provisionalSaleReceipt = {
+  ...receipt,
+  receiptKind: "SALE_PROVISIONAL",
+  receiptId: "sale-mutation-1",
+  copyType: "PROVISIONAL",
+  copyNumber: 0,
+  reprintCount: 0,
+  invoiceNumber: undefined,
+  qrReference: "RHEMA|MOBILEPOS|PROVISIONAL|MOB-001|sale-mutation-1",
+  tenders: [{ sequence: 1, paymentMethodCode: "CASH", paymentMethodName: "Cash", amount: 110 }],
+} as unknown as MobilePosProvisionalSaleReceipt;
+
 describe("Z92S receipt text", () => {
   it("renders deterministic compact text within the 32 character paper width", () => {
     const text = buildReceiptText(receipt);
@@ -84,6 +96,18 @@ describe("Z92S receipt text", () => {
     expect(text).toContain("INV-001");
     expect(text).toContain("PAY-001");
     expect(text).not.toContain("INV/2026/001");
+    expect(text.split("\n").every(line => line.length <= 32)).toBe(true);
+  });
+
+  it("marks an offline sale as provisional and omits canonical numbers", () => {
+    const text = buildReceiptText(provisionalSaleReceipt);
+
+    expect(text).toContain("PROVISIONAL");
+    expect(text).toContain("PENDING SYNCHRONIZATION");
+    expect(text).toContain("Pending server number");
+    expect(text).toContain("NOT A FINAL FINANCE RECEIPT");
+    expect(text).not.toContain("INV/2026/001");
+    expect(text).not.toContain("PAY-001");
     expect(text.split("\n").every(line => line.length <= 32)).toBe(true);
   });
 });

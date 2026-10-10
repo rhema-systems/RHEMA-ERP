@@ -1,8 +1,8 @@
 import type { MobilePosPrintableReceipt } from "@/src/types/api";
 
 export function buildReceiptHtml(receipt: MobilePosPrintableReceipt): string {
-  const isSale = receipt.receiptKind === "SALE";
-  const isProvisional = receipt.receiptKind === "COLLECTION_PROVISIONAL";
+  const isSale = receipt.receiptKind === "SALE" || receipt.receiptKind === "SALE_PROVISIONAL";
+  const isProvisional = receipt.receiptKind === "SALE_PROVISIONAL" || receipt.receiptKind === "COLLECTION_PROVISIONAL";
   const copyMark = isProvisional
     ? `<div class="provisional-mark">PROVISIONAL &middot; PENDING SYNCHRONIZATION</div>`
     : receipt.copyType === "REPRINT"
@@ -17,8 +17,10 @@ export function buildReceiptHtml(receipt: MobilePosPrintableReceipt): string {
     const paymentNumber = "paymentNumber" in tender ? tender.paymentNumber : "Pending server payment number";
     return `<tr><td><strong>${escapeHtml(tender.paymentMethodName)}</strong><span>${escapeHtml(paymentNumber)}${tender.externalReference ? ` &middot; ${escapeHtml(tender.externalReference)}` : ""}</span></td><td class="amount">${receiptMoney(tender.amount, receipt.currencyCode)}</td></tr>`;
   }).join("");
-  const sourceFacts = isSale
+  const sourceFacts = receipt.receiptKind === "SALE"
     ? `<tr><td>Invoice</td><td>${escapeHtml(receipt.invoiceNumber)}</td></tr><tr><td>Status</td><td>${escapeHtml(receipt.invoiceStatus)}</td></tr>`
+    : receipt.receiptKind === "SALE_PROVISIONAL"
+      ? `<tr><td>Document</td><td>Provisional cash sale</td></tr><tr><td>Status</td><td>Pending synchronization</td></tr>`
     : `<tr><td>Document</td><td>${isProvisional ? "Provisional collection" : "Customer collection"}</td></tr><tr><td>Status</td><td>${isProvisional ? "Pending synchronization" : "Payments posted"}</td></tr>`;
   const totals = isSale
     ? `<tr><td>Subtotal</td><td>${receiptMoney(receipt.subTotal, receipt.currencyCode)}</td></tr><tr><td>Discount</td><td>${receiptMoney(receipt.discountAmount, receipt.currencyCode)}</td></tr><tr><td>Tax</td><td>${receiptMoney(receipt.taxAmount, receipt.currencyCode)}</td></tr>`
@@ -89,7 +91,7 @@ export function buildReceiptHtml(receipt: MobilePosPrintableReceipt): string {
 export function receiptPdfFileName(receipt: MobilePosPrintableReceipt): string {
   const source = (receipt.receiptKind === "SALE" ? receipt.invoiceNumber : receipt.localReference)
     .replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "receipt";
-  const kind = receipt.receiptKind === "SALE" ? "sale" : "collection";
+  const kind = receipt.receiptKind === "SALE" || receipt.receiptKind === "SALE_PROVISIONAL" ? "sale" : "collection";
   const copy = receipt.copyType === "REPRINT" ? `reprint-${receipt.copyNumber}` : receipt.copyType === "PROVISIONAL" ? "provisional" : "original";
   return `${source}-${kind}-${copy}.pdf`;
 }

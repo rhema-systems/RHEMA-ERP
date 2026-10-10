@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildReceiptHtml, receiptPdfFileName } from "@/src/receipts/render";
-import type { MobilePosProvisionalCollectionReceipt, MobilePosReceipt } from "@/src/types/api";
+import type { MobilePosProvisionalCollectionReceipt, MobilePosProvisionalSaleReceipt, MobilePosReceipt } from "@/src/types/api";
 
 const receipt: MobilePosReceipt = {
   receiptKind: "SALE",
@@ -104,6 +104,21 @@ const provisionalCollection: MobilePosProvisionalCollectionReceipt = {
   tenders: [{ sequence: 1, paymentMethodCode: "CASH", paymentMethodName: "Cash", amount: 75 }],
 };
 
+const provisionalSale: MobilePosProvisionalSaleReceipt = {
+  ...receipt,
+  receiptKind: "SALE_PROVISIONAL",
+  receiptId: "sale-mutation-1",
+  copyType: "PROVISIONAL",
+  copyNumber: 0,
+  reprintCount: 0,
+  generatedAtUtc: "2026-10-10T12:02:00Z",
+  qrReference: "RHEMA|MOBILEPOS|PROVISIONAL|MOB-001|sale-mutation-1",
+  tillSessionNumber: "PENDING SYNC",
+  businessDate: "2026-10-10",
+  occurredAtUtc: "2026-10-10T12:00:00Z",
+  tenders: [{ sequence: 1, paymentMethodCode: "CASH", paymentMethodName: "Cash", amount: 110 }],
+};
+
 describe("receipt rendering", () => {
   it("renders a printable canonical receipt and escapes business data", () => {
     const html = buildReceiptHtml(receipt);
@@ -130,5 +145,17 @@ describe("receipt rendering", () => {
     expect(html).toContain("Pending server payment number");
     expect(html).toContain("not a final Finance receipt");
     expect(receiptPdfFileName(provisionalCollection)).toBe("COL-001-collection-provisional.pdf");
+  });
+
+  it("renders a provisional sale slip without canonical invoice or payment claims", () => {
+    const html = buildReceiptHtml(provisionalSale);
+
+    expect(html).toContain("PROVISIONAL &middot; PENDING SYNCHRONIZATION");
+    expect(html).toContain("Provisional cash sale");
+    expect(html).toContain("Pending server payment number");
+    expect(html).toContain("not a final Finance receipt");
+    expect(html).not.toContain("INV/001");
+    expect(html).not.toContain("PAY-001");
+    expect(receiptPdfFileName(provisionalSale)).toBe("MOB-001-sale-provisional.pdf");
   });
 });

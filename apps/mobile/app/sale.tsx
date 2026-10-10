@@ -27,6 +27,7 @@ import type {
   MobilePosBankAccountOption,
   MobilePosCustomerSearchResult,
   MobilePosPaymentMethod,
+  MobilePosProvisionalSaleReceipt,
   MobilePosReceipt,
   MobilePosSalePreview,
   MobilePosSaleResult,
@@ -91,7 +92,13 @@ export default function SaleScreen() {
   const [pendingIdentity, setPendingIdentity] = useState<PendingIdentity | null>(null);
   const [result, setResult] = useState<MobilePosSaleResult | null>(null);
   const [receipt, setReceipt] = useState<MobilePosReceipt | null>(null);
-  const [queuedSale, setQueuedSale] = useState<{ localReference: string; total: number; currencyCode: string } | null>(null);
+  const [queuedSale, setQueuedSale] = useState<{
+    localReference: string;
+    total: number;
+    currencyCode: string;
+    provisionalReceipt: boolean;
+    receipt?: MobilePosProvisionalSaleReceipt;
+  } | null>(null);
   const [busy, setBusy] = useState<"catalogue" | "customer" | "bankAccounts" | "preview" | "complete" | "reprint" | "print" | "share" | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
   const [outputMessage, setOutputMessage] = useState<string | null>(null);
@@ -384,9 +391,11 @@ export default function SaleScreen() {
         return Boolean(method?.allowOffline && allowedTenderIds.has(tender.paymentMethodId));
       });
       const discountAllowed = cart.every(line => line.discountPercentage === 0) || grant?.policy.allowDiscounts === true;
+      const offlineAmountAllowed = grant?.policy.maximumTransactionAmount == null
+        || preview.totalAmount <= grant.policy.maximumTransactionAmount;
       if (retryable && grant && session.user && bootstrap.currentTillSessionId
         && grant.policy.allowedCommandTypes.includes("CashSale")
-        && offlineTenderAllowed && discountAllowed) {
+        && offlineTenderAllowed && discountAllowed && offlineAmountAllowed) {
         try {
           await (await openSessionOutbox(session.user, bootstrap)).enqueue({
             clientMutationId: identity.clientMutationId,
@@ -397,15 +406,77 @@ export default function SaleScreen() {
             offlineGrantId: grant.id,
             payload: request,
           });
+          const provisionalReceipt = grant.policy.allowProvisionalReceipt ? {
+            receiptKind: "SALE_PROVISIONAL" as const,
+            receiptId: identity.clientMutationId,
+            copyType: "PROVISIONAL" as const,
+            copyNumber: 0 as const,
+            reprintCount: 0 as const,
+            generatedAtUtc: new Date().toISOString(),
+            qrReference: `RHEMA|MOBILEPOS|PROVISIONAL|${identity.localReference}|${identity.clientMutationId}`,
+            tenantId: session.user.currentTenantId ?? "",
+            tenantCode: session.user.currentTenantCode ?? "",
+            tenantName: session.user.currentTenantName ?? "RHEMA ERP",
+            storeId: bootstrap.store.id,
+            storeCode: bootstrap.store.code,
+            storeName: bootstrap.store.name,
+            locationName: bootstrap.store.code,
+            tillId: bootstrap.till.id,
+            tillNumber: bootstrap.till.tillNumber,
+            tillName: bootstrap.till.name,
+            tillSessionId: bootstrap.currentTillSessionId,
+            tillSessionNumber: "PENDING SYNC",
+            businessDate: identity.occurredAtUtc.slice(0, 10),
+            deviceId: bootstrap.device.id,
+            deviceName: bootstrap.device.deviceName,
+            cashierUserId: session.user.id,
+            cashierName: bootstrap.userName,
+            businessPartnerId: preview.businessPartnerId,
+            businessPartnerRoleId: preview.businessPartnerRoleId,
+            customerCode: preview.customerCode,
+            customerName: preview.customerName,
+            usedStoreDefaultCustomer: preview.usedStoreDefaultCustomer,
+            localReference: identity.localReference,
+            occurredAtUtc: identity.occurredAtUtc,
+            currencyCode: preview.currencyCode,
+            subTotal: preview.subTotal,
+            taxAmount: preview.taxAmount,
+            discountAmount: preview.discountAmount,
+            totalAmount: preview.totalAmount,
+            lines: preview.lines.map((line, index) => ({
+              sequence: index + 1,
+              description: line.description,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              discountAmount: line.discountAmount,
+              taxAmount: line.taxAmount,
+              lineTotal: line.lineTotal,
+              unitOfMeasureCode: line.unitOfMeasureCode,
+            })),
+            tenders: request.tenders.map((tender, index) => {
+              const method = onlineMethods.find(item => item.paymentMethodId === tender.paymentMethodId);
+              return {
+                sequence: index + 1,
+                paymentMethodCode: method?.code ?? tender.paymentMethodId,
+                paymentMethodName: method?.name ?? "Tender",
+                amount: tender.amount,
+                externalReference: tender.externalReference,
+              };
+            }),
+          } satisfies MobilePosProvisionalSaleReceipt : undefined;
           setQueuedSale({
             localReference: identity.localReference,
             total: preview.totalAmount,
             currencyCode: preview.currencyCode,
+            provisionalReceipt: grant.policy.allowProvisionalReceipt,
+            receipt: provisionalReceipt,
           });
           setError(null);
         } catch (queueError) {
           setError(asProblem(queueError));
         }
+      } else if (retryable && grant && !offlineAmountAllowed) {
+        setError(problem("This sale exceeds the signed offline per-transaction limit."));
       } else {
         setError(failure);
       }
@@ -445,14 +516,16 @@ export default function SaleScreen() {
     }
   };
 
-  const printCurrentReceipt = async () => {
-    if (!receipt) return;
+  const printCurrentReceipt = async (current: MobilePosReceipt | MobilePosProvisionalSaleReceipt) => {
     setBusy("print");
     setError(null);
     setOutputMessage(null);
     try {
-      const printResult = await printReceiptAsync(receipt, bootstrap.device.printerAdapterKey);
-      setOutputMessage(`${receipt.copyType === "REPRINT" ? `Reprint copy ${receipt.copyNumber}` : "Original receipt"} sent to ${printResult.adapterLabel}.`);
+      const printResult = await printReceiptAsync(current, bootstrap.device.printerAdapterKey);
+      const label = current.copyType === "PROVISIONAL"
+        ? "Provisional sale slip"
+        : current.copyType === "REPRINT" ? `Reprint copy ${current.copyNumber}` : "Original receipt";
+      setOutputMessage(`${label} sent to ${printResult.adapterLabel}.`);
     } catch (caught) {
       setError(asProblem(caught));
     } finally {
@@ -460,13 +533,12 @@ export default function SaleScreen() {
     }
   };
 
-  const shareCurrentReceipt = async () => {
-    if (!receipt) return;
+  const shareCurrentReceipt = async (current: MobilePosReceipt | MobilePosProvisionalSaleReceipt) => {
     setBusy("share");
     setError(null);
     setOutputMessage(null);
     try {
-      await shareReceiptPdfAsync(receipt);
+      await shareReceiptPdfAsync(current);
       setOutputMessage("The receipt PDF was saved on this device and opened in the share sheet.");
     } catch (caught) {
       setError(asProblem(caught));
@@ -485,8 +557,17 @@ export default function SaleScreen() {
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Pending synchronization</Text>
           <Text style={styles.meta}>The same sale identity and tender evidence are retained in the encrypted device workflow. RHEMA will create the final invoice, payments, and canonical receipt after server validation.</Text>
-          <Text style={styles.receiptNote}>Do not issue another sale for this transaction. Reconnect and open Sync & exceptions to submit it.</Text>
+          <Text style={styles.receiptNote}>{queuedSale.provisionalReceipt ? "The signed policy permits a clearly marked provisional sale slip." : "The signed policy does not permit a provisional receipt."}</Text>
         </View>
+        {queuedSale.receipt && <>
+          <SaleReceiptCard receipt={queuedSale.receipt} />
+          {error && <ErrorBox message={`${error.message}${error.correlationId ? ` Reference: ${error.correlationId}` : ""}`} />}
+          {outputMessage && <View style={styles.outputMessage}><Ionicons name="checkmark-circle-outline" size={19} color={colors.success} /><Text style={styles.outputMessageText}>{outputMessage}</Text></View>}
+          <View style={styles.outputActions}>
+            <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void printCurrentReceipt(queuedSale.receipt!)} style={[styles.outputButton, busy !== null && styles.disabled]}><Ionicons name="print-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>{isZcsSmartPosAdapter(bootstrap.device.printerAdapterKey) ? "Built-in print" : "System print"}</Text></Pressable>
+            <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void shareCurrentReceipt(queuedSale.receipt!)} style={[styles.outputButton, busy !== null && styles.disabled]}><Ionicons name="share-social-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>Share PDF</Text></Pressable>
+          </View>
+        </>}
         <Link href="/sync" asChild>
           <Pressable accessibilityRole="button" style={styles.primaryButton}>
             <Text style={styles.primaryButtonText}>Open Sync & exceptions</Text>
@@ -558,10 +639,10 @@ export default function SaleScreen() {
         {outputMessage && <View style={styles.outputMessage}><Ionicons name="checkmark-circle-outline" size={19} color={colors.success} /><Text style={styles.outputMessageText}>{outputMessage}</Text></View>}
         {receipt && (
           <View style={styles.outputActions}>
-            <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void printCurrentReceipt()} style={[styles.outputButton, busy !== null && styles.disabled]}>
+             <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void printCurrentReceipt(receipt)} style={[styles.outputButton, busy !== null && styles.disabled]}>
               {busy === "print" ? <ActivityIndicator color={colors.blue} /> : <><Ionicons name="print-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>{isZcsSmartPosAdapter(bootstrap.device.printerAdapterKey) ? "Built-in print" : "System print"}</Text></>}
             </Pressable>
-            <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void shareCurrentReceipt()} style={[styles.outputButton, busy !== null && styles.disabled]}>
+             <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void shareCurrentReceipt(receipt)} style={[styles.outputButton, busy !== null && styles.disabled]}>
               {busy === "share" ? <ActivityIndicator color={colors.blue} /> : <><Ionicons name="share-social-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>Share PDF</Text></>}
             </Pressable>
           </View>
@@ -729,6 +810,44 @@ function LabelValue({ label, value }: { label: string; value: string }) {
   return <View style={styles.labelValue}><Text style={styles.meta}>{label}</Text><Text style={styles.labelValueText}>{value}</Text></View>;
 }
 
+function SaleReceiptCard({ receipt }: { receipt: MobilePosReceipt | MobilePosProvisionalSaleReceipt }) {
+  return <View style={styles.receiptCard}>
+    {receipt.copyType === "PROVISIONAL" && <Text style={styles.provisionalMark}>PROVISIONAL · PENDING SYNCHRONIZATION</Text>}
+    {receipt.copyType === "REPRINT" && <Text style={styles.reprintMark}>REPRINT · COPY {receipt.copyNumber}</Text>}
+    <Text style={styles.receiptTenant}>{receipt.tenantName || "RHEMA ERP"}</Text>
+    <Text style={styles.receiptMeta}>SALES RECEIPT</Text>
+    <Text style={styles.receiptMeta}>{receipt.storeName} · {receipt.locationName || receipt.storeCode}</Text>
+    <Text style={styles.receiptMeta}>{receipt.tillNumber} · {receipt.tillSessionNumber}</Text>
+    <View style={styles.receiptDivider} />
+    <LabelValue label="Customer" value={`${receipt.customerName} (${receipt.customerCode})`} />
+    <LabelValue label="Cashier" value={receipt.cashierName} />
+    {receipt.receiptKind === "SALE"
+      ? <LabelValue label="Invoice" value={`${receipt.invoiceNumber} · ${receipt.invoiceStatus}`} />
+      : <LabelValue label="Status" value="Pending synchronization" />}
+    <LabelValue label="Reference" value={receipt.localReference} />
+    <View style={styles.receiptDivider} />
+    {receipt.lines.map(line => <View key={line.sequence} style={styles.receiptLine}>
+      <View style={styles.grow}><Text style={styles.lineTitle}>{line.description}</Text><Text style={styles.meta}>{line.quantity} {line.unitOfMeasureCode} × {money(line.unitPrice, receipt.currencyCode, 2)}</Text></View>
+      <Text style={styles.receiptLineAmount}>{money(line.lineTotal, receipt.currencyCode, 2)}</Text>
+    </View>)}
+    <View style={styles.receiptDivider} />
+    <LabelValue label="Subtotal" value={money(receipt.subTotal, receipt.currencyCode, 2)} />
+    <LabelValue label="Discount" value={money(receipt.discountAmount, receipt.currencyCode, 2)} />
+    <LabelValue label="Tax" value={money(receipt.taxAmount, receipt.currencyCode, 2)} />
+    <View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>{money(receipt.totalAmount, receipt.currencyCode, 2)}</Text></View>
+    <View style={styles.receiptDivider} />
+    {receipt.tenders.map(tender => <View key={tender.sequence} style={styles.receiptTender}>
+      <View style={styles.grow}>
+        <Text style={styles.lineTitle}>{tender.paymentMethodName}</Text>
+        <Text style={styles.meta}>{"paymentNumber" in tender ? tender.paymentNumber : "Pending server payment number"}{tender.externalReference ? ` · ${tender.externalReference}` : ""}</Text>
+      </View>
+      <Text style={styles.receiptLineAmount}>{money(tender.amount, receipt.currencyCode, 2)}</Text>
+    </View>)}
+    <Text selectable style={styles.qrReference}>{receipt.qrReference}</Text>
+    {receipt.copyType === "PROVISIONAL" && <Text style={styles.receiptNote}>This is not a final Finance receipt. The invoice and payment numbers will be assigned after successful synchronization.</Text>}
+  </View>;
+}
+
 function ErrorBox({ message }: { message: string }) {
   return <View accessibilityRole="alert" style={styles.errorBox}><Ionicons name="alert-circle-outline" size={20} color={colors.danger} /><Text style={styles.errorText}>{message}</Text></View>;
 }
@@ -829,6 +948,7 @@ const styles = StyleSheet.create({
   receiptTender: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 5 },
   receiptLineAmount: { color: colors.ink, fontSize: 13, fontWeight: "700" },
   reprintMark: { marginBottom: 12, color: colors.danger, fontSize: 13, fontWeight: "800", letterSpacing: 1.5, textAlign: "center" },
+  provisionalMark: { marginBottom: 12, padding: 8, borderWidth: 2, borderColor: colors.warning, color: colors.warning, fontSize: 11, fontWeight: "800", letterSpacing: 1, textAlign: "center" },
   qrReference: { marginTop: 16, color: colors.slate, fontSize: 10, textAlign: "center" },
   outputActions: { marginTop: 10, flexDirection: "row", gap: 10 },
   outputButton: { flex: 1, minHeight: 48, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: "#B2CCFF", backgroundColor: colors.white },
