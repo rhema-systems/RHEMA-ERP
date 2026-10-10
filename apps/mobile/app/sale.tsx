@@ -15,7 +15,9 @@ import { ApiProblem, mobileApi } from "@/src/api/client";
 import { BarcodeScannerModal } from "@/components/barcode-scanner-modal";
 import { BankAccountPickerModal } from "@/components/bank-account-picker-modal";
 import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
+import { completeWithCanonicalReceipt } from "@/src/receipts/completion";
 import { searchSessionCatalogue, searchSessionCustomers } from "@/src/offline/catalogue-runtime";
+import { cacheSessionReceipt } from "@/src/offline/receipt-runtime";
 import { openSessionOutbox } from "@/src/offline/sync-runtime";
 import { isZcsSmartPosAdapter, ZcsHardwareScannerAdapter } from "@/src/hardware/zcs-smartpos";
 import type { BarcodeScan } from "@/src/scanning/barcode";
@@ -378,9 +380,14 @@ export default function SaleScreen() {
       tenders,
     });
     try {
-      const completed = await mobileApi.completeSale(request);
-      setResult(completed);
-      setReceipt(await mobileApi.getReceipt(completed.saleId, await getInstallationId()));
+      const completed = await completeWithCanonicalReceipt({
+        complete: () => mobileApi.completeSale(request),
+        loadReceipt: result => mobileApi.getReceipt(result.saleId, request.installationId),
+        persistReceipt: current => cacheSessionReceipt(session.user!, bootstrap, current),
+      });
+      setResult(completed.result);
+      if (completed.receipt) setReceipt(completed.receipt);
+      if (completed.outputError) setError(receiptOutputProblem("sale", completed.outputStage!, completed.outputError));
     } catch (caught) {
       const failure = asProblem(caught);
       const grant = session.offlineGrant;
@@ -504,11 +511,17 @@ export default function SaleScreen() {
     setError(null);
     setOutputMessage(null);
     try {
-      setReceipt(await mobileApi.recordReceiptReprint(result.saleId, {
+      const reprint = await mobileApi.recordReceiptReprint(result.saleId, {
         installationId: await getInstallationId(),
         clientEventId: Crypto.randomUUID(),
         reason: "Cashier requested another receipt copy",
-      }));
+      });
+      setReceipt(reprint);
+      try {
+        await cacheSessionReceipt(session.user!, bootstrap, reprint);
+      } catch (cacheError) {
+        setError(receiptOutputProblem("sale reprint", "persist", cacheError));
+      }
     } catch (caught) {
       setError(asProblem(caught));
     } finally {
@@ -869,6 +882,14 @@ function createIdentity(): PendingIdentity {
 
 function asProblem(error: unknown): ApiProblem {
   return error instanceof ApiProblem ? error : problem(error instanceof Error ? error.message : "An unexpected error occurred.");
+}
+
+function receiptOutputProblem(subject: string, stage: "load" | "persist", error: unknown): ApiProblem {
+  const source = asProblem(error);
+  const message = stage === "load"
+    ? `The ${subject} completed, but its canonical receipt could not be loaded. The transaction will not be queued or posted again.`
+    : `The ${subject} completed and its receipt is available, but the receipt could not be saved on this device.`;
+  return new ApiProblem(message, source.status, source.code ?? "MOBILE_POS_RECEIPT_OUTPUT_FAILED", source.correlationId);
 }
 
 function problem(message: string): ApiProblem {

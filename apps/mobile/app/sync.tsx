@@ -66,6 +66,15 @@ export default function SyncScreen() {
         </View>
       )}
 
+      {(summary?.receiptCacheFailures ?? 0) > 0 && (
+        <View style={styles.warningBox}>
+          <Ionicons name="receipt-outline" size={19} color={colors.warning} />
+          <Text style={styles.warningText}>
+            {summary!.receiptCacheFailures} synchronized receipt(s) could not be downloaded to this device. The Finance transactions are complete; use Saved receipts to retry the receipt download.
+          </Text>
+        </View>
+      )}
+
       <Pressable
         accessibilityRole="button"
         disabled={busy}
@@ -130,6 +139,8 @@ const styles = StyleSheet.create({
   metricLabel: { marginTop: 2, color: colors.muted, fontSize: 10, fontWeight: "700" },
   errorBox: { marginTop: 14, flexDirection: "row", gap: 9, padding: 13, borderRadius: 11, backgroundColor: colors.dangerBg },
   errorText: { flex: 1, color: colors.danger, fontSize: 12, lineHeight: 18 },
+  warningBox: { marginTop: 14, flexDirection: "row", gap: 9, padding: 13, borderRadius: 11, backgroundColor: colors.warningBg },
+  warningText: { flex: 1, color: colors.warning, fontSize: 12, lineHeight: 18 },
   syncButton: { marginTop: 16, minHeight: 50, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: colors.blue },
   syncButtonText: { color: colors.white, fontSize: 14, fontWeight: "700" },
   disabled: { opacity: 0.5 },

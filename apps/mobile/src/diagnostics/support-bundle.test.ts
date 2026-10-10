@@ -79,7 +79,7 @@ describe("Mobile POS support bundle", () => {
           allowedPaymentMethods: [],
         },
       },
-      outbox: { total: 5, pending: 2, rejected: 1, conflict: 1, manualReview: 1, messages: [{ payload: { cardNumber: "must-not-export" } }] as never },
+      outbox: { total: 5, pending: 2, rejected: 1, conflict: 1, manualReview: 1, receiptCacheFailures: 0, messages: [{ payload: { cardNumber: "must-not-export" } }] as never },
     });
 
     expect(bundle).toMatchObject({

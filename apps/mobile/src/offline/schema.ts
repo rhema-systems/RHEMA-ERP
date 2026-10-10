@@ -4,7 +4,7 @@ export interface OfflineDatabaseMigration {
   sql: string;
 }
 
-export const OFFLINE_DATABASE_VERSION = 4;
+export const OFFLINE_DATABASE_VERSION = 5;
 
 export const offlineDatabaseMigrations: OfflineDatabaseMigration[] = [
   {
@@ -173,6 +173,31 @@ export const offlineDatabaseMigrations: OfflineDatabaseMigration[] = [
         PRIMARY KEY (scope_key, business_partner_role_id),
         FOREIGN KEY (scope_key) REFERENCES cache_context(scope_key) ON DELETE CASCADE
       );
+    `,
+  },
+  {
+    version: 5,
+    name: "mobile_pos_canonical_receipt_cache",
+    sql: `
+      CREATE TABLE IF NOT EXISTS receipt_document_cache (
+        scope_key TEXT NOT NULL,
+        receipt_kind TEXT NOT NULL CHECK (receipt_kind IN ('SALE', 'COLLECTION')),
+        receipt_id TEXT NOT NULL,
+        copy_type TEXT NOT NULL CHECK (copy_type IN ('ORIGINAL', 'REPRINT')),
+        copy_number INTEGER NOT NULL CHECK (copy_number >= 0),
+        local_reference TEXT NOT NULL,
+        receipt_number TEXT NOT NULL,
+        occurred_at_utc TEXT NOT NULL,
+        generated_at_utc TEXT NOT NULL,
+        received_at_utc TEXT NOT NULL,
+        projection_json TEXT NOT NULL,
+        PRIMARY KEY (scope_key, receipt_kind, receipt_id, copy_type, copy_number),
+        FOREIGN KEY (scope_key) REFERENCES cache_context(scope_key) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS ix_receipt_document_cache_recent
+        ON receipt_document_cache(scope_key, occurred_at_utc DESC, received_at_utc DESC);
+      CREATE INDEX IF NOT EXISTS ix_receipt_document_cache_reference
+        ON receipt_document_cache(scope_key, local_reference, receipt_number);
     `,
   },
 ];

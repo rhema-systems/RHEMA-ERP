@@ -1,6 +1,7 @@
 import { sessionScope } from "@/src/offline/catalogue-runtime";
 import { MobilePosOutboxDispatcher } from "@/src/offline/dispatcher";
 import { SqliteOutbox, type OutboxMessage, type OutboxState } from "@/src/offline/outbox";
+import { hydrateSynchronizedSessionReceipts } from "@/src/offline/receipt-runtime";
 import type { MobilePosBootstrap, UserInfo } from "@/src/types/api";
 
 const visibleStates: readonly OutboxState[] = [
@@ -19,6 +20,7 @@ export interface OutboxSummary {
   conflict: number;
   manualReview: number;
   messages: OutboxMessage[];
+  receiptCacheFailures: number;
 }
 
 export async function openSessionOutbox(user: UserInfo, bootstrap: MobilePosBootstrap): Promise<SqliteOutbox> {
@@ -45,7 +47,9 @@ export async function synchronizeSessionOutbox(
     const outcome = await dispatcher.dispatchNext();
     if (outcome === "Idle" || outcome === "RetryScheduled") break;
   }
-  return summarize(await outbox.list(visibleStates, 500));
+  const summary = summarize(await outbox.list(visibleStates, 500));
+  const receiptHydration = await hydrateSynchronizedSessionReceipts(user, bootstrap, 500);
+  return { ...summary, receiptCacheFailures: receiptHydration.failed };
 }
 
 function summarize(messages: OutboxMessage[]): OutboxSummary {
@@ -56,5 +60,6 @@ function summarize(messages: OutboxMessage[]): OutboxSummary {
     conflict: messages.filter(message => message.state === "Conflict").length,
     manualReview: messages.filter(message => message.state === "ManualReview").length,
     messages,
+    receiptCacheFailures: 0,
   };
 }

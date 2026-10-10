@@ -289,6 +289,21 @@ export class SqliteOutbox {
     return rows.map(mapRow);
   }
 
+  async listRecent(states: readonly OutboxState[], limit = 100): Promise<OutboxMessage[]> {
+    const take = Math.max(1, Math.min(Math.trunc(limit), 500));
+    if (states.length === 0) return [];
+    for (const state of states) requireOutboxState(state);
+    const placeholders = states.map(() => "?").join(",");
+    const rows = await this.database.getAllAsync<OutboxRow>(
+      `SELECT * FROM outbox_message WHERE scope_key = ? AND state IN (${placeholders})
+       ORDER BY created_at_utc DESC, client_mutation_id DESC LIMIT ?`,
+      this.scope.scopeKey,
+      ...states,
+      take,
+    );
+    return rows.map(mapRow);
+  }
+
   private async persist<TPayload>(
     input: OutboxCommandInput<TPayload>,
     initialState: "DraftLocal" | "Pending",

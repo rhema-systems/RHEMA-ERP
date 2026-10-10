@@ -19,6 +19,8 @@ import {
 import { isZcsSmartPosAdapter } from "@/src/hardware/zcs-smartpos";
 import { openSessionOutbox } from "@/src/offline/sync-runtime";
 import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
+import { completeWithCanonicalReceipt } from "@/src/receipts/completion";
+import { cacheSessionReceipt } from "@/src/offline/receipt-runtime";
 import { sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
 import { useSession } from "@/src/session/session-context";
 import { getInstallationId } from "@/src/storage/secure-session";
@@ -226,13 +228,14 @@ export default function CollectionScreen() {
         await queueOfflineCollection(request);
       } else {
         try {
-          const completed = await mobileApi.completeCollection(request);
-          setResult(completed);
-          try {
-            setReceipt(await mobileApi.getCollectionReceipt(completed.collectionId, await getInstallationId()));
-          } catch (receiptError) {
-            setError(asProblem(receiptError));
-          }
+          const completed = await completeWithCanonicalReceipt({
+            complete: () => mobileApi.completeCollection(request),
+            loadReceipt: result => mobileApi.getCollectionReceipt(result.collectionId, request.installationId),
+            persistReceipt: current => cacheSessionReceipt(session.user!, bootstrap, current),
+          });
+          setResult(completed.result);
+          if (completed.receipt) setReceipt(completed.receipt);
+          if (completed.outputError) setError(receiptOutputProblem("collection", completed.outputStage!, completed.outputError));
         } catch (caught) {
           if (!isRetryableTransportFailure(caught)) throw caught;
           await queueOfflineCollection(request);
@@ -351,11 +354,17 @@ export default function CollectionScreen() {
     setError(null);
     setOutputMessage(null);
     try {
-      setReceipt(await mobileApi.recordCollectionReceiptReprint(result.collectionId, {
+      const reprint = await mobileApi.recordCollectionReceiptReprint(result.collectionId, {
         installationId: await getInstallationId(),
         clientEventId: Crypto.randomUUID(),
         reason: "Cashier requested another collection receipt copy",
-      }));
+      });
+      setReceipt(reprint);
+      try {
+        await cacheSessionReceipt(session.user!, bootstrap, reprint);
+      } catch (cacheError) {
+        setError(receiptOutputProblem("collection reprint", "persist", cacheError));
+      }
     } catch (caught) {
       setError(asProblem(caught));
     } finally {
@@ -512,6 +521,13 @@ function createIdentity() {
 }
 function problem(message: string) { return new ApiProblem(message, 400, "COLLECTION_VALIDATION"); }
 function asProblem(error: unknown) { return error instanceof ApiProblem ? error : problem(error instanceof Error ? error.message : "An unexpected error occurred."); }
+function receiptOutputProblem(subject: string, stage: "load" | "persist", error: unknown) {
+  const source = asProblem(error);
+  const message = stage === "load"
+    ? `The ${subject} completed, but its canonical receipt could not be loaded. The transaction will not be queued or posted again.`
+    : `The ${subject} completed and its receipt is available, but the receipt could not be saved on this device.`;
+  return new ApiProblem(message, source.status, source.code ?? "MOBILE_POS_RECEIPT_OUTPUT_FAILED", source.correlationId);
+}
 function money(value: number, currency: string) { return `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function date(value: string) { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString(); }
 function formatCacheTime(value: string | null) { if (!value) return "earlier"; const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(); }

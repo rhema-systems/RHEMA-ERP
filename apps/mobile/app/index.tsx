@@ -149,6 +149,17 @@ export default function HomeScreen() {
             </Pressable>
           </Link>
 
+          <Link href="/receipts" asChild>
+            <Pressable accessibilityRole="button" style={styles.featureButton}>
+              <View style={styles.featureIcon}><Ionicons name="receipt-outline" size={22} color={colors.blue} /></View>
+              <View style={styles.featureMain}>
+                <Text style={styles.featureTitle}>Saved receipts</Text>
+                <Text style={styles.featureText}>Review canonical sale and collection receipts saved for this device scope.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={19} color={colors.muted} />
+            </Pressable>
+          </Link>
+
           <View style={styles.infoCard}>
             <View style={styles.sectionRow}>
               <Text style={styles.sectionTitle}>Offline authorization</Text>

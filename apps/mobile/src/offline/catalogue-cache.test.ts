@@ -20,13 +20,15 @@ const item: MobilePosCatalogueItem = {
 
 describe("offline database foundation", () => {
   it("defines the durable scoped cache, outbox, receipt, and cursor tables", () => {
-    expect(OFFLINE_DATABASE_VERSION).toBe(4);
+    expect(OFFLINE_DATABASE_VERSION).toBe(5);
     const sql = offlineDatabaseMigrations.map(migration => migration.sql).join("\n");
-    for (const table of ["cache_context", "catalogue_item_cache", "customer_cache", "payment_method_cache", "configuration_cache", "receipt_cache", "sync_cursor", "outbox_message", "outstanding_invoice_cache", "outstanding_invoice_snapshot"]) {
+    for (const table of ["cache_context", "catalogue_item_cache", "customer_cache", "payment_method_cache", "configuration_cache", "receipt_cache", "receipt_document_cache", "sync_cursor", "outbox_message", "outstanding_invoice_cache", "outstanding_invoice_snapshot"]) {
       expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
     expect(sql).not.toMatch(/access_token|refresh_token|signing_secret/i);
     expect(sql).toContain("CREATE TRIGGER IF NOT EXISTS outbox_state_transition_guard");
+    expect(sql).toContain("CHECK (receipt_kind IN ('SALE', 'COLLECTION'))");
+    expect(sql).toContain("CHECK (copy_type IN ('ORIGINAL', 'REPRINT'))");
   });
 
   it("binds local data to tenant, user, device, store, and till", () => {
