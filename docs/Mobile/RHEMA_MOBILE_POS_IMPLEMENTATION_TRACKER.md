@@ -129,14 +129,14 @@
 | MPOS-0701 | Printer/scanner capability interfaces and fake adapters | In progress | Receipt-printer capability/result contract, deterministic fake printer, normalized scanner/test adapter, runtime hardware detection, and focused tests are implemented; physical adapter evidence remains |
 | MPOS-0702 | ZCS built-in printer adapter | In progress | Local Expo/Kotlin bridge adapts SmartPos initialization/status/text/start calls; canonical 32-column receipt rendering, device capability heartbeat, configured checkout routing, audited external-SDK packaging, real artifact hash validation, and Android prebuild/autolink evidence pass; written redistribution approval, native Gradle build, and physical print acceptance remain |
 | MPOS-0703 | ZCS hardware scanner adapter | In progress | Local Expo/Kotlin bridge adapts `HQrsanner` power/trigger/stop calls and the sale screen captures the vendor keyboard-wedge result through the normalized catalogue path; focused lifecycle tests and Android prebuild/autolink evidence pass; native Gradle build and physical trigger/decode acceptance remain |
-| MPOS-0704 | Bluetooth ESC/POS adapter | Planned | Supported printer models |
+| MPOS-0704 | Bluetooth ESC/POS adapter | Blocked | Management/vendor must confirm the supported printer models and protocol behavior before an adapter and certification matrix can be selected |
 | MPOS-0705 | Z92S physical certification | Blocked | Signed build and physical Z92S |
 
 ## Phase 8 - hardening and release
 
 | ID | Work item | Status |
 | --- | --- | --- |
-| MPOS-0801 | Complete `acceptance:mobile-pos` gate | Planned |
+| MPOS-0801 | Complete `acceptance:mobile-pos` gate | Complete - the committed gate restores both lockfiles, rejects tracked mobile binaries, validates mobile and HQ TypeScript, runs mobile tests/Expo Doctor/Hermes export, performs a migration-aware API Release build, requires a nonempty all-passing focused API TRX, verifies idempotent SQL for all four Mobile POS migrations, and optionally hash-verifies the externally supplied Z92S SDK packaging; the release-form run passed on 2026-10-10 with 63/63 focused API tests and all SDK hashes |
 | MPOS-0802 | Mobile threat review and penetration checks | Planned |
 | MPOS-0803 | Accounting reconciliation certification | Planned |
 | MPOS-0804 | Provider sandbox certification | Blocked pending provider selection |
@@ -151,6 +151,7 @@
 | ZCS Z92S printer SDK/service contract | MPOS-0702 | Supplied 2026-10-09 as SmartPos 1.8.1 and hash-audited; no licence/redistribution terms detected; exact Android 14 firmware behavior remains unverified |
 | ZCS hardware scanner contract | MPOS-0703 | Supplied 2026-10-09 through `HQrsanner`; physical Z92S behavior remains unverified |
 | Physical Z92S certification unit | MPOS-0705 | Awaiting availability |
+| Supported Bluetooth ESC/POS printer models and protocol contracts | MPOS-0704 | Awaiting management/vendor confirmation; implementation is blocked to avoid claiming compatibility against an unspecified device |
 | Mobile Money/card provider contract and sandbox | MPOS-0804 | Awaiting management/provider selection |
 | Android signing identity and secure CI credentials | Phase 8 | Must be prepared before release |
 
