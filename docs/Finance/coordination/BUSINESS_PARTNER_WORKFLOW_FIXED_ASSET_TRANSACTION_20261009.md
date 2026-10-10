@@ -33,7 +33,9 @@ Changed files:
 
 ## Migrations
 
-- `20261009143000_ConsolidateBusinessPartnerWorkflowEntityType` — created, not applied.
+- `20261009143000_ConsolidateBusinessPartnerWorkflowEntityType` — applied on 2026-10-10 to local `RHEMAERP_BOOKV2_UAT_20260922`; not applied to any remote database.
+- Verified copy-only backup: `C:\Program Files\Microsoft SQL Server\MSSQL16.EXPRESS22\MSSQL\Backup\RHEMAERP_BOOKV2_UAT_20260922_pre_BP_workflow_20261010.bak`.
+- Post-application verification: one active/non-deleted `BusinessPartner` row, one retired/deleted legacy alias, and the canonical row owns 1 workflow definition and 4 retained workflow instances.
 
 ## Verification
 
@@ -45,10 +47,10 @@ Changed files:
 
 ## Known failures and remaining work
 
-- Apply the migration only through the normal reviewed deployment process; it remains unapplied locally and remotely.
+- Apply the migration to remote environments only through the normal reviewed deployment process; it remains unapplied remotely.
 - Deploy the corrected build and migration, then submit a newly created Business Partner and verify that an approval instance appears for the configured approver. Do not use `SUP260002` as maker-checker evidence because its earlier activation did not create valid workflow evidence.
 
 ## Authorization boundaries
 
-- Authorized: local implementation, tests, local commits.
-- Not authorized: applying migrations, changing any database, pushing, creating a pull request, deployment, or changing remote runtime state.
+- Authorized: local implementation, tests, local commits, and the 2026-10-10 migration application to local `RHEMAERP_BOOKV2_UAT_20260922`.
+- Not authorized: changing any remote database, pushing, creating a pull request, deployment, or changing remote runtime state.
