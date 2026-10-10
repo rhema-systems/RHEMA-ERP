@@ -233,6 +233,7 @@ public sealed class MobilePosCollectionConfiguration : IEntityTypeConfiguration<
             .IsUnique().HasFilter("[IsDeleted] = 0");
         entity.HasIndex(item => new { item.TenantId, item.MobilePosStoreId, item.BusinessDate, item.Status });
         entity.Property(item => item.CurrencyCode).IsUnicode(false);
+        entity.Property(item => item.OfflinePolicySnapshotHash).IsUnicode(false);
 
         entity.HasOne(item => item.MobilePosStore).WithMany()
             .HasForeignKey(item => item.MobilePosStoreId).OnDelete(DeleteBehavior.Restrict);
@@ -248,9 +249,15 @@ public sealed class MobilePosCollectionConfiguration : IEntityTypeConfiguration<
             .HasForeignKey(item => item.BusinessPartnerId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(item => item.BusinessPartnerRole).WithMany()
             .HasForeignKey(item => item.BusinessPartnerRoleId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(item => item.MobilePosOfflineGrant).WithMany()
+            .HasForeignKey(item => item.MobilePosOfflineGrantId).OnDelete(DeleteBehavior.Restrict);
 
-        entity.ToTable(table => table.HasCheckConstraint(
-            "CK_MobilePosCollections_TotalAmount", "[TotalAmount] > 0"));
+        entity.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_MobilePosCollections_TotalAmount", "[TotalAmount] > 0");
+            table.HasCheckConstraint("CK_MobilePosCollections_OfflinePolicyHash",
+                "[OfflinePolicySnapshotHash] IS NULL OR LEN([OfflinePolicySnapshotHash]) = 64");
+        });
     }
 }
 

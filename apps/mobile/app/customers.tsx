@@ -3,6 +3,8 @@ import { Link, Redirect, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ApiProblem, mobileApi } from "@/src/api/client";
+import { isRetryableTransportFailure, loadSessionOutstandingInvoices } from "@/src/offline/collection-runtime";
+import { searchSessionCustomers } from "@/src/offline/catalogue-runtime";
 import { useSession } from "@/src/session/session-context";
 import { getInstallationId } from "@/src/storage/secure-session";
 import type { MobilePosCustomerSearchResult, OutstandingInvoice } from "@/src/types/api";
@@ -23,6 +25,7 @@ export default function CustomersScreen() {
   const [results, setResults] = useState<MobilePosCustomerSearchResult[]>([]);
   const [selected, setSelected] = useState<MobilePosCustomerSearchResult | null>(defaultCustomer);
   const [invoices, setInvoices] = useState<OutstandingInvoice[] | null>(null);
+  const [invoiceCacheTime, setInvoiceCacheTime] = useState<string | null>(null);
   const [busy, setBusy] = useState<"search" | "invoices" | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
 
@@ -30,6 +33,7 @@ export default function CustomersScreen() {
     setSelected(defaultCustomer);
     setResults([]);
     setInvoices(null);
+    setInvoiceCacheTime(null);
     setError(null);
   }, [defaultCustomer]);
 
@@ -51,7 +55,13 @@ export default function CustomersScreen() {
     setBusy("search");
     setError(null);
     try {
-      setResults(await mobileApi.searchCustomers(await getInstallationId(), term));
+      try {
+        setResults(await mobileApi.searchCustomers(await getInstallationId(), term));
+      } catch (caught) {
+        const bootstrap = session.bootstrap;
+        if (!isRetryableTransportFailure(caught) || !session.user || !bootstrap) throw caught;
+        setResults(await searchSessionCustomers(session.user, bootstrap, term));
+      }
     } catch (caught) {
       setError(asProblem(caught));
     } finally {
@@ -62,10 +72,20 @@ export default function CustomersScreen() {
   const chooseCustomer = async (customer: MobilePosCustomerSearchResult) => {
     setSelected(customer);
     setInvoices(null);
+    setInvoiceCacheTime(null);
     setBusy("invoices");
     setError(null);
     try {
-      setInvoices(await mobileApi.getOutstandingInvoices(await getInstallationId(), customer));
+      const bootstrap = session.bootstrap;
+      if (!session.user || !bootstrap) throw new Error("The signed-in Mobile POS user is unavailable.");
+      const loaded = await loadSessionOutstandingInvoices(
+        session.user,
+        bootstrap,
+        await getInstallationId(),
+        customer,
+      );
+      setInvoices(loaded.invoices);
+      setInvoiceCacheTime(loaded.source === "Cached" ? loaded.cachedAtUtc ?? "cached" : null);
     } catch (caught) {
       setError(asProblem(caught));
     } finally {
@@ -153,6 +173,12 @@ export default function CustomersScreen() {
           {selected && (
             <View style={styles.invoiceSection}>
               <Text style={styles.sectionLabel}>Outstanding invoices · {selected.name}</Text>
+              {invoiceCacheTime && (
+                <View style={styles.cacheNotice}>
+                  <Ionicons name="cloud-offline-outline" size={17} color={colors.warning} />
+                  <Text style={styles.cacheNoticeText}>Offline balances cached {formatCacheTime(invoiceCacheTime)}. They will be revalidated during synchronization.</Text>
+                </View>
+              )}
               {busy === "invoices" ? (
                 <ActivityIndicator style={styles.invoiceLoader} color={colors.blue} />
               ) : invoices?.length === 0 ? (
@@ -210,6 +236,11 @@ function date(value: string): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString();
 }
 
+function formatCacheTime(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
   content: { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 36 },
@@ -242,6 +273,8 @@ const styles = StyleSheet.create({
   resultMeta: { marginTop: 4, color: colors.muted, fontSize: 11 },
   emptyText: { marginTop: 16, color: colors.muted, fontSize: 13, lineHeight: 19, textAlign: "center" },
   invoiceSection: { marginTop: 2 },
+  cacheNotice: { marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 8, padding: 11, borderRadius: 11, backgroundColor: "#FFFAEB" },
+  cacheNoticeText: { flex: 1, color: colors.slate, fontSize: 11, lineHeight: 16 },
   invoiceLoader: { marginTop: 20 },
   clearCard: { flexDirection: "row", alignItems: "center", gap: 9, padding: 15, borderRadius: 14, backgroundColor: colors.successBg },
   clearText: { color: colors.success, fontSize: 13, fontWeight: "600" },

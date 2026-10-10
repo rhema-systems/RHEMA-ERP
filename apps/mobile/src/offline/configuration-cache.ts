@@ -1,5 +1,5 @@
 import { activateOfflineScope, openOfflineDatabase, type OfflineScope } from "@/src/offline/database";
-import type { MobilePosBootstrap } from "@/src/types/api";
+import type { MobilePosBankAccountOption, MobilePosBootstrap } from "@/src/types/api";
 
 export async function cacheSessionConfiguration(scope: OfflineScope, bootstrap: MobilePosBootstrap): Promise<void> {
   await activateOfflineScope(scope);
@@ -27,4 +27,37 @@ export async function cacheSessionConfiguration(scope: OfflineScope, bootstrap: 
       );
     }
   });
+}
+
+export async function cacheBankAccounts(
+  scope: OfflineScope,
+  accounts: MobilePosBankAccountOption[],
+  changedAt = new Date(),
+): Promise<void> {
+  await activateOfflineScope(scope);
+  const changedAtUtc = validDate(changedAt).toISOString();
+  await (await openOfflineDatabase()).runAsync(
+    `INSERT INTO configuration_cache(scope_key, configuration_key, changed_at_utc, projection_json)
+     VALUES (?, 'bank-accounts', ?, ?)
+     ON CONFLICT(scope_key, configuration_key) DO UPDATE SET
+       changed_at_utc = excluded.changed_at_utc,
+       projection_json = excluded.projection_json`,
+    scope.scopeKey,
+    changedAtUtc,
+    JSON.stringify(accounts),
+  );
+}
+
+export async function loadBankAccounts(scope: OfflineScope): Promise<MobilePosBankAccountOption[] | null> {
+  await activateOfflineScope(scope);
+  const row = await (await openOfflineDatabase()).getFirstAsync<{ projection_json: string }>(
+    "SELECT projection_json FROM configuration_cache WHERE scope_key = ? AND configuration_key = 'bank-accounts'",
+    scope.scopeKey,
+  );
+  return row ? JSON.parse(row.projection_json) as MobilePosBankAccountOption[] : null;
+}
+
+function validDate(value: Date): Date {
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new Error("The bank account cache timestamp is invalid.");
+  return value;
 }

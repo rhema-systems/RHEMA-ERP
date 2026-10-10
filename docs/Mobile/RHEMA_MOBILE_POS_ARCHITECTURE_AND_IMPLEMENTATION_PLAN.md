@@ -407,15 +407,16 @@ SQLite contains:
 - schema/version metadata
 - store/till/bootstrap snapshot
 - approved customer search subset
+- outstanding-invoice snapshots by approved customer
 - product/service catalogue and tax display projection
-- payment-method policy
+- payment-method policy and eligible collection bank accounts
 - receipt projection/cache
 - outbox, attempts, results, and sanitized errors
 - sync cursors and server tombstones
 
 PII is minimized. Tokens and signing secrets never enter SQLite. SQLCipher feasibility is evaluated during Phase 2 prebuild work; its adoption must be proven compatible with Expo SDK and required native hardware modules.
 
-The implemented Expo SQLite schema uses WAL, foreign keys, explicit versioned migrations, and a tenant/user/device/store/till scope key. Catalogue and approved-customer synchronization store a durable page cursor after every transaction, resume interrupted snapshots, apply no-longer-eligible records as tombstones, and advance the server watermark only after the final page. Item-master and assigned-warehouse quantity changes both feed the catalogue cache; customer-role, Business Partner, and approved AR-profile changes feed the approved-customer cache. Bootstrap configuration and the current till's payment-method projection are replaced transactionally. Online search remains authoritative; network failures may fall back to the latest scoped local projection with an explicit offline notice.
+The implemented Expo SQLite schema uses WAL, foreign keys, explicit versioned migrations, and a tenant/user/device/store/till scope key. Catalogue and approved-customer synchronization store a durable page cursor after every transaction, resume interrupted snapshots, apply no-longer-eligible records as tombstones, and advance the server watermark only after the final page. Item-master and assigned-warehouse quantity changes both feed the catalogue cache; customer-role, Business Partner, and approved AR-profile changes feed the approved-customer cache. Bootstrap configuration, the current till's payment-method projection, eligible collection bank accounts, and customer-scoped outstanding-invoice snapshots are replaced transactionally. Cached empty invoice results have their own snapshot marker so they remain distinguishable from missing data. Online reads remain authoritative; retryable transport failures may fall back to the latest scoped local projection with an explicit offline notice and server revalidation on synchronization.
 
 ### Outbox state machine
 

@@ -50,6 +50,8 @@
     <Compile Include="Services\MobilePos\MobilePosMutationExecutionRelationalTests.cs" />
     <Compile Include="Services\MobilePos\MobilePosSaleServiceTests.cs" />
     <Compile Include="Services\MobilePos\MobilePosCollectionServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosOfflineGrantValidationServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosSyncServiceTests.cs" />
     <Compile Include="Services\MobilePos\MobilePosReceiptServiceTests.cs" />
     <Compile Include="Services\MobilePos\MobilePosTillSessionServiceTests.cs" />
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />

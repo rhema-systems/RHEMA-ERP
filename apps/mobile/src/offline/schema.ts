@@ -4,7 +4,7 @@ export interface OfflineDatabaseMigration {
   sql: string;
 }
 
-export const OFFLINE_DATABASE_VERSION = 3;
+export const OFFLINE_DATABASE_VERSION = 4;
 
 export const offlineDatabaseMigrations: OfflineDatabaseMigration[] = [
   {
@@ -145,6 +145,34 @@ export const offlineDatabaseMigrations: OfflineDatabaseMigration[] = [
       BEGIN
         SELECT RAISE(ABORT, 'Invalid Mobile POS outbox state transition');
       END;
+    `,
+  },
+  {
+    version: 4,
+    name: "mobile_pos_outstanding_invoice_cache",
+    sql: `
+      CREATE TABLE IF NOT EXISTS outstanding_invoice_cache (
+        scope_key TEXT NOT NULL,
+        business_partner_id TEXT NOT NULL,
+        business_partner_role_id TEXT NOT NULL,
+        invoice_id TEXT NOT NULL,
+        invoice_number TEXT NOT NULL,
+        cached_at_utc TEXT NOT NULL,
+        projection_json TEXT NOT NULL,
+        PRIMARY KEY (scope_key, invoice_id),
+        FOREIGN KEY (scope_key) REFERENCES cache_context(scope_key) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS ix_outstanding_invoice_cache_customer
+        ON outstanding_invoice_cache(scope_key, business_partner_role_id, invoice_number);
+
+      CREATE TABLE IF NOT EXISTS outstanding_invoice_snapshot (
+        scope_key TEXT NOT NULL,
+        business_partner_id TEXT NOT NULL,
+        business_partner_role_id TEXT NOT NULL,
+        cached_at_utc TEXT NOT NULL,
+        PRIMARY KEY (scope_key, business_partner_role_id),
+        FOREIGN KEY (scope_key) REFERENCES cache_context(scope_key) ON DELETE CASCADE
+      );
     `,
   },
 ];

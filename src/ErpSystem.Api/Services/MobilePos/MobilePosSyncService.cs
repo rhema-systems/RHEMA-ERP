@@ -22,17 +22,21 @@ public interface IMobilePosSyncService
 public sealed class MobilePosSyncService : IMobilePosSyncService
 {
     private const string CashSaleCommand = "CashSale";
-    private const int CashSaleSchemaVersion = 1;
+    private const string CashReceiptCommand = "CashReceipt";
+    private const int CurrentSchemaVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IMobilePosOfflineGrantValidationService _grants;
     private readonly IMobilePosSaleService _sales;
+    private readonly IMobilePosCollectionService _collections;
 
     public MobilePosSyncService(
         IMobilePosOfflineGrantValidationService grants,
-        IMobilePosSaleService sales)
+        IMobilePosSaleService sales,
+        IMobilePosCollectionService collections)
     {
         _grants = grants;
         _sales = sales;
+        _collections = collections;
     }
 
     public async Task<MobilePosSyncPushResultDto> PushAsync(
@@ -43,8 +47,10 @@ public sealed class MobilePosSyncService : IMobilePosSyncService
         var mutationId = Required(request.ClientMutationId, 100, "client mutation ID");
         try
         {
-            if (!string.Equals(request.CommandType?.Trim(), CashSaleCommand, StringComparison.Ordinal)
-                || request.SchemaVersion != CashSaleSchemaVersion)
+            var commandType = request.CommandType?.Trim() ?? string.Empty;
+            if ((!string.Equals(commandType, CashSaleCommand, StringComparison.Ordinal)
+                 && !string.Equals(commandType, CashReceiptCommand, StringComparison.Ordinal))
+                || request.SchemaVersion != CurrentSchemaVersion)
             {
                 throw Reject(
                     "MOBILE_POS_SYNC_COMMAND_NOT_SUPPORTED",
@@ -59,47 +65,9 @@ public sealed class MobilePosSyncService : IMobilePosSyncService
             if (!FixedTimeHexEquals(payloadHash, request.PayloadHash))
                 throw Reject("MOBILE_POS_SYNC_PAYLOAD_HASH_MISMATCH", "The queued command payload no longer matches its recorded hash.");
 
-            MobilePosCompleteSaleRequestDto command;
-            try
-            {
-                command = request.Payload.Deserialize<MobilePosCompleteSaleRequestDto>(JsonOptions)
-                    ?? throw new JsonException("The payload was empty.");
-            }
-            catch (JsonException)
-            {
-                throw Reject("MOBILE_POS_SYNC_PAYLOAD_INVALID", "The queued cash sale payload could not be read.");
-            }
-            if (!string.Equals(command.ClientMutationId?.Trim(), mutationId, StringComparison.Ordinal)
-                || !string.Equals(command.LocalReference?.Trim(), Required(request.LocalReference, 100, "local reference"), StringComparison.Ordinal))
-            {
-                throw Reject(
-                    "MOBILE_POS_SYNC_ENVELOPE_MISMATCH",
-                    "The queued command identity does not match its synchronization envelope.");
-            }
-            if (!command.OccurredAtUtc.HasValue)
-                throw Reject("MOBILE_POS_OFFLINE_OCCURRED_AT_REQUIRED", "The queued sale does not retain its device occurrence time.");
-
-            var authorization = await _grants.AuthorizeAsync(
-                new MobilePosOfflineGrantValidationRequest(
-                    Required(request.OfflineGrantToken, 8_000, "offline grant token"),
-                    Required(request.OfflineGrantId, "offline grant ID"),
-                    Required(request.DeviceId, "device ID"),
-                    Required(request.StoreId, "store ID"),
-                    Required(request.TillId, "till ID"),
-                    Required(request.TillSessionId, "till session ID"),
-                    CashSaleCommand,
-                    CashSaleSchemaVersion,
-                    command.OccurredAtUtc.Value,
-                    command.ExpectedTotalAmount,
-                    command.Tenders),
-                cancellationToken);
-            var sale = await _sales.CompleteOfflineAsync(command, authorization, cancellationToken);
-            return new MobilePosSyncPushResultDto
-            {
-                State = "Synced",
-                ClientMutationId = mutationId,
-                Sale = sale
-            };
+            return string.Equals(commandType, CashSaleCommand, StringComparison.Ordinal)
+                ? await PushSaleAsync(request, mutationId, cancellationToken)
+                : await PushCollectionAsync(request, mutationId, cancellationToken);
         }
         catch (MobilePosMutationConflictException exception)
         {
@@ -108,6 +76,102 @@ public sealed class MobilePosSyncService : IMobilePosSyncService
         catch (MobilePosCommandRejectedException exception)
         {
             return Failure("Rejected", mutationId, exception.Code, exception.Message);
+        }
+    }
+
+    private async Task<MobilePosSyncPushResultDto> PushSaleAsync(
+        MobilePosSyncPushRequestDto request,
+        string mutationId,
+        CancellationToken cancellationToken)
+    {
+        MobilePosCompleteSaleRequestDto command;
+        try
+        {
+            command = request.Payload.Deserialize<MobilePosCompleteSaleRequestDto>(JsonOptions)
+                ?? throw new JsonException("The payload was empty.");
+        }
+        catch (JsonException)
+        {
+            throw Reject("MOBILE_POS_SYNC_PAYLOAD_INVALID", "The queued cash sale payload could not be read.");
+        }
+        ValidateIdentity(request, mutationId, command.ClientMutationId, command.LocalReference);
+        if (!command.OccurredAtUtc.HasValue)
+            throw Reject("MOBILE_POS_OFFLINE_OCCURRED_AT_REQUIRED", "The queued sale does not retain its device occurrence time.");
+
+        var authorization = await _grants.AuthorizeAsync(
+            CreateGrantRequest(request, CashSaleCommand, command.OccurredAtUtc.Value,
+                command.ExpectedTotalAmount, command.Tenders), cancellationToken);
+        var sale = await _sales.CompleteOfflineAsync(command, authorization, cancellationToken);
+        return new MobilePosSyncPushResultDto
+        {
+            State = "Synced",
+            ClientMutationId = mutationId,
+            Sale = sale
+        };
+    }
+
+    private async Task<MobilePosSyncPushResultDto> PushCollectionAsync(
+        MobilePosSyncPushRequestDto request,
+        string mutationId,
+        CancellationToken cancellationToken)
+    {
+        MobilePosCompleteCollectionRequestDto command;
+        try
+        {
+            command = request.Payload.Deserialize<MobilePosCompleteCollectionRequestDto>(JsonOptions)
+                ?? throw new JsonException("The payload was empty.");
+        }
+        catch (JsonException)
+        {
+            throw Reject("MOBILE_POS_SYNC_PAYLOAD_INVALID", "The queued customer collection payload could not be read.");
+        }
+        ValidateIdentity(request, mutationId, command.ClientMutationId, command.LocalReference);
+        if (!command.OccurredAtUtc.HasValue)
+            throw Reject("MOBILE_POS_OFFLINE_OCCURRED_AT_REQUIRED", "The queued collection does not retain its device occurrence time.");
+
+        var authorization = await _grants.AuthorizeAsync(
+            CreateGrantRequest(request, CashReceiptCommand, command.OccurredAtUtc.Value,
+                command.Allocations.Sum(item => item.Amount), command.Tenders), cancellationToken);
+        var collection = await _collections.CompleteOfflineAsync(command, authorization, cancellationToken);
+        return new MobilePosSyncPushResultDto
+        {
+            State = "Synced",
+            ClientMutationId = mutationId,
+            Collection = collection
+        };
+    }
+
+    private static MobilePosOfflineGrantValidationRequest CreateGrantRequest(
+        MobilePosSyncPushRequestDto request,
+        string commandType,
+        DateTime occurredAtUtc,
+        decimal transactionAmount,
+        IReadOnlyCollection<MobilePosTenderInputDto> tenders) => new(
+            Required(request.OfflineGrantToken, 8_000, "offline grant token"),
+            Required(request.OfflineGrantId, "offline grant ID"),
+            Required(request.DeviceId, "device ID"),
+            Required(request.StoreId, "store ID"),
+            Required(request.TillId, "till ID"),
+            Required(request.TillSessionId, "till session ID"),
+            commandType,
+            CurrentSchemaVersion,
+            occurredAtUtc,
+            transactionAmount,
+            tenders);
+
+    private static void ValidateIdentity(
+        MobilePosSyncPushRequestDto request,
+        string mutationId,
+        string? payloadMutationId,
+        string? payloadLocalReference)
+    {
+        if (!string.Equals(payloadMutationId?.Trim(), mutationId, StringComparison.Ordinal)
+            || !string.Equals(payloadLocalReference?.Trim(),
+                Required(request.LocalReference, 100, "local reference"), StringComparison.Ordinal))
+        {
+            throw Reject(
+                "MOBILE_POS_SYNC_ENVELOPE_MISMATCH",
+                "The queued command identity does not match its synchronization envelope.");
         }
     }
 

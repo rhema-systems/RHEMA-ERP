@@ -107,6 +107,61 @@ public sealed class MobilePosCollectionServiceTests
         receipt.ErrorCode.Should().Be("MOBILE_POS_COLLECTION_EXCEEDS_BALANCE");
     }
 
+    [Fact]
+    public async Task CompleteOfflineAsync_ShouldRetainSignedGrantEvidenceAndMarkEveryTenderOffline()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var request = fixture.ValidRequest();
+        request.OccurredAtUtc = DateTime.UtcNow.AddMinutes(-5);
+        var authorization = await fixture.OfflineAuthorizationAsync(allowPartialPayment: true);
+
+        var result = await fixture.Service.CompleteOfflineAsync(request, authorization, CancellationToken.None);
+
+        result.TotalAmount.Should().Be(100m);
+        var collection = await fixture.Db.MobilePosCollections.Include(item => item.Tenders).SingleAsync();
+        collection.MobilePosOfflineGrantId.Should().Be(authorization.Grant.Id);
+        collection.OfflinePolicySnapshotHash.Should().Be(authorization.Grant.PolicySnapshotHash);
+        collection.Tenders.Should().OnlyContain(item => item.WasRecordedOffline);
+    }
+
+    [Fact]
+    public async Task CompleteOfflineAsync_ShouldRejectPartialAllocationsWhenGrantDoesNotAllowThem()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var request = fixture.ValidRequest();
+        request.OccurredAtUtc = DateTime.UtcNow.AddMinutes(-5);
+        var authorization = await fixture.OfflineAuthorizationAsync(allowPartialPayment: false);
+
+        var action = () => fixture.Service.CompleteOfflineAsync(request, authorization, CancellationToken.None);
+
+        await action.Should().ThrowAsync<MobilePosCommandRejectedException>()
+            .Where(exception => exception.Code == "MOBILE_POS_OFFLINE_PARTIAL_PAYMENT_NOT_ALLOWED");
+        fixture.Payments.Verify(service => service.CreateAsync(
+            It.IsAny<PaymentCreateDto>(),
+            It.IsAny<FinancePostingProducerContext>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CompleteOfflineAsync_ShouldRequireBothPartialPaymentFlagAndSignedCommand()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var request = fixture.ValidRequest();
+        request.OccurredAtUtc = DateTime.UtcNow.AddMinutes(-5);
+        var authorization = await fixture.OfflineAuthorizationAsync(
+            allowPartialPayment: true,
+            includePartialPaymentCommand: false);
+
+        var action = () => fixture.Service.CompleteOfflineAsync(request, authorization, CancellationToken.None);
+
+        await action.Should().ThrowAsync<MobilePosCommandRejectedException>()
+            .Where(exception => exception.Code == "MOBILE_POS_OFFLINE_PARTIAL_PAYMENT_NOT_ALLOWED");
+        fixture.Payments.Verify(service => service.CreateAsync(
+            It.IsAny<PaymentCreateDto>(),
+            It.IsAny<FinancePostingProducerContext>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly Guid _firstMethodId;
@@ -268,12 +323,12 @@ public sealed class MobilePosCollectionServiceTests
                 new MobilePosTillPaymentMethod
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, MobilePosTillId = tillId,
-                    PaymentMethodId = firstMethodId, PaymentMethod = firstMethod, AllowOnline = true
+                    PaymentMethodId = firstMethodId, PaymentMethod = firstMethod, AllowOnline = true, AllowOffline = true
                 },
                 new MobilePosTillPaymentMethod
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, MobilePosTillId = tillId,
-                    PaymentMethodId = secondMethodId, PaymentMethod = secondMethod, AllowOnline = true
+                    PaymentMethodId = secondMethodId, PaymentMethod = secondMethod, AllowOnline = true, AllowOffline = true
                 });
             await db.SaveChangesAsync();
 
@@ -340,6 +395,35 @@ public sealed class MobilePosCollectionServiceTests
                 new MobilePosTenderInputDto { PaymentMethodId = _secondMethodId, Amount = 40m }
             ]
         };
+
+        public async Task<MobilePosOfflineGrantAuthorization> OfflineAuthorizationAsync(
+            bool allowPartialPayment,
+            bool includePartialPaymentCommand = true)
+        {
+            var device = await Db.MobilePosDevices.SingleAsync();
+            var store = await Db.MobilePosStores.SingleAsync();
+            var till = await Db.MobilePosTills.SingleAsync();
+            var session = await Db.CashierTillSessions.SingleAsync();
+            return new MobilePosOfflineGrantAuthorization(
+                new MobilePosOfflineGrant
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = store.TenantId,
+                    UserId = session.CashierUserId,
+                    MobilePosDeviceId = device.Id,
+                    MobilePosStoreId = store.Id,
+                    MobilePosTillId = till.Id,
+                    CashierTillSessionId = session.Id,
+                    PolicySnapshotHash = new string('A', 64)
+                },
+                new MobilePosOfflineGrantPolicySnapshotDto
+                {
+                    AllowPartialPayment = allowPartialPayment,
+                    AllowedCommandTypes = allowPartialPayment && includePartialPaymentCommand
+                        ? ["CashReceipt", "PartialPayment"]
+                        : ["CashReceipt"]
+                });
+        }
 
         private static Invoice Invoice(
             Guid id,

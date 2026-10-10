@@ -112,6 +112,22 @@ describe("Mobile POS outbox dispatcher", () => {
     expect(outbox.calls).toEqual([{ action: "synced", code: undefined }]);
   });
 
+  it("accepts a canonical customer-collection result as synchronized", async () => {
+    const outbox = store({ ...message(), commandType: "CashReceipt" });
+    const dispatcher = new MobilePosOutboxDispatcher(
+      outbox.value,
+      async () => grant(),
+      async request => ({
+        state: "Synced",
+        clientMutationId: request.clientMutationId,
+        collection: { collectionId: "collection-1" },
+      }) as MobilePosSyncPushResult,
+    );
+
+    await expect(dispatcher.dispatchNext()).resolves.toBe("Synced");
+    expect(outbox.calls).toEqual([{ action: "synced", code: undefined }]);
+  });
+
   it.each([
     ["Rejected", "MOBILE_POS_LIMIT", "rejected", "Rejected"],
     ["Conflict", "MOBILE_POS_CONFLICT", "conflict", "Conflict"],

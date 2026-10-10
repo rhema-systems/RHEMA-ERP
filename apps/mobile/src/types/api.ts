@@ -567,6 +567,7 @@ export interface MobilePosSyncPushResult {
   state: "Synced" | "Rejected" | "Conflict";
   clientMutationId: string;
   sale?: MobilePosSaleResult;
+  collection?: MobilePosCollectionResult;
   errorCode?: string;
   errorDetail?: string;
 }

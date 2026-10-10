@@ -7,9 +7,16 @@ import { BankAccountPickerModal } from "@/components/bank-account-picker-modal";
 import { ApiProblem, mobileApi } from "@/src/api/client";
 import {
   buildCompleteCollectionRequest,
+  requiresPartialPayment,
   sumCollectionAllocations,
   type CollectionAllocationDraft,
 } from "@/src/collections/checkout";
+import {
+  isRetryableTransportFailure,
+  loadSessionBankAccounts,
+  loadSessionOutstandingInvoices,
+} from "@/src/offline/collection-runtime";
+import { openSessionOutbox } from "@/src/offline/sync-runtime";
 import { sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
 import { useSession } from "@/src/session/session-context";
 import { getInstallationId } from "@/src/storage/secure-session";
@@ -56,14 +63,27 @@ export default function CollectionScreen() {
     () => bootstrap?.till.paymentMethods.filter(method => method.allowOnline) ?? [],
     [bootstrap],
   );
+  const offlineMethods = useMemo(() => {
+    const allowed = new Set(session.offlineGrant?.policy.allowedPaymentMethods.map(method => method.paymentMethodId) ?? []);
+    return bootstrap?.till.paymentMethods.filter(method => method.allowOffline && allowed.has(method.paymentMethodId)) ?? [];
+  }, [bootstrap, session.offlineGrant]);
 
   const [invoices, setInvoices] = useState<OutstandingInvoice[]>([]);
+  const [usingCachedInvoices, setUsingCachedInvoices] = useState(false);
+  const [invoiceCacheTime, setInvoiceCacheTime] = useState<string | null>(null);
   const [allocations, setAllocations] = useState<CollectionAllocationDraft[]>([]);
   const [tenders, setTenders] = useState<TenderDraft[]>([]);
   const [bankAccounts, setBankAccounts] = useState<MobilePosBankAccountOption[]>([]);
   const [bankAccountTenderId, setBankAccountTenderId] = useState<string | null>(null);
   const [identity, setIdentity] = useState<{ clientMutationId: string; localReference: string; occurredAtUtc: string } | null>(null);
   const [result, setResult] = useState<MobilePosCollectionResult | null>(null);
+  const [queuedCollection, setQueuedCollection] = useState<{
+    localReference: string;
+    totalAmount: number;
+    currencyCode: string;
+    allocations: Array<{ invoiceNumber: string; amount: number }>;
+    provisionalReceipt: boolean;
+  } | null>(null);
   const [busy, setBusy] = useState<"load" | "bankAccounts" | "complete" | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
 
@@ -74,16 +94,26 @@ export default function CollectionScreen() {
     setError(null);
     void (async () => {
       try {
-        const current = await mobileApi.getOutstandingInvoices(await getInstallationId(), customer);
+        if (!session.user || !bootstrap) throw new Error("The signed-in Mobile POS session is unavailable.");
+        const loaded = await loadSessionOutstandingInvoices(
+          session.user,
+          bootstrap,
+          await getInstallationId(),
+          customer,
+        );
         if (!active) return;
+        const current = loaded.invoices;
         setInvoices(current);
+        setUsingCachedInvoices(loaded.source === "Cached");
+        setInvoiceCacheTime(loaded.source === "Cached" ? loaded.cachedAtUtc ?? null : null);
         const initial = current.map(invoice => ({
           invoiceId: invoice.id,
           amountText: invoice.id === params.initialInvoiceId ? invoice.balanceAmount.toFixed(2) : "",
         }));
         setAllocations(initial);
         const initialTotal = sumCollectionAllocations(initial);
-        const firstMethod = onlineMethods.find(method => !method.requiresBankAccount) ?? onlineMethods[0];
+        const methods = loaded.source === "Cached" ? offlineMethods : onlineMethods;
+        const firstMethod = methods.find(method => !method.requiresBankAccount) ?? methods[0];
         setTenders(firstMethod && initialTotal > 0 ? [{
           paymentMethodId: firstMethod.paymentMethodId,
           amountText: initialTotal.toFixed(2),
@@ -96,7 +126,7 @@ export default function CollectionScreen() {
       }
     })();
     return () => { active = false; };
-  }, [customer, onlineMethods, params.initialInvoiceId, session.status]);
+  }, [bootstrap, customer, offlineMethods, onlineMethods, params.initialInvoiceId, session.status, session.user]);
 
   if (session.status === "signedOut" || session.status === "mfaRequired") return <Redirect href="/login" />;
   if (session.status !== "ready" || !bootstrap) return <Redirect href="/" />;
@@ -105,6 +135,7 @@ export default function CollectionScreen() {
   const allocationTotal = sumCollectionAllocations(allocations);
   const tenderTotal = sumTenderDrafts(tenders, 2);
   const totalsMatch = Math.abs(allocationTotal - tenderTotal) < 0.01;
+  const paymentMethods = usingCachedInvoices ? offlineMethods : onlineMethods;
   const submitDisabled = busy !== null
     || invoices.length === 0
     || Boolean(missingPermission)
@@ -146,7 +177,9 @@ export default function CollectionScreen() {
     try {
       const accounts = bankAccounts.length > 0
         ? bankAccounts
-        : await mobileApi.getEligibleBankAccounts(await getInstallationId());
+        : session.user
+          ? await loadSessionBankAccounts(session.user, bootstrap, await getInstallationId())
+          : [];
       setBankAccounts(accounts);
       setBankAccountTenderId(paymentMethodId);
     } catch (caught) {
@@ -160,7 +193,7 @@ export default function CollectionScreen() {
     if (missingPermission) return setError(problem(`Your role is missing ${missingPermission}.`));
     if (!bootstrap.currentTillSessionId) return setError(problem("Open your assigned till session before collecting a payment."));
     for (const tender of tenders) {
-      const method = onlineMethods.find(item => item.paymentMethodId === tender.paymentMethodId);
+      const method = paymentMethods.find(item => item.paymentMethodId === tender.paymentMethodId);
       if (!method) return setError(problem("A selected tender is no longer available for this till."));
       if (method.requiresBankAccount && !tender.bankAccountId) return setError(problem(`${method.name} requires a bank account selection.`));
       if ((method.requiresReference || method.requireExternalAuthorizationReference) && !tender.externalReference.trim()) {
@@ -181,12 +214,66 @@ export default function CollectionScreen() {
         allocations,
         tenders,
       });
-      setResult(await mobileApi.completeCollection(request));
+      if (usingCachedInvoices) {
+        await queueOfflineCollection(request);
+      } else {
+        try {
+          setResult(await mobileApi.completeCollection(request));
+        } catch (caught) {
+          if (!isRetryableTransportFailure(caught)) throw caught;
+          await queueOfflineCollection(request);
+        }
+      }
     } catch (caught) {
       setError(asProblem(caught));
     } finally {
       setBusy(null);
     }
+  };
+
+  const queueOfflineCollection = async (request: ReturnType<typeof buildCompleteCollectionRequest>) => {
+    const grant = session.offlineGrant;
+    if (!grant || !session.user || !bootstrap.currentTillSessionId) {
+      throw problem("A current signed offline authorization is required to queue this collection.");
+    }
+    if (!grant.policy.allowedCommandTypes.includes("CashReceipt")) {
+      throw problem("The signed offline policy does not authorize customer collections.");
+    }
+    if (requiresPartialPayment(invoices, allocations)
+      && (!grant.policy.allowPartialPayment || !grant.policy.allowedCommandTypes.includes("PartialPayment"))) {
+      throw problem("The signed offline policy does not authorize partial invoice payments.");
+    }
+    const allowedTenderIds = new Set(grant.policy.allowedPaymentMethods.map(method => method.paymentMethodId));
+    if (!request.tenders.every(tender => {
+      const method = bootstrap.till.paymentMethods.find(item => item.paymentMethodId === tender.paymentMethodId);
+      return Boolean(method?.allowOffline && allowedTenderIds.has(tender.paymentMethodId));
+    })) {
+      throw problem("One or more selected tenders are not authorized for offline collection.");
+    }
+    if (grant.policy.maximumTransactionAmount != null
+      && request.allocations.reduce((total, item) => total + item.amount, 0) > grant.policy.maximumTransactionAmount) {
+      throw problem("This collection exceeds the signed offline per-transaction limit.");
+    }
+    await (await openSessionOutbox(session.user, bootstrap)).enqueue({
+      clientMutationId: request.clientMutationId,
+      localReference: request.localReference,
+      commandType: "CashReceipt",
+      schemaVersion: 1,
+      tillSessionId: bootstrap.currentTillSessionId,
+      offlineGrantId: grant.id,
+      payload: request,
+    });
+    const invoiceById = new Map(invoices.map(invoice => [invoice.id, invoice]));
+    setQueuedCollection({
+      localReference: request.localReference,
+      totalAmount: request.allocations.reduce((total, item) => total + item.amount, 0),
+      currencyCode: bootstrap.store.currencyCode,
+      allocations: request.allocations.map(item => ({
+        invoiceNumber: invoiceById.get(item.invoiceId)?.invoiceNumber ?? item.invoiceId,
+        amount: item.amount,
+      })),
+      provisionalReceipt: grant.policy.allowProvisionalReceipt,
+    });
   };
 
   if (result) {
@@ -205,6 +292,30 @@ export default function CollectionScreen() {
     );
   }
 
+  if (queuedCollection) {
+    return (
+      <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+        <View style={[styles.successIcon, styles.queuedIcon]}><Ionicons name="cloud-upload-outline" color={colors.white} size={34} /></View>
+        <Text style={styles.successTitle}>Collection queued</Text>
+        <Text style={styles.successAmount}>{money(queuedCollection.totalAmount, queuedCollection.currencyCode)}</Text>
+        <Text style={styles.successMeta}>{customer.name} · {queuedCollection.localReference}</Text>
+        <View style={styles.pendingNotice}>
+          <Ionicons name="time-outline" size={19} color={colors.warning} />
+          <Text style={styles.pendingNoticeText}>
+            {queuedCollection.provisionalReceipt
+              ? "Provisional offline receipt. Finance payment numbers will be assigned after synchronization."
+              : "Pending synchronization. The signed policy does not permit a provisional receipt."}
+          </Text>
+        </View>
+        <View style={styles.summaryCard}>
+          {queuedCollection.allocations.map(item => <SummaryRow key={item.invoiceNumber} label={item.invoiceNumber} value={money(item.amount, queuedCollection.currencyCode)} />)}
+        </View>
+        <Pressable onPress={() => router.replace("/sync")} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Open sync queue</Text></Pressable>
+        <Pressable onPress={() => router.replace("/customers")} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Back to customers</Text></Pressable>
+      </ScrollView>
+    );
+  }
+
   return (
     <>
       <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -212,7 +323,14 @@ export default function CollectionScreen() {
           <Link href="/customers" asChild><Pressable accessibilityLabel="Back" style={styles.backButton}><Ionicons name="arrow-back" size={22} color={colors.navy} /></Pressable></Link>
           <View style={styles.grow}><Text style={styles.title}>Collect customer payment</Text><Text style={styles.subtitle}>{customer.name} · {customer.code}</Text></View>
         </View>
-        <View style={styles.onlineNotice}><Ionicons name="cloud-done-outline" size={18} color={colors.blue} /><Text style={styles.onlineText}>Online Finance collection. Current balances are checked again when you submit.</Text></View>
+        <View style={styles.onlineNotice}>
+          <Ionicons name={usingCachedInvoices ? "cloud-offline-outline" : "cloud-done-outline"} size={18} color={usingCachedInvoices ? colors.warning : colors.blue} />
+          <Text style={styles.onlineText}>
+            {usingCachedInvoices
+              ? `Using balances cached ${formatCacheTime(invoiceCacheTime)}. The server will revalidate them during synchronization.`
+              : "Online Finance collection. Current balances are checked again when you submit."}
+          </Text>
+        </View>
         {missingPermission && <ErrorBox message={`Your role is missing ${missingPermission}.`} />}
         {!bootstrap.currentTillSessionId && <ErrorBox message="Open your assigned till session before collecting a payment." />}
         {error && <ErrorBox message={`${error.message}${error.correlationId ? ` Reference: ${error.correlationId}` : ""}`} />}
@@ -231,7 +349,7 @@ export default function CollectionScreen() {
 
         <SectionTitle number="2" title="Split tender" />
         {tenders.map(tender => {
-          const method = onlineMethods.find(item => item.paymentMethodId === tender.paymentMethodId);
+          const method = paymentMethods.find(item => item.paymentMethodId === tender.paymentMethodId);
           if (!method) return null;
           const selectedAccount = bankAccounts.find(account => account.bankAccountId === tender.bankAccountId);
           return (
@@ -243,7 +361,7 @@ export default function CollectionScreen() {
             </View>
           );
         })}
-        <View style={styles.methodWrap}>{onlineMethods.filter(method => !tenders.some(item => item.paymentMethodId === method.paymentMethodId)).map(method => <Pressable key={method.paymentMethodId} onPress={() => addTender(method)} style={styles.methodButton}><Ionicons name="add" size={16} color={colors.blue} /><Text style={styles.methodText}>{method.name}</Text></Pressable>)}</View>
+        <View style={styles.methodWrap}>{paymentMethods.filter(method => !tenders.some(item => item.paymentMethodId === method.paymentMethodId)).map(method => <Pressable key={method.paymentMethodId} onPress={() => addTender(method)} style={styles.methodButton}><Ionicons name="add" size={16} color={colors.blue} /><Text style={styles.methodText}>{method.name}</Text></Pressable>)}</View>
         <View style={styles.totalRow}><Text style={styles.totalLabel}>Tender total</Text><Text style={[styles.totalValue, !totalsMatch && styles.mismatch]}>{money(tenderTotal, bootstrap.store.currencyCode)}</Text></View>
         <Pressable disabled={submitDisabled} onPress={() => void complete()} style={[styles.primaryButton, submitDisabled && styles.disabled]}>{busy === "complete" ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>Record collection</Text>}</Pressable>
       </ScrollView>
@@ -260,6 +378,7 @@ function problem(message: string) { return new ApiProblem(message, 400, "COLLECT
 function asProblem(error: unknown) { return error instanceof ApiProblem ? error : problem(error instanceof Error ? error.message : "An unexpected error occurred."); }
 function money(value: number, currency: string) { return `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function date(value: string) { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString(); }
+function formatCacheTime(value: string | null) { if (!value) return "earlier"; const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(); }
 function ErrorBox({ message }: { message: string }) { return <View accessibilityRole="alert" style={styles.errorBox}><Ionicons name="alert-circle-outline" size={20} color={colors.danger} /><Text style={styles.errorText}>{message}</Text></View>; }
 function SectionTitle({ number, title }: { number: string; title: string }) { return <View style={styles.sectionHeading}><View style={styles.numberBadge}><Text style={styles.numberText}>{number}</Text></View><Text style={styles.sectionTitle}>{title}</Text></View>; }
 function SummaryRow({ label, value }: { label: string; value: string }) { return <View style={styles.summaryRow}><Text style={styles.meta}>{label}</Text><Text style={styles.summaryValue}>{value}</Text></View>; }
@@ -279,4 +398,6 @@ const styles = StyleSheet.create({
   primaryButton: { minHeight: 50, marginTop: 18, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.blue }, primaryButtonText: { color: colors.white, fontSize: 14, fontWeight: "800" }, disabled: { opacity: 0.45 },
   emptyCard: { padding: 20, borderRadius: 14, backgroundColor: colors.white }, emptyText: { color: colors.muted, textAlign: "center", fontSize: 13 },
   successIcon: { width: 68, height: 68, marginTop: 50, alignSelf: "center", alignItems: "center", justifyContent: "center", borderRadius: 23, backgroundColor: colors.success }, successTitle: { marginTop: 18, color: colors.ink, textAlign: "center", fontSize: 23, fontWeight: "800" }, successAmount: { marginTop: 8, color: colors.navy, textAlign: "center", fontSize: 29, fontWeight: "900" }, successMeta: { marginTop: 7, color: colors.muted, textAlign: "center", fontSize: 12 }, summaryCard: { marginTop: 22, padding: 15, borderRadius: 15, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.line }, summaryRow: { minHeight: 38, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, summaryValue: { color: colors.ink, fontSize: 12, fontWeight: "700" },
+  queuedIcon: { backgroundColor: colors.warning }, pendingNotice: { marginTop: 18, flexDirection: "row", gap: 9, padding: 13, borderRadius: 12, backgroundColor: colors.warningBg }, pendingNoticeText: { flex: 1, color: colors.slate, fontSize: 12, lineHeight: 18 },
+  secondaryButton: { minHeight: 48, marginTop: 10, alignItems: "center", justifyContent: "center", borderRadius: 13, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white }, secondaryButtonText: { color: colors.navy, fontSize: 14, fontWeight: "800" },
 });

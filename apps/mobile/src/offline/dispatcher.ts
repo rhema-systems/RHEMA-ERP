@@ -75,7 +75,7 @@ export class MobilePosOutboxDispatcher {
         );
         return "ManualReview";
       }
-      if (result.state === "Synced" && result.sale) {
+      if (result.state === "Synced" && (result.sale || result.collection)) {
         await this.outbox.markSynced(message.clientMutationId, result);
         return "Synced";
       }

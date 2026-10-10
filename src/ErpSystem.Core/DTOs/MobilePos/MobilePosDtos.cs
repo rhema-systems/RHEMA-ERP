@@ -463,6 +463,7 @@ public sealed class MobilePosSyncPushResultDto
     public string State { get; set; } = string.Empty;
     public string ClientMutationId { get; set; } = string.Empty;
     public MobilePosSaleResultDto? Sale { get; set; }
+    public MobilePosCollectionResultDto? Collection { get; set; }
     public string? ErrorCode { get; set; }
     public string? ErrorDetail { get; set; }
 }

@@ -42,7 +42,8 @@ public interface IMobilePosOfflineGrantValidationService
 public sealed class MobilePosOfflineGrantValidationService : IMobilePosOfflineGrantValidationService
 {
     private const string CashSaleCommand = "CashSale";
-    private const int CashSaleSchemaVersion = 1;
+    private const string CashReceiptCommand = "CashReceipt";
+    private const int CurrentSchemaVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
@@ -150,9 +151,11 @@ public sealed class MobilePosOfflineGrantValidationService : IMobilePosOfflineGr
             throw Reject("MOBILE_POS_OFFLINE_POLICY_SNAPSHOT_INVALID", "The stored offline policy snapshot belongs to another policy.");
 
         var commandType = request.CommandType?.Trim() ?? string.Empty;
-        if (!string.Equals(commandType, CashSaleCommand, StringComparison.Ordinal)
-            || request.SchemaVersion != CashSaleSchemaVersion
-            || !policy.AllowedCommandTypes.Contains(CashSaleCommand, StringComparer.Ordinal))
+        var supportedCommand = string.Equals(commandType, CashSaleCommand, StringComparison.Ordinal)
+            || string.Equals(commandType, CashReceiptCommand, StringComparison.Ordinal);
+        if (!supportedCommand
+            || request.SchemaVersion != CurrentSchemaVersion
+            || !policy.AllowedCommandTypes.Contains(commandType, StringComparer.Ordinal))
         {
             throw Reject("MOBILE_POS_OFFLINE_COMMAND_NOT_ALLOWED", "This offline command type or schema version was not authorized by the signed policy.");
         }
@@ -163,18 +166,25 @@ public sealed class MobilePosOfflineGrantValidationService : IMobilePosOfflineGr
             throw Reject("MOBILE_POS_OFFLINE_TRANSACTION_LIMIT_EXCEEDED", "The offline transaction exceeds the signed per-transaction limit.");
         }
 
-        var priorSales = await _db.MobilePosSales.AsNoTracking()
+        var priorSaleAmounts = await _db.MobilePosSales.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.MobilePosOfflineGrantId == grant.Id
                 && item.Status == MobilePosSaleStatus.Completed && !item.IsDeleted)
             .Select(item => item.TotalAmount)
             .ToListAsync(cancellationToken);
+        var priorCollectionAmounts = await _db.MobilePosCollections.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.MobilePosOfflineGrantId == grant.Id
+                && item.Status == MobilePosCollectionStatus.Completed && !item.IsDeleted)
+            .Select(item => item.TotalAmount)
+            .ToListAsync(cancellationToken);
+        var priorTransactionCount = priorSaleAmounts.Count + priorCollectionAmounts.Count;
+        var priorAggregateAmount = priorSaleAmounts.Sum() + priorCollectionAmounts.Sum();
         if (policy.MaximumTransactionCount.HasValue
-            && priorSales.Count + 1 > policy.MaximumTransactionCount.Value)
+            && priorTransactionCount + 1 > policy.MaximumTransactionCount.Value)
         {
             throw Reject("MOBILE_POS_OFFLINE_TRANSACTION_COUNT_EXCEEDED", "The signed offline transaction-count limit has been reached.");
         }
         if (policy.MaximumAggregateAmount.HasValue
-            && priorSales.Sum() + request.TransactionAmount > policy.MaximumAggregateAmount.Value)
+            && priorAggregateAmount + request.TransactionAmount > policy.MaximumAggregateAmount.Value)
         {
             throw Reject("MOBILE_POS_OFFLINE_AGGREGATE_LIMIT_EXCEEDED", "The signed offline aggregate amount limit would be exceeded.");
         }
@@ -194,7 +204,7 @@ public sealed class MobilePosOfflineGrantValidationService : IMobilePosOfflineGr
         MobilePosOfflineGrantPolicySnapshotDto policy)
     {
         if (tenders.Count is < 1 or > 10)
-            throw Reject("MOBILE_POS_OFFLINE_TENDERS_INVALID", "An offline sale must contain between one and ten tenders.");
+            throw Reject("MOBILE_POS_OFFLINE_TENDERS_INVALID", "An offline transaction must contain between one and ten tenders.");
         var allowed = policy.AllowedPaymentMethods.ToDictionary(item => item.PaymentMethodId);
         foreach (var tender in tenders)
         {

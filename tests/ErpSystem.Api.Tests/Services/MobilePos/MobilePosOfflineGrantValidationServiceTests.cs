@@ -62,6 +62,53 @@ public sealed class MobilePosOfflineGrantValidationServiceTests
             .Where(exception => exception.Code == "MOBILE_POS_OFFLINE_TENDER_NOT_ALLOWED");
     }
 
+    [Fact]
+    public async Task AuthorizeAsync_ShouldAcceptCashReceiptWhenIncludedInSignedPolicy()
+    {
+        await using var fixture = await Fixture.CreateAsync(MobilePosOfflineGrantStatus.Active);
+
+        var authorization = await fixture.Service.AuthorizeAsync(
+            fixture.Request(amount: 50m, commandType: "CashReceipt"),
+            CancellationToken.None);
+
+        authorization.Grant.Id.Should().Be(fixture.Grant.Id);
+        authorization.Policy.AllowedCommandTypes.Should().Contain("CashReceipt");
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_ShouldIncludePriorCollectionsInSignedAggregateLimit()
+    {
+        await using var fixture = await Fixture.CreateAsync(MobilePosOfflineGrantStatus.Active);
+        fixture.Db.MobilePosCollections.Add(new MobilePosCollection
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.Grant.TenantId,
+            MobilePosStoreId = fixture.Grant.MobilePosStoreId,
+            MobilePosTillId = fixture.Grant.MobilePosTillId,
+            CashierTillSessionId = fixture.Grant.CashierTillSessionId,
+            MobilePosDeviceId = fixture.Grant.MobilePosDeviceId,
+            OperatorUserId = fixture.Grant.UserId,
+            ClientMutationId = "previous-collection-mutation",
+            LocalReference = "OFF-COL-OLD-001",
+            BusinessPartnerId = Guid.NewGuid(),
+            BusinessPartnerRoleId = Guid.NewGuid(),
+            BusinessDate = fixture.OccurredAtUtc.Date,
+            OccurredAtUtc = fixture.OccurredAtUtc,
+            CurrencyCode = "GHS",
+            TotalAmount = 75m,
+            Status = MobilePosCollectionStatus.Completed,
+            MobilePosOfflineGrantId = fixture.Grant.Id
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var action = () => fixture.Service.AuthorizeAsync(
+            fixture.Request(amount: 100m, commandType: "CashReceipt"),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<MobilePosCommandRejectedException>()
+            .Where(exception => exception.Code == "MOBILE_POS_OFFLINE_AGGREGATE_LIMIT_EXCEEDED");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(
@@ -117,7 +164,7 @@ public sealed class MobilePosOfflineGrantValidationServiceTests
                 MaximumTransactionCount = 2,
                 MaximumOfflineAgeMinutes = 60,
                 AllowProvisionalReceipt = true,
-                AllowedCommandTypes = ["CashSale"],
+                AllowedCommandTypes = ["CashSale", "CashReceipt"],
                 AllowedPaymentMethods =
                 [
                     new MobilePosOfflinePaymentMethodSnapshotDto
@@ -224,7 +271,7 @@ public sealed class MobilePosOfflineGrantValidationServiceTests
                 occurredAt);
         }
 
-        public MobilePosOfflineGrantValidationRequest Request(decimal amount = 100m)
+        public MobilePosOfflineGrantValidationRequest Request(decimal amount = 100m, string commandType = "CashSale")
         {
             var token = Tokens.Sign(new MobilePosOfflineGrantTokenPayload(
                 MobilePosOfflineGrantTokenService.CurrentVersion,
@@ -247,7 +294,7 @@ public sealed class MobilePosOfflineGrantValidationServiceTests
                 Grant.MobilePosStoreId,
                 Grant.MobilePosTillId,
                 Grant.CashierTillSessionId,
-                "CashSale",
+                commandType,
                 1,
                 OccurredAtUtc,
                 amount,

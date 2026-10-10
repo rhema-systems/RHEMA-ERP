@@ -1,7 +1,7 @@
 import { mobileApi } from "@/src/api/client";
 import { SqliteCatalogueCache, synchronizeCatalogue } from "@/src/offline/catalogue-cache";
 import { SqliteCustomerCache } from "@/src/offline/customer-cache";
-import { cacheSessionConfiguration } from "@/src/offline/configuration-cache";
+import { cacheBankAccounts, cacheSessionConfiguration } from "@/src/offline/configuration-cache";
 import { createOfflineScope } from "@/src/offline/database";
 import type { MobilePosBootstrap, MobilePosCatalogueItem, MobilePosCustomerSearchResult, UserInfo } from "@/src/types/api";
 
@@ -20,6 +20,11 @@ export async function synchronizeSessionReferenceData(
   if (user.permissions.includes("MobilePOS.Customer.View")) {
     await (await SqliteCustomerCache.open(scope)).synchronize((sinceUtc, cursor) =>
       mobileApi.getCustomerChanges(installationId, sinceUtc, cursor));
+  }
+  if (user.permissions.includes("MobilePOS.Till.Operate")
+    && user.permissions.includes("MobilePOS.Payment.Collect")
+    && user.permissions.includes("Finance.AR.Payments.Receive")) {
+    await cacheBankAccounts(scope, await mobileApi.getEligibleBankAccounts(installationId));
   }
 }
 

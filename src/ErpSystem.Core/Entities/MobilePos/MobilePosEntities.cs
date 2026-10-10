@@ -480,6 +480,13 @@ public sealed class MobilePosCollection : TenantEntity
     public decimal TotalAmount { get; set; }
 
     public MobilePosCollectionStatus Status { get; set; } = MobilePosCollectionStatus.Pending;
+
+    public Guid? MobilePosOfflineGrantId { get; set; }
+    public MobilePosOfflineGrant? MobilePosOfflineGrant { get; set; }
+
+    [MaxLength(64)]
+    public string? OfflinePolicySnapshotHash { get; set; }
+
     public DateTime? SynchronizedAtUtc { get; set; }
 
     [Timestamp]

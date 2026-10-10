@@ -18,7 +18,7 @@ Or run the repository script directly:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/Invoke-MobilePosAcceptance.ps1
 ```
 
-The standard gate restores both lockfiles, rejects committed mobile binaries, checks Mobile POS and HQ TypeScript, runs the mobile tests and Expo Doctor, exports the Android Hermes bundle, performs a migration-aware API Release build, runs the focused Mobile POS API tests, and verifies idempotent SQL for all five Mobile POS migrations, including the online customer-collection envelopes.
+The standard gate restores both lockfiles, rejects committed mobile binaries, checks Mobile POS and HQ TypeScript, runs the mobile tests and Expo Doctor, exports the Android Hermes bundle, performs a migration-aware API Release build, runs the focused Mobile POS API tests, and verifies idempotent SQL for all six Mobile POS migrations, including online collection envelopes and signed offline-collection evidence.
 
 Evidence is written beneath the ignored `.artifacts/mobile-pos/acceptance/<UTC timestamp>/` directory. The JSON record contains the commit, stage status, timings, test result, and log paths.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCompleteCollectionRequest, sumCollectionAllocations } from "@/src/collections/checkout";
+import { buildCompleteCollectionRequest, requiresPartialPayment, sumCollectionAllocations } from "@/src/collections/checkout";
 import type { OutstandingInvoice } from "@/src/types/api";
 
 const invoices: OutstandingInvoice[] = [
@@ -75,5 +75,16 @@ describe("Mobile POS collection checkout", () => {
       allocations: [{ invoiceId: "invoice-1", amountText: "50" }],
       tenders: [{ paymentMethodId: "cash", amountText: "49", externalReference: "" }],
     })).toThrow("Tender total must equal");
+  });
+
+  it("detects when the signed offline policy also needs partial-payment authority", () => {
+    expect(requiresPartialPayment(invoices, [
+      { invoiceId: "invoice-1", amountText: "100" },
+      { invoiceId: "invoice-2", amountText: "30" },
+    ])).toBe(true);
+    expect(requiresPartialPayment(invoices, [
+      { invoiceId: "invoice-1", amountText: "100" },
+      { invoiceId: "invoice-2", amountText: "60" },
+    ])).toBe(false);
   });
 });

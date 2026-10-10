@@ -20,6 +20,20 @@ export function sumCollectionAllocations(
   );
 }
 
+export function requiresPartialPayment(
+  invoices: OutstandingInvoice[],
+  drafts: CollectionAllocationDraft[],
+  decimalPlaces = 2,
+): boolean {
+  const invoiceById = new Map(invoices.map(invoice => [invoice.id, invoice]));
+  return drafts.some(draft => {
+    const amount = parseMoney(draft.amountText);
+    const invoice = invoiceById.get(draft.invoiceId);
+    return amount != null && amount > 0 && invoice != null
+      && roundMoney(amount, decimalPlaces) < roundMoney(invoice.balanceAmount, decimalPlaces);
+  });
+}
+
 export function buildCompleteCollectionRequest(input: {
   installationId: string;
   clientMutationId: string;

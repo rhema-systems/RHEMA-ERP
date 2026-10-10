@@ -17,6 +17,11 @@ public interface IMobilePosCollectionService
     Task<MobilePosCollectionResultDto> CompleteAsync(
         MobilePosCompleteCollectionRequestDto request,
         CancellationToken cancellationToken);
+
+    Task<MobilePosCollectionResultDto> CompleteOfflineAsync(
+        MobilePosCompleteCollectionRequestDto request,
+        MobilePosOfflineGrantAuthorization authorization,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -81,9 +86,47 @@ public sealed class MobilePosCollectionService : IMobilePosCollectionService
             bootstrap.Device.Id,
             bootstrap.Store.Id,
             bootstrap.Till.Id,
-            bootstrap.CurrentTillSessionId.Value);
+            bootstrap.CurrentTillSessionId.Value,
+            false,
+            null,
+            null,
+            false);
         var execution = await _mutations.ExecuteAsync<MobilePosCompleteCollectionRequestDto, MobilePosCollectionResultDto>(
             bootstrap.Device.Id,
+            request.ClientMutationId,
+            CommandType,
+            SchemaVersion,
+            request,
+            token => CompleteCoreAsync(context, request, token),
+            cancellationToken);
+        execution.Result.MutationReceiptId = execution.ReceiptId;
+        execution.Result.IsReplay = execution.IsReplay;
+        return execution.Result;
+    }
+
+    public async Task<MobilePosCollectionResultDto> CompleteOfflineAsync(
+        MobilePosCompleteCollectionRequestDto request,
+        MobilePosOfflineGrantAuthorization authorization,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(authorization);
+        if (!request.OccurredAtUtc.HasValue)
+            throw Reject("MOBILE_POS_OFFLINE_OCCURRED_AT_REQUIRED", "An offline collection must retain the time recorded on the device.");
+
+        var grant = authorization.Grant;
+        var context = new CollectionExecutionContext(
+            grant.MobilePosDeviceId,
+            grant.MobilePosStoreId,
+            grant.MobilePosTillId,
+            grant.CashierTillSessionId,
+            true,
+            grant.Id,
+            grant.PolicySnapshotHash,
+            authorization.Policy.AllowPartialPayment
+                && authorization.Policy.AllowedCommandTypes.Contains("PartialPayment", StringComparer.Ordinal));
+        var execution = await _mutations.ExecuteAsync<MobilePosCompleteCollectionRequestDto, MobilePosCollectionResultDto>(
+            grant.MobilePosDeviceId,
             request.ClientMutationId,
             CommandType,
             SchemaVersion,
@@ -116,14 +159,17 @@ public sealed class MobilePosCollectionService : IMobilePosCollectionService
             throw Reject("MOBILE_POS_DEVICE_ASSIGNMENT_CHANGED", "The device assignment changed. Refresh Mobile POS before retrying.");
         }
 
-        var assignmentActive = await _db.MobilePosUserStoreAssignments.AnyAsync(item =>
-            item.TenantId == tenantId && item.UserId == userId && item.IsActive && !item.IsDeleted
-            && item.MobilePosStoreId == context.StoreId
-            && item.EffectiveFromUtc <= now
-            && (!item.EffectiveToUtc.HasValue || item.EffectiveToUtc > now),
-            cancellationToken);
-        if (!assignmentActive)
-            throw Reject("MOBILE_POS_STORE_ASSIGNMENT_EXPIRED", "Your Mobile POS store assignment is no longer active.");
+        if (!context.RecordedOffline)
+        {
+            var assignmentActive = await _db.MobilePosUserStoreAssignments.AnyAsync(item =>
+                item.TenantId == tenantId && item.UserId == userId && item.IsActive && !item.IsDeleted
+                && item.MobilePosStoreId == context.StoreId
+                && item.EffectiveFromUtc <= now
+                && (!item.EffectiveToUtc.HasValue || item.EffectiveToUtc > now),
+                cancellationToken);
+            if (!assignmentActive)
+                throw Reject("MOBILE_POS_STORE_ASSIGNMENT_EXPIRED", "Your Mobile POS store assignment is no longer active.");
+        }
 
         var store = await _db.MobilePosStores.SingleOrDefaultAsync(item =>
             item.TenantId == tenantId && item.Id == context.StoreId && !item.IsDeleted,
@@ -138,7 +184,9 @@ public sealed class MobilePosCollectionService : IMobilePosCollectionService
         var session = await _db.CashierTillSessions.SingleOrDefaultAsync(item =>
             item.TenantId == tenantId && item.Id == context.TillSessionId && !item.IsDeleted,
             cancellationToken) ?? throw Reject("MOBILE_POS_TILL_SESSION_NOT_FOUND", "The till session was not found.");
-        if (session.Status != CashierTillSessionStatus.Open
+        var allowedSessionState = session.Status == CashierTillSessionStatus.Open
+            || (context.RecordedOffline && session.Status == CashierTillSessionStatus.PendingReview);
+        if (!allowedSessionState
             || session.CashierUserId != userId
             || session.LiquidityAccountId != till.LiquidityAccountId)
         {
@@ -178,14 +226,28 @@ public sealed class MobilePosCollectionService : IMobilePosCollectionService
                 throw Reject("MOBILE_POS_COLLECTION_INVOICE_NOT_OUTSTANDING", $"Invoice {invoice.InvoiceNumber} is not open for collection.");
             if (RoundMoney(allocation.Amount) > RoundMoney(invoice.BalanceAmount))
                 throw Reject("MOBILE_POS_COLLECTION_EXCEEDS_BALANCE", $"The amount for invoice {invoice.InvoiceNumber} exceeds its outstanding balance.");
+            if (context.RecordedOffline && RoundMoney(allocation.Amount) < RoundMoney(invoice.BalanceAmount)
+                && !context.AllowPartialPayment)
+            {
+                throw Reject("MOBILE_POS_OFFLINE_PARTIAL_PAYMENT_NOT_ALLOWED",
+                    "The signed offline policy does not authorize partial invoice payments.");
+            }
         }
 
-        var allowedTenders = await _db.MobilePosTillPaymentMethods.AsNoTracking()
+        var tenderQuery = _db.MobilePosTillPaymentMethods.AsNoTracking()
             .Where(mapping => mapping.TenantId == tenantId && mapping.MobilePosTillId == till.Id
-                && !mapping.IsDeleted && mapping.AllowOnline && mapping.PaymentMethod.IsActive)
-            .Include(mapping => mapping.PaymentMethod)
+                && !mapping.IsDeleted && mapping.PaymentMethod.IsActive);
+        tenderQuery = context.RecordedOffline
+            ? tenderQuery.Where(mapping => mapping.AllowOffline)
+            : tenderQuery.Where(mapping => mapping.AllowOnline);
+        var allowedTenders = await tenderQuery.Include(mapping => mapping.PaymentMethod)
             .ToDictionaryAsync(mapping => mapping.PaymentMethodId, cancellationToken);
-        await ValidateTendersAsync(request.Tenders, allowedTenders, store.CurrencyCode, cancellationToken);
+        await ValidateTendersAsync(
+            request.Tenders,
+            allowedTenders,
+            store.CurrencyCode,
+            context.RecordedOffline,
+            cancellationToken);
 
         var allocationTotal = RoundMoney(request.Allocations.Sum(item => item.Amount));
         var tenderTotal = RoundMoney(request.Tenders.Sum(item => item.Amount));
@@ -219,7 +281,7 @@ public sealed class MobilePosCollectionService : IMobilePosCollectionService
                 BankAccountId = tender.BankAccountId,
                 LiquidityAccountId = liquidityAccountId,
                 TransactionReference = Clean(tender.ExternalReference),
-                Notes = $"Mobile POS collection {localReference}; tender {tenderIndex + 1}/{request.Tenders.Count}",
+                Notes = $"Mobile POS {(context.RecordedOffline ? "offline " : string.Empty)}collection {localReference}; tender {tenderIndex + 1}/{request.Tenders.Count}",
                 Allocations = tenderAllocations
             }, PaymentProducer, cancellationToken);
             paymentResults.Add(payment);
@@ -247,6 +309,8 @@ public sealed class MobilePosCollectionService : IMobilePosCollectionService
             CurrencyCode = store.CurrencyCode,
             TotalAmount = allocationTotal,
             Status = MobilePosCollectionStatus.Completed,
+            MobilePosOfflineGrantId = context.OfflineGrantId,
+            OfflinePolicySnapshotHash = context.OfflinePolicySnapshotHash,
             SynchronizedAtUtc = now,
             CreatedAt = now,
             CreatedBy = UserName,
@@ -283,7 +347,7 @@ public sealed class MobilePosCollectionService : IMobilePosCollectionService
                 CustomerPaymentId = payment.value.Id,
                 PaymentNumber = payment.value.PaymentNumber,
                 PaymentStatus = payment.value.Status,
-                WasRecordedOffline = false,
+                WasRecordedOffline = context.RecordedOffline,
                 Status = MobilePosTenderStatus.Completed,
                 CreatedAt = now,
                 CreatedBy = UserName,
@@ -333,10 +397,12 @@ public sealed class MobilePosCollectionService : IMobilePosCollectionService
         IReadOnlyList<MobilePosTenderInputDto> tenders,
         IReadOnlyDictionary<Guid, MobilePosTillPaymentMethod> allowedTenders,
         string currencyCode,
+        bool recordedOffline,
         CancellationToken cancellationToken)
     {
         if (tenders.Select(item => item.PaymentMethodId).Any(id => !allowedTenders.ContainsKey(id)))
-            throw Reject("MOBILE_POS_TENDER_NOT_ALLOWED", "One or more tender methods are not active and enabled for online use at this till.");
+            throw Reject("MOBILE_POS_TENDER_NOT_ALLOWED",
+                $"One or more tender methods are not active and enabled for {(recordedOffline ? "offline" : "online")} use at this till.");
 
         foreach (var tender in tenders)
         {
@@ -448,7 +514,11 @@ public sealed class MobilePosCollectionService : IMobilePosCollectionService
         Guid DeviceId,
         Guid StoreId,
         Guid TillId,
-        Guid TillSessionId);
+        Guid TillSessionId,
+        bool RecordedOffline,
+        Guid? OfflineGrantId,
+        string? OfflinePolicySnapshotHash,
+        bool AllowPartialPayment);
 
     private sealed class RemainingAllocation(Guid invoiceId, decimal remainingAmount)
     {
