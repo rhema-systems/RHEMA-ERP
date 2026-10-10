@@ -61,7 +61,9 @@ export default function AccountScreen() {
       <View style={styles.card}>
         <InfoRow label="Status" value={session.pendingDevice ? String(session.pendingDevice.status) : session.bootstrap ? "Active" : "Unavailable"} />
         <InfoRow label="Store" value={session.bootstrap?.store.name ?? session.pendingDevice?.storeName ?? "Not assigned"} />
-        <InfoRow label="Till" value={session.bootstrap?.till.tillNumber ?? session.pendingDevice?.tillNumber ?? "Not assigned"} last />
+        <InfoRow label="Till" value={session.bootstrap?.till.tillNumber ?? session.pendingDevice?.tillNumber ?? "Not assigned"} />
+        <InfoRow label="Printer" value={session.bootstrap?.device.printerAdapterKey ?? session.pendingDevice?.printerAdapterKey ?? "system-print"} />
+        <InfoRow label="Scanner" value={session.bootstrap?.device.scannerAdapterKey ?? session.pendingDevice?.scannerAdapterKey ?? "camera-manual"} last />
       </View>
 
       <Pressable accessibilityRole="button" onPress={() => void session.signOut()} style={styles.logoutButton}>

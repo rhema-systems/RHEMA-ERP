@@ -126,9 +126,9 @@
 
 | ID | Work item | Status | Dependency |
 | --- | --- | --- | --- |
-| MPOS-0701 | Printer/scanner capability interfaces and fake adapters | In progress | Scanner normalization/test adapter exists; printer capability interface remains |
-| MPOS-0702 | ZCS built-in printer adapter | Ready | SDK supplied and audited; scheduled after Phase 6; redistribution approval and physical test unit still required for acceptance |
-| MPOS-0703 | ZCS hardware scanner adapter | Ready | `HQrsanner` contract supplied and audited; scheduled after Phase 6; physical test unit still required for acceptance |
+| MPOS-0701 | Printer/scanner capability interfaces and fake adapters | In progress | Receipt-printer capability/result contract, deterministic fake printer, normalized scanner/test adapter, runtime hardware detection, and focused tests are implemented; physical adapter evidence remains |
+| MPOS-0702 | ZCS built-in printer adapter | In progress | Local Expo/Kotlin bridge adapts SmartPos initialization/status/text/start calls; canonical 32-column receipt rendering, device capability heartbeat, configured checkout routing, audited external-SDK packaging, real artifact hash validation, and Android prebuild/autolink evidence pass; written redistribution approval, native Gradle build, and physical print acceptance remain |
+| MPOS-0703 | ZCS hardware scanner adapter | In progress | Local Expo/Kotlin bridge adapts `HQrsanner` power/trigger/stop calls and the sale screen captures the vendor keyboard-wedge result through the normalized catalogue path; focused lifecycle tests and Android prebuild/autolink evidence pass; native Gradle build and physical trigger/decode acceptance remain |
 | MPOS-0704 | Bluetooth ESC/POS adapter | Planned | Supported printer models |
 | MPOS-0705 | Z92S physical certification | Blocked | Signed build and physical Z92S |
 

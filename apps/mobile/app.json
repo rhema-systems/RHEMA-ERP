@@ -33,6 +33,13 @@
           "cameraPermission": "Allow RHEMA Field POS to scan product barcodes.",
           "recordAudioAndroid": false
         }
+      ],
+      [
+        "./plugins/with-zcs-smartpos",
+        {
+          "enabledEnv": "RHEMA_ZCS_ENABLED",
+          "sdkDirectoryEnv": "RHEMA_ZCS_SDK_DIR"
+        }
       ]
     ],
     "android": {

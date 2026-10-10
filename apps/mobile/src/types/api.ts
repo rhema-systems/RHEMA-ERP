@@ -360,6 +360,15 @@ export interface DeviceEnrollmentRequest {
   scannerAdapterKey?: string;
 }
 
+export interface MobilePosHeartbeatRequest {
+  installationId: string;
+  appVersion?: string;
+  operatingSystemVersion?: string;
+  printerAdapterKey?: string;
+  scannerAdapterKey?: string;
+  lastSyncAtUtc?: string;
+}
+
 export interface MobilePosCatalogueItem {
   inventoryItemId: string;
   itemCode: string;

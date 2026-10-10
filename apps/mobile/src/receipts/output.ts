@@ -1,11 +1,17 @@
 import { Directory, File, Paths } from "expo-file-system";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import { isZcsSmartPosAdapter, ZcsReceiptPrinterAdapter } from "@/src/hardware/zcs-smartpos";
+import type { ReceiptPrintResult } from "@/src/printing/receipt-printer";
 import { buildReceiptHtml, receiptPdfFileName } from "@/src/receipts/render";
 import type { MobilePosReceipt } from "@/src/types/api";
 
-export async function printReceiptAsync(receipt: MobilePosReceipt): Promise<void> {
+export async function printReceiptAsync(receipt: MobilePosReceipt, configuredAdapterKey?: string): Promise<ReceiptPrintResult> {
+  if (isZcsSmartPosAdapter(configuredAdapterKey)) {
+    return new ZcsReceiptPrinterAdapter().print(receipt);
+  }
   await Print.printAsync({ html: buildReceiptHtml(receipt) });
+  return { adapterKey: "system-print", adapterLabel: "Android system print" };
 }
 
 export async function persistReceiptPdfAsync(receipt: MobilePosReceipt): Promise<string> {

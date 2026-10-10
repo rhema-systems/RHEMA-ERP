@@ -29,6 +29,7 @@ import type {
   MobilePosSyncPushResult,
   MobilePosReceipt,
   MobilePosReceiptReprintRequest,
+  MobilePosHeartbeatRequest,
   OutstandingInvoice,
   SelectTenantResponse,
   UserInfo,
@@ -243,6 +244,10 @@ export const mobileApi = {
   ),
   requestEnrollment: (request: DeviceEnrollmentRequest) => authorizedRequest<MobilePosDevice>(
     "/api/mobile-pos/v1/devices/enrollment-requests",
+    { method: "POST", body: JSON.stringify(request) },
+  ),
+  heartbeat: (request: MobilePosHeartbeatRequest) => authorizedRequest<MobilePosDevice>(
+    "/api/mobile-pos/v1/heartbeat",
     { method: "POST", body: JSON.stringify(request) },
   ),
 };

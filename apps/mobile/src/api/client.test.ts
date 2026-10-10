@@ -345,4 +345,27 @@ describe("Mobile POS API client", () => {
       "https://erp.example.com/api/mobile-pos/v1/customers/changes?installationId=install%2F01&sinceUtc=2026-10-08T11%3A00%3A00.000Z&cursor=customer-page%2B%2F%3D&limit=75",
     );
   });
+
+  it("reports the detected printer and scanner adapters in the device heartbeat", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => jsonResponse({ id: "device-1", status: "Active", revocationEpoch: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mobileApi.heartbeat({
+      installationId: "install-01",
+      appVersion: "0.1.0",
+      operatingSystemVersion: "14",
+      printerAdapterKey: "zcs-smartpos",
+      scannerAdapterKey: "zcs-smartpos",
+    });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0].toString()).toBe("https://erp.example.com/api/mobile-pos/v1/heartbeat");
+    const init = call?.[1];
+    expect(init).toBeDefined();
+    if (!init) throw new Error("Expected a heartbeat request body.");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      printerAdapterKey: "zcs-smartpos",
+      scannerAdapterKey: "zcs-smartpos",
+    });
+  });
 });

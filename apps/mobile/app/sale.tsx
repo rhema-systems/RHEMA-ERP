@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
 import { Link, Redirect } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -17,6 +17,7 @@ import { BankAccountPickerModal } from "@/components/bank-account-picker-modal";
 import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
 import { searchSessionCatalogue, searchSessionCustomers } from "@/src/offline/catalogue-runtime";
 import { openSessionOutbox } from "@/src/offline/sync-runtime";
+import { isZcsSmartPosAdapter, ZcsHardwareScannerAdapter } from "@/src/hardware/zcs-smartpos";
 import type { BarcodeScan } from "@/src/scanning/barcode";
 import { buildCompleteSaleRequest, sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
 import { useSession } from "@/src/session/session-context";
@@ -96,6 +97,10 @@ export default function SaleScreen() {
   const [outputMessage, setOutputMessage] = useState<string | null>(null);
   const [catalogueNotice, setCatalogueNotice] = useState<string | null>(null);
   const [customerNotice, setCustomerNotice] = useState<string | null>(null);
+  const [hardwareScanning, setHardwareScanning] = useState(false);
+  const catalogueInputRef = useRef<TextInput>(null);
+  const zcsScanner = useMemo(() => new ZcsHardwareScannerAdapter(), []);
+  const usesZcsScanner = isZcsSmartPosAdapter(bootstrap?.device.scannerAdapterKey);
 
   const onlineMethods = useMemo(
     () => bootstrap?.till.paymentMethods.filter(method => method.allowOnline) ?? [],
@@ -105,6 +110,8 @@ export default function SaleScreen() {
   useEffect(() => {
     setCustomer(defaultCustomer);
   }, [defaultCustomer]);
+
+  useEffect(() => () => { void zcsScanner.stop(); }, [zcsScanner]);
 
   if (session.status === "signedOut" || session.status === "mfaRequired") return <Redirect href="/login" />;
   if (session.status !== "ready" || !bootstrap) return <Redirect href="/" />;
@@ -147,8 +154,48 @@ export default function SaleScreen() {
 
   const acceptBarcodeScan = (scan: BarcodeScan) => {
     setScannerOpen(false);
+    setHardwareScanning(false);
     setCatalogueQuery(scan.value);
     void runCatalogueSearch(scan.value);
+  };
+
+  const triggerHardwareScanner = async () => {
+    setError(null);
+    setCatalogueQuery("");
+    try {
+      await zcsScanner.start(acceptBarcodeScan);
+      setHardwareScanning(true);
+      catalogueInputRef.current?.focus();
+      await zcsScanner.trigger();
+    } catch (caught) {
+      setHardwareScanning(false);
+      await zcsScanner.stop();
+      setError(asProblem(caught));
+    }
+  };
+
+  const cancelHardwareScanner = async () => {
+    setHardwareScanning(false);
+    try {
+      await zcsScanner.stop();
+    } catch (caught) {
+      setError(asProblem(caught));
+    }
+  };
+
+  const submitCatalogueSearch = (rawValue: string) => {
+    if (!hardwareScanning) {
+      void runCatalogueSearch(rawValue);
+      return;
+    }
+    try {
+      zcsScanner.acceptKeyboardWedge(rawValue);
+    } catch (caught) {
+      setError(asProblem(caught));
+    } finally {
+      setHardwareScanning(false);
+      void zcsScanner.stop();
+    }
   };
 
   const searchCustomers = async () => {
@@ -404,8 +451,8 @@ export default function SaleScreen() {
     setError(null);
     setOutputMessage(null);
     try {
-      await printReceiptAsync(receipt);
-      setOutputMessage(`${receipt.copyType === "REPRINT" ? `Reprint copy ${receipt.copyNumber}` : "Original receipt"} sent to the system print service.`);
+      const printResult = await printReceiptAsync(receipt, bootstrap.device.printerAdapterKey);
+      setOutputMessage(`${receipt.copyType === "REPRINT" ? `Reprint copy ${receipt.copyNumber}` : "Original receipt"} sent to ${printResult.adapterLabel}.`);
     } catch (caught) {
       setError(asProblem(caught));
     } finally {
@@ -512,7 +559,7 @@ export default function SaleScreen() {
         {receipt && (
           <View style={styles.outputActions}>
             <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void printCurrentReceipt()} style={[styles.outputButton, busy !== null && styles.disabled]}>
-              {busy === "print" ? <ActivityIndicator color={colors.blue} /> : <><Ionicons name="print-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>System print</Text></>}
+              {busy === "print" ? <ActivityIndicator color={colors.blue} /> : <><Ionicons name="print-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>{isZcsSmartPosAdapter(bootstrap.device.printerAdapterKey) ? "Built-in print" : "System print"}</Text></>}
             </Pressable>
             <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => void shareCurrentReceipt()} style={[styles.outputButton, busy !== null && styles.disabled]}>
               {busy === "share" ? <ActivityIndicator color={colors.blue} /> : <><Ionicons name="share-social-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>Share PDF</Text></>}
@@ -559,7 +606,18 @@ export default function SaleScreen() {
       )}
 
       <SectionTitle number="2" title="Items" />
-      <SearchBar label="Item name, code or barcode" value={catalogueQuery} onChangeText={setCatalogueQuery} onSearch={() => void runCatalogueSearch(catalogueQuery)} onScan={() => setScannerOpen(true)} busy={busy === "catalogue"} />
+      <SearchBar
+        busy={busy === "catalogue"}
+        hardwareScanning={hardwareScanning}
+        inputRef={catalogueInputRef}
+        label="Item name, code or barcode"
+        onChangeText={setCatalogueQuery}
+        onHardwareScan={usesZcsScanner ? () => void (hardwareScanning ? cancelHardwareScanner() : triggerHardwareScanner()) : undefined}
+        onScan={() => setScannerOpen(true)}
+        onSearch={() => void runCatalogueSearch(catalogueQuery)}
+        onSubmitValue={submitCatalogueSearch}
+        value={catalogueQuery}
+      />
       {catalogueNotice && <View style={styles.offlineNotice}><Ionicons name="cloud-offline-outline" size={18} color={colors.blue} /><Text style={styles.offlineNoticeText}>{catalogueNotice}</Text></View>}
       <BarcodeScannerModal visible={scannerOpen} onClose={() => setScannerOpen(false)} onScan={acceptBarcodeScan} />
       <BankAccountPickerModal
@@ -655,8 +713,8 @@ export default function SaleScreen() {
   );
 }
 
-function SearchBar({ label, value, onChangeText, onSearch, onScan, busy }: { label: string; value: string; onChangeText: (value: string) => void; onSearch: () => void; onScan?: () => void; busy: boolean }) {
-  return <View style={styles.searchRow}><TextInput accessibilityLabel={label} autoCapitalize="none" onChangeText={onChangeText} onSubmitEditing={onSearch} placeholder={label} placeholderTextColor={colors.muted} returnKeyType="search" style={[styles.input, styles.searchInput]} value={value} />{onScan && <Pressable accessibilityLabel="Open camera barcode scanner" disabled={busy} onPress={onScan} style={styles.scanButton}><Ionicons name="barcode-outline" size={21} color={colors.blue} /></Pressable>}<Pressable disabled={busy} onPress={onSearch} style={styles.searchButton}>{busy ? <ActivityIndicator size="small" color={colors.white} /> : <Ionicons name="search" size={19} color={colors.white} />}</Pressable></View>;
+function SearchBar({ label, value, onChangeText, onSearch, onSubmitValue, onScan, onHardwareScan, hardwareScanning = false, inputRef, busy }: { label: string; value: string; onChangeText: (value: string) => void; onSearch: () => void; onSubmitValue?: (value: string) => void; onScan?: () => void; onHardwareScan?: () => void; hardwareScanning?: boolean; inputRef?: RefObject<TextInput | null>; busy: boolean }) {
+  return <View style={styles.searchRow}><TextInput ref={inputRef} accessibilityLabel={label} autoCapitalize="none" onChangeText={onChangeText} onSubmitEditing={event => onSubmitValue ? onSubmitValue(event.nativeEvent.text) : onSearch()} placeholder={hardwareScanning ? "Scan a barcode with the Z92S scanner" : label} placeholderTextColor={colors.muted} returnKeyType="search" style={[styles.input, styles.searchInput]} value={value} />{onHardwareScan && <Pressable accessibilityLabel={hardwareScanning ? "Stop Z92S hardware scanner" : "Trigger Z92S hardware scanner"} disabled={busy} onPress={onHardwareScan} style={styles.scanButton}>{hardwareScanning ? <Ionicons name="stop-circle-outline" size={21} color={colors.danger} /> : <Ionicons name="scan-outline" size={21} color={colors.blue} />}</Pressable>}{onScan && <Pressable accessibilityLabel="Open camera barcode scanner" disabled={busy || hardwareScanning} onPress={onScan} style={styles.scanButton}><Ionicons name="barcode-outline" size={21} color={colors.blue} /></Pressable>}<Pressable disabled={busy || hardwareScanning} onPress={onSearch} style={[styles.searchButton, hardwareScanning && styles.disabled]}>{busy ? <ActivityIndicator size="small" color={colors.white} /> : <Ionicons name="search" size={19} color={colors.white} />}</Pressable></View>;
 }
 
 function ResultRow({ title, detail, onPress, disabled = false }: { title: string; detail: string; onPress: () => void; disabled?: boolean }) {

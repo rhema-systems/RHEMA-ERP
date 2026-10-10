@@ -475,7 +475,7 @@ Required from ZCS or the device supplier:
 5. Supported ABI, min/target SDK, ProGuard/R8 rules, and lifecycle guidance.
 6. A physical Z92S development/certification unit.
 
-The Phase 4 scanner boundary supplies normalized camera/manual/keyboard-wedge input and a disposable test adapter. When Phase 7 begins, a Kotlin native module and Expo config plugin can adapt the supplied `Printer` and `HQrsanner` APIs without changing checkout or receipt use cases.
+The Phase 4 scanner boundary supplies normalized camera/manual/keyboard-wedge input and a disposable test adapter. Phase 7 now includes a local Expo/Kotlin module that adapts the supplied `Printer` and `HQrsanner` APIs through a reflection boundary, plus an Expo config plugin that verifies the audited hashes and copies the externally held JAR/JNI artifacts only into the ignored generated Android project. Canonical receipt output and catalogue lookup retain their existing use cases. The app reports detected adapter keys through enrollment/heartbeat and falls back to Android system printing and camera/manual scanning when the vendor SDK is absent. Native Gradle compilation, signed distribution, and physical Z92S behavior remain acceptance gates.
 
 ## Q. Permissions
 

@@ -3,6 +3,7 @@ import * as Device from "expo-device";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ApiProblem, mobileApi } from "@/src/api/client";
 import { defaultServerProfile, validateServerProfile } from "@/src/config/environment";
+import { detectMobileHardwareAdapters, type MobileHardwareAdapters } from "@/src/hardware/capabilities";
 import { isOfflineGrantUsable } from "@/src/offline/grant";
 import { synchronizeSessionReferenceData } from "@/src/offline/catalogue-runtime";
 import {
@@ -67,7 +68,8 @@ function mayRequestEnrollment(user: UserInfo): boolean {
   return user.permissions.includes("MobilePOS.Device.Enroll");
 }
 
-async function buildEnrollmentRequest() {
+async function buildEnrollmentRequest(adapters?: MobileHardwareAdapters) {
+  const detectedAdapters = adapters ?? await detectMobileHardwareAdapters();
   return {
     installationId: await getInstallationId(),
     deviceName: Device.deviceName ?? Device.modelName ?? "RHEMA mobile device",
@@ -75,9 +77,22 @@ async function buildEnrollmentRequest() {
     model: Device.modelName ?? undefined,
     operatingSystemVersion: Device.osVersion ?? undefined,
     appVersion: Constants.expoConfig?.version ?? undefined,
-    printerAdapterKey: "system-print",
-    scannerAdapterKey: "camera-manual",
+    ...detectedAdapters,
   };
+}
+
+async function applyDetectedHardware(result: MobilePosBootstrap, installationId: string): Promise<MobilePosBootstrap> {
+  const adapters = await detectMobileHardwareAdapters();
+  const device = { ...result.device, ...adapters };
+  void mobileApi.heartbeat({
+    installationId,
+    appVersion: Constants.expoConfig?.version ?? undefined,
+    operatingSystemVersion: Device.osVersion ?? undefined,
+    ...adapters,
+  }).catch(() => {
+    // A capability heartbeat must not block an otherwise valid online session.
+  });
+  return { ...result, device };
 }
 
 export function SessionProvider({ children }: React.PropsWithChildren) {
@@ -95,7 +110,7 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
   const resolveMobileAccess = useCallback(async (currentUser: UserInfo, allowEnrollment: boolean) => {
     const installationId = await getInstallationId();
     try {
-      const result = await mobileApi.bootstrap(installationId);
+      const result = await applyDetectedHardware(await mobileApi.bootstrap(installationId), installationId);
       const cachedGrant = await loadOfflineGrant();
       if (cachedGrant && isOfflineGrantUsable(cachedGrant, result, currentUser.currentTenantId)) {
         setOfflineGrant(cachedGrant);
@@ -129,10 +144,11 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
     try {
       await clearOfflineGrant();
       setOfflineGrant(null);
-      const device = await mobileApi.requestEnrollment(await buildEnrollmentRequest());
+      const adapters = await detectMobileHardwareAdapters();
+      const device = await mobileApi.requestEnrollment(await buildEnrollmentRequest(adapters));
       setPendingDevice(device);
       if (isActiveDevice(device)) {
-        const result = await mobileApi.bootstrap(installationId);
+        const result = await applyDetectedHardware(await mobileApi.bootstrap(installationId), installationId);
         setBootstrap(result);
         setPendingDevice(null);
         setError(null);

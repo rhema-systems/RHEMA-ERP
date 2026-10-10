@@ -4,7 +4,7 @@
 
 Audit the committed Flash ERP Android mobile application and the current RHEMA ERP Finance, AR, payment, till, security, tenant, location, and offline capabilities. Produce an implementation-ready architecture and phased delivery plan for the RHEMA Field POS and Revenue Collection mobile application. The plan must incorporate the management policies recorded in `C:\Users\USER\Desktop\Mobile app.docx`, including per-store default walk-in customers.
 
-The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. The Phase 3 read slice adds governed approved-customer search, automatic store default-customer resolution, and canonical outstanding-invoice lookup. The Phase 3 Finance-route milestone adds distinct compiled invoice and customer-payment producer routes, external-producer contracts, module-lock identity, and canonical AR guard/settlement support. The transaction foundation adds persisted sale, line, tender, and mutation-receipt source envelopes plus server-side idempotent command execution. The online-sale milestone composes one validated invoice and one allocated canonical CustomerPayment per split tender inside that transaction boundary. The checkout milestone adds governed catalogue search, canonical server preview, a mobile cart and split-tender flow that calls the atomic command, a canonical receipt projection, permission-gated idempotent reprint auditing, and the Phase 4 camera/manual/keyboard-wedge scanner boundary. Phase 5 now has versioned scoped SQLite persistence, resumable reference feeds, a guarded transactional outbox, signed offline-command enforcement, one-command idempotent push, and a client retry/rejection/conflict dispatcher. The supplied ZCS package has been inventoried for Phase 7 without moving its integration ahead of the tracker. This work does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
+The architecture and contract mapping are complete. Phase 2 now contains an isolated Expo application, server-side Mobile POS governance foundation, signed offline-grant issuance, secure client grant handling, and an HQ administration page. The Phase 3 read slice adds governed approved-customer search, automatic store default-customer resolution, and canonical outstanding-invoice lookup. The Phase 3 Finance-route milestone adds distinct compiled invoice and customer-payment producer routes, external-producer contracts, module-lock identity, and canonical AR guard/settlement support. The transaction foundation adds persisted sale, line, tender, and mutation-receipt source envelopes plus server-side idempotent command execution. The online-sale milestone composes one validated invoice and one allocated canonical CustomerPayment per split tender inside that transaction boundary. The checkout milestone adds governed catalogue search, canonical server preview, a mobile cart and split-tender flow that calls the atomic command, a canonical receipt projection, permission-gated idempotent reprint auditing, and the Phase 4 camera/manual/keyboard-wedge scanner boundary. Phase 5 now has versioned scoped SQLite persistence, resumable reference feeds, a guarded transactional outbox, signed offline-command enforcement, one-command idempotent push, and a client retry/rejection/conflict dispatcher. Phase 6 adds canonical till-session opening, reconciliation, cash declaration, pending-sync controls, maker/checker day-end review, HQ reporting, and governed Finance bank-deposit proposals. Phase 7 now contains the ZCS printer/scanner capability boundary, Expo/Kotlin bridge, externally supplied SDK packaging control, and mobile checkout integration. This work does not authorize an alternate accounting ledger, direct database synchronization, production deployment, or device enrollment in a live environment.
 
 ## Branch and worktree
 
@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `161c2b29ec3b7507eeac422d482819657ef93f76`
+- Current implementation checkpoint: `1a3d0ad98ec`
 - Pull request: not created
 
 ## Source baselines
@@ -79,6 +79,11 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `1b534f646e8` - Version-3 durable Mobile POS outbox, canonical payload hashing, guarded state transitions, retries, recovery, and secret exclusion.
 - `63bbcd9c68a` - Signed and persisted offline-grant validation with device/scope/policy/tender/limit/session enforcement and focused tests.
 - `8a8cc43adf4` - Idempotent offline cash-sale sync endpoint, canonical Finance orchestration, client dispatcher, explicit terminal decisions, and focused tests.
+- `250a9d6c059` - Offline synchronization coordination checkpoint.
+- `1c1f6ff5af0` - Mobile offline operator sync, retained-grant lifecycle, and safe response-loss replay.
+- `f157ad02fe8` - Canonical Mobile POS till-session workflow, mobile UI, authorization, and focused tests.
+- `ad635847819` - Server-derived Mobile POS till reconciliation and client presentation.
+- `1a3d0ad98ec` - Cash declaration, pending-sync finalization controls, HQ day-end workflow/reporting, and canonical bank-deposit proposal integration.
 
 ## Phase 2 application foundation
 
@@ -205,6 +210,15 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Added a historical till-close report and CSV export showing cashier/session, close state, sync evidence, variance, and canonical bank-deposit status.
 - Added bank-deposit proposal creation only after the Mobile POS evidence is finalized and the Finance till session is closed. Eligible unallocated custody entries are delegated to the canonical `IBankingSettlementService`; retries recover the same Finance deposit through an immutable source marker and the existing destination-account/reference uniqueness control.
 
+## Phase 7 Z92S hardware integration
+
+- Added a local Expo Android module with a Kotlin reflection bridge for the audited SmartPos 1.8.1 `DriverManager`, `Sys`, `Printer`, and `HQrsanner` contracts. Reflection allows normal portable builds to compile without committing or redistributing proprietary vendor files.
+- Added a controlled Expo config plugin. A Z92S prebuild must explicitly set `RHEMA_ZCS_ENABLED=true` and `RHEMA_ZCS_SDK_DIR`; the plugin rejects missing or hash-mismatched JAR/JNI artifacts, copies only the audited ARM64/ARMv7 files into the ignored generated Android project, and adds the app Gradle dependency.
+- Added receipt-printer capability/result contracts, a deterministic fake adapter, compact canonical 32-column receipt text, and a Z92S printer adapter that checks initialization and printer status before sending the canonical receipt to the built-in printer. Android system print/PDF/share remain the portable fallback.
+- Added a Z92S scanner adapter that owns SDK initialization, power, trigger, stop, and power-off lifecycle. It follows the vendor demo's keyboard-wedge behavior by focusing the catalogue input and converting the terminating input into the existing normalized vendor scan and catalogue lookup path. Camera scanning remains available.
+- Hardware capability detection now reports `zcs-smartpos` through device enrollment and heartbeat when the packaged SDK exposes each capability, while ordinary builds report `system-print` and `camera-manual`. The account screen shows the active adapter keys.
+- No SmartPos JAR or JNI binary is tracked. Written redistribution approval, a Java/Android native build environment, a signed APK, and a physical Android 14 Z92S remain required for acceptance.
+
 ## Verification evidence
 
 - Git worktree created cleanly from the exact `origin/master` baseline.
@@ -249,19 +263,23 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Idempotent SQL generation from `20261009114817_AddMobilePosTransactionFoundation` through `20261010003147_LinkMobilePosTillCloseBankDeposit` passed. The 14,621-byte script contains the till-close table, canonical bank-deposit link, and both migration-history markers.
 - Twenty focused till/day-end tests passed. Coverage includes dual endpoint permissions, cash declaration policy, deterministic pending evidence, maker/checker controls, unresolved-sync blocking, completed-sync finalization, return-for-recount propagation, report/deposit permissions, canonical custody-entry proposal mapping, and deposit linkage.
 - The Expo TypeScript check and all 56 mobile tests passed after the cash declaration and close-submission API/UI work. The HQ frontend TypeScript check also passed after the day-end queue, report, CSV export, and bank-deposit proposal controls.
-- The supplied ZCS archive hash, entry count, JAR/JNI hashes, documented public printer/scanner APIs, ABIs, sample target, and absence of detected licence files were checked read-only. No vendor binary was added to the application at this stage.
+- The supplied ZCS archive hash, entry count, JAR/JNI hashes, documented public printer/scanner APIs, ABIs, sample target, and absence of detected licence files were checked read-only. No vendor binary was added to source control.
+- The Phase 7 source passed the Expo TypeScript check and all 68 mobile tests. New coverage includes compact receipt text, printer capability/fake behavior, ZCS printer submission, scanner power/trigger/stop lifecycle, vendor wedge normalization, runtime capability selection, device heartbeat reporting, plugin gating, and rejection of missing or hash-altered SDK files.
+- Expo Doctor passed 18/18 and the Android Hermes export completed after adding the local module. An SDK-enabled clean Expo prebuild succeeded, autolinking resolved `com.rhemasystems.zcssmartpos.ZcsSmartPosModule`, the generated app Gradle file contained the controlled JAR dependency, and all three packaged artifacts matched the audited SHA-256 hashes.
+- The verification host has no Java runtime or Android SDK, so native Gradle/Kotlin compilation was not claimed. That gate remains explicit rather than treating JavaScript export or Expo prebuild as a compiled APK.
 
 ## Known failures and constraints
 
 - The Flash ERP reference checkout is intentionally dirty. Read committed files through Git object paths and do not clean, reset, stash, or commit that checkout.
-- The ZCS SmartPos 1.8.1 printer/scanner SDK is supplied and audited, but its package has no detected redistribution terms and its Android 14 behavior has not been certified on a physical Z92S. Phase 7 can commit adapter source and an external-SDK build hook; vendor binaries remain outside source control until redistribution is approved.
+- The ZCS SmartPos 1.8.1 printer/scanner SDK is supplied and audited, but its package has no detected redistribution terms and its Android 14 behavior has not been certified on a physical Z92S. Phase 7 adapter source and the external-SDK build hook are implemented; vendor binaries remain outside source control and distributable builds remain gated by written approval.
+- The current verification host has no Java runtime or Android SDK, so the generated Android project and Kotlin bridge have not passed a native Gradle build here.
 - Native Android keystore behavior, visible device enrollment/remote-disable flow, and physical Z92S behavior require an Android device and later acceptance stages.
 - Offline grant consumption and cash-sale Finance orchestration are implemented for schema version 1. Physical disconnect/reconnect, concurrent SQL Server aggregate consumption, and process/APK persistence remain unverified outside the automated in-memory and client test boundaries.
 - The repository currently reports pre-existing ImageSharp package advisories and compiler warnings; the verified Mobile POS builds completed with zero errors.
 
 ## Remaining work
 
-Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, receipt, and mobile checkout paths. Continue Phase 4 with SQL Server concurrency/failure-injection coverage, end-to-end Finance reconciliation evidence, and visible Android checkout/receipt acceptance. Finish Phase 5 with forced disconnect/retry/process-restart and signed APK upgrade preservation evidence. Apply and exercise the Phase 6 migrations in an authorized test database and capture authenticated browser/device/Finance workflow evidence. Proceed with the Phase 7 Z92S native printer/scanner adapters; physical acceptance still requires written redistribution approval and an Android 14 Z92S unit.
+Complete the remaining Phase 2 acceptance evidence: physical Android secure-storage/auth/enrollment and remote-disable flow, visible HQ browser verification after applying the migrations in an authorized test database, and relational concurrency coverage for effective assignments. Complete live SQL/API/device evidence for the Phase 3 customer, invoice read, producer-route, online sale, catalogue, preview, receipt, and mobile checkout paths. Continue Phase 4 with SQL Server concurrency/failure-injection coverage, end-to-end Finance reconciliation evidence, and visible Android checkout/receipt acceptance. Finish Phase 5 with forced disconnect/retry/process-restart and signed APK upgrade preservation evidence. Apply and exercise the Phase 6 migrations in an authorized test database and capture authenticated browser/device/Finance workflow evidence. Complete the Phase 7 native Gradle build and signed Z92S printer/scanner certification after written SDK redistribution approval and access to an Android 14 Z92S unit; MPOS-0704 Bluetooth ESC/POS remains planned after supported printer models are confirmed.
 
 ## Authorization boundaries
 
