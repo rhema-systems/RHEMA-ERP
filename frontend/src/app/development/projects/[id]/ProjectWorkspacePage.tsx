@@ -11,7 +11,7 @@ import {
   type SetStateAction,
   type WheelEventHandler,
 } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { format, getISOWeek } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
@@ -40,7 +40,9 @@ import { IssueRequisitionDialog } from '@/components/inventory/IssueRequisitionD
 import { ReturnRequisitionDialog } from '@/components/inventory/ReturnRequisitionDialog';
 import { RequisitionDialog } from '@/components/inventory/RequisitionDialog';
 import {
+  buildProjectPlanningPath,
   getProjectWorkspaceTabs,
+  PROJECT_WORK_COMPONENT_QUERY_PARAM,
   PROJECT_WORKSPACE_TAB_LABELS,
   type ProjectWorkspaceTab,
 } from './projectWorkspaceTabs';
@@ -1385,9 +1387,13 @@ export default function ProjectWorkspacePage({
 }) {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [, startTabTransition] = useTransition();
   const id = params?.id;
   const [activeTab, setActiveTab] = useState<ProjectWorkspaceTab>(initialTab);
+  const requestedWorkComponentId = searchParams.get(
+    PROJECT_WORK_COMPONENT_QUERY_PARAM
+  );
   const navigateToTab = (tab: string) => {
     const nextTab = tab as ProjectWorkspaceTab;
     if (!id || nextTab === activeTab) {
@@ -1734,6 +1740,22 @@ export default function ProjectWorkspacePage({
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
+
+  useEffect(() => {
+    if (
+      activeTab !== 'plan' ||
+      !requestedWorkComponentId ||
+      !project?.packages.some((item) => item.id === requestedWorkComponentId)
+    ) {
+      return;
+    }
+
+    setWork((current) =>
+      current.projectPackageId === requestedWorkComponentId
+        ? current
+        : { ...current, projectPackageId: requestedWorkComponentId }
+    );
+  }, [activeTab, project?.packages, requestedWorkComponentId]);
 
   useEffect(() => {
     const projectCurrencyCode = (
@@ -5957,17 +5979,22 @@ export default function ProjectWorkspacePage({
         onValueChange={navigateToTab}
         className="space-y-6"
       >
-        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
-          {workspaceTabs.map((tab) => (
-            <TabsTrigger
-              key={tab}
-              value={tab}
-              className="border bg-muted/60 px-3 py-2 data-[state=active]:border-primary data-[state=active]:bg-background"
-            >
-              {PROJECT_WORKSPACE_TAB_LABELS[tab]}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="-mx-1 overflow-x-auto border-b border-border px-1">
+          <TabsList
+            aria-label="Project sections"
+            className="h-auto min-w-max justify-start rounded-none bg-transparent p-0"
+          >
+            {workspaceTabs.map((tab) => (
+              <TabsTrigger
+                key={tab}
+                value={tab}
+                className="rounded-none border-b-2 border-transparent bg-transparent px-4 py-3 text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              >
+                {PROJECT_WORKSPACE_TAB_LABELS[tab]}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
         <TabsContent value="overview" className="space-y-6">
           <ProjectOverviewTab
@@ -6157,6 +6184,19 @@ export default function ProjectWorkspacePage({
             onEditBoqItem={beginEditProjectBoqItem}
             onCancelBoqItemEdit={resetProjectBoqItemEditor}
             onDeleteBoqItem={deleteProjectBoqItem}
+            onPlanWorkComponent={(workComponentId) => {
+              setWork((current) => ({
+                ...current,
+                projectPackageId: workComponentId,
+              }));
+              setActiveTab('plan');
+              startTabTransition(() => {
+                router.push(
+                  buildProjectPlanningPath(project.id, workComponentId),
+                  { scroll: false }
+                );
+              });
+            }}
             onImportCompleted={load}
           />
         </TabsContent>

@@ -2,8 +2,8 @@ export const PROJECT_WORKSPACE_TABS = [
   'overview',
   'phases',
   'packages',
-  'budgeting',
   'plan',
+  'budgeting',
   'design',
   'approvals',
   'commercial',
@@ -23,6 +23,15 @@ export const PROJECT_WORKSPACE_TABS = [
 ] as const;
 
 export type ProjectWorkspaceTab = typeof PROJECT_WORKSPACE_TABS[number];
+
+export const PROJECT_WORK_COMPONENT_QUERY_PARAM = 'workComponent';
+
+export function buildProjectPlanningPath(
+  projectId: string,
+  workComponentId: string
+): string {
+  return `/development/projects/${encodeURIComponent(projectId)}/plan?${PROJECT_WORK_COMPONENT_QUERY_PARAM}=${encodeURIComponent(workComponentId)}`;
+}
 
 export const PROJECT_WORKSPACE_TAB_LABELS: Record<ProjectWorkspaceTab, string> = {
   overview: 'Overview',
@@ -105,5 +114,5 @@ export function getProjectWorkspaceTabs(context?: ProjectWorkspaceTabContext): P
     tabs = moveTabsAfter(tabs, ['units'], 'handover');
   }
 
-  return tabs;
+  return moveTabsAfter(tabs, ['plan'], 'packages');
 }

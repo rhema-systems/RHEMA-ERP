@@ -2,6 +2,7 @@ import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRightCircle,
+  CalendarRange,
   Pencil,
   Plus,
   Trash2,
@@ -81,6 +82,7 @@ type ProjectPackagesTabProps = {
   onEditBoqItem: (boqItem: ProjectBoqItemDto) => void;
   onCancelBoqItemEdit: () => void;
   onDeleteBoqItem: (boqItemId: string) => void;
+  onPlanWorkComponent: (packageId: string) => void;
   onImportCompleted: () => Promise<void> | void;
 };
 
@@ -179,6 +181,7 @@ export function ProjectPackagesTab({
   onEditBoqItem,
   onCancelBoqItemEdit,
   onDeleteBoqItem,
+  onPlanWorkComponent,
   onImportCompleted,
 }: ProjectPackagesTabProps) {
   const { hasPermission } = useAuth();
@@ -430,6 +433,16 @@ export function ProjectPackagesTab({
         </AccordionTrigger>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            aria-label={`Plan ${item.name}`}
+            onClick={() => onPlanWorkComponent(item.id)}
+          >
+            <CalendarRange className="h-4 w-4" />
+            Plan
+          </Button>
           {canManageBoq ? (
             <Button
               variant="outline"
@@ -471,17 +484,29 @@ export function ProjectPackagesTab({
               {item.boqItems.length} line(s) linked to this work component
             </div>
           </div>
-          {canManageBoq ? (
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               className="gap-2"
-              onClick={() => openAddBoqDialogForPackage(item.id)}
+              aria-label={`Plan BOQ for ${item.name}`}
+              onClick={() => onPlanWorkComponent(item.id)}
             >
-              <Plus className="h-4 w-4" />
-              Add BOQ Line
+              <CalendarRange className="h-4 w-4" />
+              Plan
             </Button>
-          ) : null}
+            {canManageBoq ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => openAddBoqDialogForPackage(item.id)}
+              >
+                <Plus className="h-4 w-4" />
+                Add BOQ Line
+              </Button>
+            ) : null}
+          </div>
         </div>
         {item.boqItems.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-white p-5 text-sm text-muted-foreground">
