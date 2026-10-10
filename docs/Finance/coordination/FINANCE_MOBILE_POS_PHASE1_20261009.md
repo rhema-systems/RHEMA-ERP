@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `af41c9b8a2c72affb863afabc968a3389aad41ff`
+- Current implementation checkpoint: `04d2c253f1f6b087f62feeff9e44d88d9d3ac8ba`
 - Pull request: not created
 
 ## Source baselines
@@ -107,6 +107,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `cc793abfb56` - Policy-controlled provisional offline cash-sale screen, PDF/share/system/Z92S output, signed transaction-limit guard, and focused rendering coverage.
 - `d14e4a5dfe5` - Provisional offline sale receipt implementation tracker and Finance coordination checkpoint accepted by the consolidated gate.
 - `af41c9b8a2c` - Version-5 scope-bound canonical receipt persistence, Saved receipts UI, synchronized-receipt hydration, and completed-transaction output isolation.
+- `04d2c253f1f` - Canonical receipt persistence implementation tracker and Finance coordination checkpoint accepted by the consolidated gate.
 
 ## Phase 2 application foundation
 
@@ -356,6 +357,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The provisional offline sale output passes Mobile TypeScript and all 93 mobile tests. Added HTML/PDF and 32-column Z92S assertions prove the provisional marks, local reference, cached server-calculated lines/totals, pending server-number language, safe filename, and absence of canonical invoice/payment claims.
 - The exact-commit `acceptance:mobile-pos -SkipInstall` gate passed on checkpoint `d14e4a5dfe5` on 2026-10-10. It passed the proprietary-binary guard, Mobile TypeScript, 93/93 mobile tests, Expo Doctor, Android Hermes export, HQ TypeScript, the migration-aware API Release build with zero errors, 83/83 focused Mobile POS API tests, idempotent SQL generation for all six Mobile POS migrations, and all 15 migration-content markers. Evidence is under the ignored `.artifacts/mobile-pos/acceptance/20261010-131348/` directory. Existing lockfile installations were explicitly reused; proprietary Z92S packaging and native Android compilation were not requested.
 - The canonical receipt-cache source passes Mobile TypeScript, all 99 mobile tests, and Android Hermes export. New coverage proves canonical sale/collection parsing, rejection of provisional and malformed projections, migration-version/table checks, and that receipt load/persistence failures return the completed transaction result instead of escaping into offline submission handling.
+- The exact-commit `acceptance:mobile-pos -SkipInstall` gate passed on checkpoint `04d2c253f1f` on 2026-10-10. It passed the proprietary-binary guard, Mobile TypeScript, 99/99 mobile tests, Expo Doctor, Android Hermes export, HQ TypeScript, the migration-aware API Release build, 83/83 focused Mobile POS API tests, idempotent SQL generation for all six server Mobile POS migrations, and all 15 server migration markers. Evidence is under the ignored `.artifacts/mobile-pos/acceptance/20261010-134537/` directory. Existing lockfile installations were explicitly reused; proprietary Z92S packaging and native Android compilation were not requested.
 
 ## Known failures and constraints
 
