@@ -16,7 +16,8 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
 - Current Mobile POS checkpoint: `084ccfe7789c52d3a1854cc638efa4b53035b783`
 - Current release-candidate checkpoint before publication: `53c949e4332`
-- Pull request: not created
+- Pull request: `#395`, merged to `master` as `25d01ddf3216d57443348dc822bb8c15841a1396` on 2026-10-10
+- Deployment workflow: manually dispatched from merged `master` in GitHub Actions run `38076930873`
 
 ## Source baselines
 
