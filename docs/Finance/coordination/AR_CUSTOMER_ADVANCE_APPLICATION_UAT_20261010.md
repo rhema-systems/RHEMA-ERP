@@ -12,6 +12,7 @@
 - Exact base: `dd6fb224a1eaa7512087ed3bf0dd767d490c0f12`
 - Existing branch commits before this workstream: `14f1bb5c6`, `52e41f6aa`, `5ccce718c`
 - Completed workstream commit: `612aef0e9` (`Clarify AR receipt and ledger dates`)
+- Payment-on-account implementation commit: `c880ed029` (`Add AR payment-on-account application flow`)
 
 ## Confirmed current behavior
 
