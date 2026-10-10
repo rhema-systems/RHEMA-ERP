@@ -2,7 +2,7 @@ import { ZcsSmartPos, type ZcsSmartPosCapabilities } from "zcs-smartpos";
 import { buildReceiptText } from "@/src/printing/receipt-text";
 import type { PrinterCapability, ReceiptPrinterAdapter, ReceiptPrintResult } from "@/src/printing/receipt-printer";
 import { createBarcodeScan, type BarcodeScan, type BarcodeScanListener, type BarcodeScannerAdapter } from "@/src/scanning/barcode";
-import type { MobilePosReceipt } from "@/src/types/api";
+import type { MobilePosPrintableReceipt } from "@/src/types/api";
 
 export const zcsSmartPosAdapterKey = "zcs-smartpos";
 
@@ -36,7 +36,7 @@ export class ZcsReceiptPrinterAdapter implements ReceiptPrinterAdapter {
     };
   }
 
-  async print(receipt: MobilePosReceipt): Promise<ReceiptPrintResult> {
+  async print(receipt: MobilePosPrintableReceipt): Promise<ReceiptPrintResult> {
     const capability = await this.getCapability();
     if (!capability.available) throw new Error(capability.detail || "The Z92S built-in printer is unavailable.");
     await this.native.initialize();

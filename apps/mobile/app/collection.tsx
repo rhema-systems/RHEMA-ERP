@@ -16,15 +16,19 @@ import {
   loadSessionBankAccounts,
   loadSessionOutstandingInvoices,
 } from "@/src/offline/collection-runtime";
+import { isZcsSmartPosAdapter } from "@/src/hardware/zcs-smartpos";
 import { openSessionOutbox } from "@/src/offline/sync-runtime";
+import { printReceiptAsync, shareReceiptPdfAsync } from "@/src/receipts/output";
 import { sumTenderDrafts, type TenderDraft } from "@/src/sales/checkout";
 import { useSession } from "@/src/session/session-context";
 import { getInstallationId } from "@/src/storage/secure-session";
 import type {
   MobilePosBankAccountOption,
+  MobilePosCollectionReceipt,
   MobilePosCollectionResult,
   MobilePosCustomerSearchResult,
   MobilePosPaymentMethod,
+  MobilePosProvisionalCollectionReceipt,
   OutstandingInvoice,
 } from "@/src/types/api";
 import { colors } from "@/src/ui/theme";
@@ -48,6 +52,7 @@ export default function CollectionScreen() {
   const bootstrap = session.bootstrap;
   const permissions = session.user?.permissions ?? [];
   const missingPermission = requiredPermissions.find(permission => !permissions.includes(permission));
+  const canReprintReceipt = permissions.includes("MobilePOS.Receipt.Reprint");
   const customer = useMemo<MobilePosCustomerSearchResult | null>(() => {
     if (!params.businessPartnerId || !params.businessPartnerRoleId) return null;
     return {
@@ -77,14 +82,17 @@ export default function CollectionScreen() {
   const [bankAccountTenderId, setBankAccountTenderId] = useState<string | null>(null);
   const [identity, setIdentity] = useState<{ clientMutationId: string; localReference: string; occurredAtUtc: string } | null>(null);
   const [result, setResult] = useState<MobilePosCollectionResult | null>(null);
+  const [receipt, setReceipt] = useState<MobilePosCollectionReceipt | null>(null);
+  const [outputMessage, setOutputMessage] = useState<string | null>(null);
   const [queuedCollection, setQueuedCollection] = useState<{
     localReference: string;
     totalAmount: number;
     currencyCode: string;
     allocations: Array<{ invoiceNumber: string; amount: number }>;
     provisionalReceipt: boolean;
+    receipt?: MobilePosProvisionalCollectionReceipt;
   } | null>(null);
-  const [busy, setBusy] = useState<"load" | "bankAccounts" | "complete" | null>(null);
+  const [busy, setBusy] = useState<"load" | "bankAccounts" | "complete" | "reprint" | "print" | "share" | null>(null);
   const [error, setError] = useState<ApiProblem | null>(null);
 
   useEffect(() => {
@@ -218,7 +226,13 @@ export default function CollectionScreen() {
         await queueOfflineCollection(request);
       } else {
         try {
-          setResult(await mobileApi.completeCollection(request));
+          const completed = await mobileApi.completeCollection(request);
+          setResult(completed);
+          try {
+            setReceipt(await mobileApi.getCollectionReceipt(completed.collectionId, await getInstallationId()));
+          } catch (receiptError) {
+            setError(asProblem(receiptError));
+          }
         } catch (caught) {
           if (!isRetryableTransportFailure(caught)) throw caught;
           await queueOfflineCollection(request);
@@ -264,6 +278,60 @@ export default function CollectionScreen() {
       payload: request,
     });
     const invoiceById = new Map(invoices.map(invoice => [invoice.id, invoice]));
+    const occurredAtUtc = request.occurredAtUtc ?? new Date().toISOString();
+    const provisionalReceipt = grant.policy.allowProvisionalReceipt ? {
+      receiptKind: "COLLECTION_PROVISIONAL" as const,
+      receiptId: request.clientMutationId,
+      copyType: "PROVISIONAL" as const,
+      copyNumber: 0 as const,
+      reprintCount: 0 as const,
+      generatedAtUtc: new Date().toISOString(),
+      qrReference: `RHEMA|MOBILEPOS|PROVISIONAL|${request.localReference}|${request.clientMutationId}`,
+      tenantId: session.user.currentTenantId ?? "",
+      tenantCode: session.user.currentTenantCode ?? "",
+      tenantName: session.user.currentTenantName ?? "RHEMA ERP",
+      storeId: bootstrap.store.id,
+      storeCode: bootstrap.store.code,
+      storeName: bootstrap.store.name,
+      locationName: bootstrap.store.code,
+      tillId: bootstrap.till.id,
+      tillNumber: bootstrap.till.tillNumber,
+      tillName: bootstrap.till.name,
+      tillSessionId: bootstrap.currentTillSessionId,
+      tillSessionNumber: "PENDING SYNC",
+      businessDate: occurredAtUtc.slice(0, 10),
+      deviceId: bootstrap.device.id,
+      deviceName: bootstrap.device.deviceName,
+      cashierUserId: session.user.id,
+      cashierName: bootstrap.userName,
+      businessPartnerId: customer.businessPartnerId,
+      businessPartnerRoleId: customer.businessPartnerRoleId,
+      customerCode: customer.code,
+      customerName: customer.name,
+      localReference: request.localReference,
+      occurredAtUtc,
+      currencyCode: bootstrap.store.currencyCode,
+      totalAmount: request.allocations.reduce((total, item) => total + item.amount, 0),
+      wasRecordedOffline: true as const,
+      allocations: request.allocations.map((item, index) => ({
+        sequence: index + 1,
+        invoiceId: item.invoiceId,
+        invoiceNumber: invoiceById.get(item.invoiceId)?.invoiceNumber ?? item.invoiceId,
+        amount: item.amount,
+      })),
+      tenders: request.tenders.map((item, index) => {
+        const method = paymentMethods.find(value => value.paymentMethodId === item.paymentMethodId);
+        return {
+          sequence: index + 1,
+          paymentMethodCode: method?.code ?? item.paymentMethodId,
+          paymentMethodName: method?.name ?? "Tender",
+          amount: item.amount,
+          externalReference: item.externalReference,
+        };
+      }),
+    } satisfies MobilePosProvisionalCollectionReceipt : undefined;
+    setResult(null);
+    setReceipt(null);
     setQueuedCollection({
       localReference: request.localReference,
       totalAmount: request.allocations.reduce((total, item) => total + item.amount, 0),
@@ -273,7 +341,57 @@ export default function CollectionScreen() {
         amount: item.amount,
       })),
       provisionalReceipt: grant.policy.allowProvisionalReceipt,
+      receipt: provisionalReceipt,
     });
+  };
+
+  const createReprintCopy = async () => {
+    if (!result || !canReprintReceipt) return;
+    setBusy("reprint");
+    setError(null);
+    setOutputMessage(null);
+    try {
+      setReceipt(await mobileApi.recordCollectionReceiptReprint(result.collectionId, {
+        installationId: await getInstallationId(),
+        clientEventId: Crypto.randomUUID(),
+        reason: "Cashier requested another collection receipt copy",
+      }));
+    } catch (caught) {
+      setError(asProblem(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const printCurrentReceipt = async (current: MobilePosCollectionReceipt | MobilePosProvisionalCollectionReceipt) => {
+    setBusy("print");
+    setError(null);
+    setOutputMessage(null);
+    try {
+      const printed = await printReceiptAsync(current, bootstrap.device.printerAdapterKey);
+      const label = current.copyType === "PROVISIONAL"
+        ? "Provisional collection slip"
+        : current.copyType === "REPRINT" ? `Reprint copy ${current.copyNumber}` : "Original collection receipt";
+      setOutputMessage(`${label} sent to ${printed.adapterLabel}.`);
+    } catch (caught) {
+      setError(asProblem(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const shareCurrentReceipt = async (current: MobilePosCollectionReceipt | MobilePosProvisionalCollectionReceipt) => {
+    setBusy("share");
+    setError(null);
+    setOutputMessage(null);
+    try {
+      await shareReceiptPdfAsync(current);
+      setOutputMessage("The collection receipt PDF was saved on this device and opened in the share sheet.");
+    } catch (caught) {
+      setError(asProblem(caught));
+    } finally {
+      setBusy(null);
+    }
   };
 
   if (result) {
@@ -283,10 +401,19 @@ export default function CollectionScreen() {
         <Text style={styles.successTitle}>Collection recorded</Text>
         <Text style={styles.successAmount}>{money(result.totalAmount, result.currencyCode)}</Text>
         <Text style={styles.successMeta}>{result.customerName} · {result.localReference}</Text>
-        <View style={styles.summaryCard}>
-          {result.allocations.map(item => <SummaryRow key={item.invoiceId} label={item.invoiceNumber} value={money(item.amount, result.currencyCode)} />)}
-          {result.tenders.map(item => <SummaryRow key={item.tenderId} label={item.paymentNumber} value={item.paymentStatus} />)}
-        </View>
+        {error && <ErrorBox message={`${error.message}${error.correlationId ? ` Reference: ${error.correlationId}` : ""}`} />}
+        {receipt ? <CollectionReceiptCard receipt={receipt} /> : (
+          <View style={styles.summaryCard}>
+            {result.allocations.map(item => <SummaryRow key={item.invoiceId} label={item.invoiceNumber} value={money(item.amount, result.currencyCode)} />)}
+            {result.tenders.map(item => <SummaryRow key={item.tenderId} label={item.paymentNumber} value={item.paymentStatus} />)}
+          </View>
+        )}
+        {outputMessage && <View style={styles.outputMessage}><Ionicons name="checkmark-circle-outline" size={19} color={colors.success} /><Text style={styles.outputMessageText}>{outputMessage}</Text></View>}
+        {receipt && <View style={styles.outputActions}>
+          <Pressable disabled={busy !== null} onPress={() => void printCurrentReceipt(receipt)} style={[styles.outputButton, busy !== null && styles.disabled]}><Ionicons name="print-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>{isZcsSmartPosAdapter(bootstrap.device.printerAdapterKey) ? "Built-in print" : "System print"}</Text></Pressable>
+          <Pressable disabled={busy !== null} onPress={() => void shareCurrentReceipt(receipt)} style={[styles.outputButton, busy !== null && styles.disabled]}><Ionicons name="share-social-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>Share PDF</Text></Pressable>
+        </View>}
+        {receipt && canReprintReceipt && <Pressable disabled={busy !== null} onPress={() => void createReprintCopy()} style={[styles.secondaryButton, busy !== null && styles.disabled]}>{busy === "reprint" ? <ActivityIndicator color={colors.blue} /> : <Text style={styles.secondaryButtonText}>Generate audited reprint copy</Text>}</Pressable>}
         <Pressable onPress={() => router.replace("/customers")} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Back to customers</Text></Pressable>
       </ScrollView>
     );
@@ -310,6 +437,15 @@ export default function CollectionScreen() {
         <View style={styles.summaryCard}>
           {queuedCollection.allocations.map(item => <SummaryRow key={item.invoiceNumber} label={item.invoiceNumber} value={money(item.amount, queuedCollection.currencyCode)} />)}
         </View>
+        {queuedCollection.receipt && <>
+          <CollectionReceiptCard receipt={queuedCollection.receipt} />
+          {error && <ErrorBox message={`${error.message}${error.correlationId ? ` Reference: ${error.correlationId}` : ""}`} />}
+          {outputMessage && <View style={styles.outputMessage}><Ionicons name="checkmark-circle-outline" size={19} color={colors.success} /><Text style={styles.outputMessageText}>{outputMessage}</Text></View>}
+          <View style={styles.outputActions}>
+            <Pressable disabled={busy !== null} onPress={() => void printCurrentReceipt(queuedCollection.receipt!)} style={[styles.outputButton, busy !== null && styles.disabled]}><Ionicons name="print-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>{isZcsSmartPosAdapter(bootstrap.device.printerAdapterKey) ? "Built-in print" : "System print"}</Text></Pressable>
+            <Pressable disabled={busy !== null} onPress={() => void shareCurrentReceipt(queuedCollection.receipt!)} style={[styles.outputButton, busy !== null && styles.disabled]}><Ionicons name="share-social-outline" size={18} color={colors.blue} /><Text style={styles.outputButtonText}>Share PDF</Text></Pressable>
+          </View>
+        </>}
         <Pressable onPress={() => router.replace("/sync")} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Open sync queue</Text></Pressable>
         <Pressable onPress={() => router.replace("/customers")} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Back to customers</Text></Pressable>
       </ScrollView>
@@ -382,6 +518,26 @@ function formatCacheTime(value: string | null) { if (!value) return "earlier"; c
 function ErrorBox({ message }: { message: string }) { return <View accessibilityRole="alert" style={styles.errorBox}><Ionicons name="alert-circle-outline" size={20} color={colors.danger} /><Text style={styles.errorText}>{message}</Text></View>; }
 function SectionTitle({ number, title }: { number: string; title: string }) { return <View style={styles.sectionHeading}><View style={styles.numberBadge}><Text style={styles.numberText}>{number}</Text></View><Text style={styles.sectionTitle}>{title}</Text></View>; }
 function SummaryRow({ label, value }: { label: string; value: string }) { return <View style={styles.summaryRow}><Text style={styles.meta}>{label}</Text><Text style={styles.summaryValue}>{value}</Text></View>; }
+function CollectionReceiptCard({ receipt }: { receipt: MobilePosCollectionReceipt | MobilePosProvisionalCollectionReceipt }) {
+  return <View style={styles.receiptCard}>
+    {receipt.copyType === "PROVISIONAL" && <Text style={styles.provisionalMark}>PROVISIONAL · PENDING SYNCHRONIZATION</Text>}
+    {receipt.copyType === "REPRINT" && <Text style={styles.reprintMark}>REPRINT · COPY {receipt.copyNumber}</Text>}
+    <Text style={styles.receiptTenant}>{receipt.tenantName || "RHEMA ERP"}</Text>
+    <Text style={styles.receiptMeta}>CUSTOMER COLLECTION RECEIPT</Text>
+    <Text style={styles.receiptMeta}>{receipt.storeName} · {receipt.tillNumber}</Text>
+    <View style={styles.receiptDivider} />
+    <SummaryRow label="Customer" value={`${receipt.customerName} (${receipt.customerCode})`} />
+    <SummaryRow label="Cashier" value={receipt.cashierName} />
+    <SummaryRow label="Reference" value={receipt.localReference} />
+    <View style={styles.receiptDivider} />
+    {receipt.allocations.map(item => <SummaryRow key={`${item.sequence}-${item.invoiceId}`} label={item.invoiceNumber} value={money(item.amount, receipt.currencyCode)} />)}
+    <View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>{money(receipt.totalAmount, receipt.currencyCode)}</Text></View>
+    <View style={styles.receiptDivider} />
+    {receipt.tenders.map(item => <SummaryRow key={item.sequence} label={item.paymentMethodName} value={"paymentNumber" in item ? item.paymentNumber : "Pending server number"} />)}
+    <Text selectable style={styles.qrReference}>{receipt.qrReference}</Text>
+    {receipt.copyType === "PROVISIONAL" && <Text style={styles.receiptNote}>This is not a final Finance receipt. Canonical payment numbers are assigned only after successful synchronization.</Text>}
+  </View>;
+}
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background }, content: { paddingHorizontal: 20, paddingTop: 52, paddingBottom: 40 },
@@ -400,4 +556,6 @@ const styles = StyleSheet.create({
   successIcon: { width: 68, height: 68, marginTop: 50, alignSelf: "center", alignItems: "center", justifyContent: "center", borderRadius: 23, backgroundColor: colors.success }, successTitle: { marginTop: 18, color: colors.ink, textAlign: "center", fontSize: 23, fontWeight: "800" }, successAmount: { marginTop: 8, color: colors.navy, textAlign: "center", fontSize: 29, fontWeight: "900" }, successMeta: { marginTop: 7, color: colors.muted, textAlign: "center", fontSize: 12 }, summaryCard: { marginTop: 22, padding: 15, borderRadius: 15, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.line }, summaryRow: { minHeight: 38, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, summaryValue: { color: colors.ink, fontSize: 12, fontWeight: "700" },
   queuedIcon: { backgroundColor: colors.warning }, pendingNotice: { marginTop: 18, flexDirection: "row", gap: 9, padding: 13, borderRadius: 12, backgroundColor: colors.warningBg }, pendingNoticeText: { flex: 1, color: colors.slate, fontSize: 12, lineHeight: 18 },
   secondaryButton: { minHeight: 48, marginTop: 10, alignItems: "center", justifyContent: "center", borderRadius: 13, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white }, secondaryButtonText: { color: colors.navy, fontSize: 14, fontWeight: "800" },
+  receiptCard: { marginTop: 18, padding: 18, borderRadius: 18, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white }, receiptTenant: { color: colors.navy, fontSize: 18, fontWeight: "800", textAlign: "center" }, receiptMeta: { marginTop: 3, color: colors.slate, fontSize: 11, textAlign: "center" }, receiptDivider: { height: 1, marginVertical: 14, backgroundColor: colors.line }, receiptNote: { marginTop: 14, color: colors.slate, fontSize: 11, lineHeight: 17, textAlign: "center" }, qrReference: { marginTop: 16, color: colors.muted, fontSize: 9, lineHeight: 13, textAlign: "center" }, reprintMark: { marginBottom: 12, color: colors.danger, fontSize: 13, fontWeight: "800", letterSpacing: 1.5, textAlign: "center" }, provisionalMark: { marginBottom: 12, padding: 8, borderWidth: 2, borderColor: colors.warning, color: colors.warning, fontSize: 11, fontWeight: "800", letterSpacing: 1, textAlign: "center" },
+  outputActions: { marginTop: 14, flexDirection: "row", gap: 10 }, outputButton: { minHeight: 48, flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, borderRadius: 12, borderWidth: 1, borderColor: "#84ADFF", backgroundColor: colors.white }, outputButtonText: { color: colors.blue, fontSize: 12, fontWeight: "800" }, outputMessage: { marginTop: 12, flexDirection: "row", gap: 8, padding: 12, borderRadius: 12, backgroundColor: colors.successBg }, outputMessageText: { flex: 1, color: colors.success, fontSize: 11, lineHeight: 16 },
 });

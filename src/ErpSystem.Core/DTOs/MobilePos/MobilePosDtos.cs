@@ -709,6 +709,7 @@ public sealed class MobilePosReceiptReprintRequestDto
 
 public sealed class MobilePosReceiptDto
 {
+    public string ReceiptKind { get; set; } = "SALE";
     public Guid ReceiptId { get; set; }
     public string CopyType { get; set; } = "ORIGINAL";
     public int CopyNumber { get; set; }
@@ -755,6 +756,56 @@ public sealed class MobilePosReceiptDto
     public decimal TotalAmount { get; set; }
     public IReadOnlyList<MobilePosReceiptLineDto> Lines { get; set; } = [];
     public IReadOnlyList<MobilePosReceiptTenderDto> Tenders { get; set; } = [];
+}
+
+public sealed class MobilePosCollectionReceiptDto
+{
+    public string ReceiptKind { get; set; } = "COLLECTION";
+    public Guid ReceiptId { get; set; }
+    public string CopyType { get; set; } = "ORIGINAL";
+    public int CopyNumber { get; set; }
+    public int ReprintCount { get; set; }
+    public Guid? AuditEventId { get; set; }
+    public DateTime GeneratedAtUtc { get; set; }
+    public string? ReprintReason { get; set; }
+    public string QrReference { get; set; } = string.Empty;
+
+    public Guid TenantId { get; set; }
+    public string TenantCode { get; set; } = string.Empty;
+    public string TenantName { get; set; } = string.Empty;
+    public Guid StoreId { get; set; }
+    public string StoreCode { get; set; } = string.Empty;
+    public string StoreName { get; set; } = string.Empty;
+    public string LocationName { get; set; } = string.Empty;
+    public Guid TillId { get; set; }
+    public string TillNumber { get; set; } = string.Empty;
+    public string TillName { get; set; } = string.Empty;
+    public Guid TillSessionId { get; set; }
+    public string TillSessionNumber { get; set; } = string.Empty;
+    public DateTime BusinessDate { get; set; }
+    public Guid DeviceId { get; set; }
+    public string DeviceName { get; set; } = string.Empty;
+    public Guid CashierUserId { get; set; }
+    public string CashierName { get; set; } = string.Empty;
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public string CustomerCode { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public string LocalReference { get; set; } = string.Empty;
+    public DateTime OccurredAtUtc { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public bool WasRecordedOffline { get; set; }
+    public IReadOnlyList<MobilePosCollectionReceiptAllocationDto> Allocations { get; set; } = [];
+    public IReadOnlyList<MobilePosReceiptTenderDto> Tenders { get; set; } = [];
+}
+
+public sealed class MobilePosCollectionReceiptAllocationDto
+{
+    public int Sequence { get; set; }
+    public Guid InvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
 }
 
 public sealed class MobilePosReceiptLineDto

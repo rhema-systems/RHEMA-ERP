@@ -90,18 +90,65 @@ public sealed class MobilePosReceiptServiceTests
             .WithMessage("*assigned store*");
     }
 
+    [Fact]
+    public async Task GetCollectionAsync_ShouldProjectCanonicalAllocationsAndPayments()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var receipt = await fixture.Service.GetCollectionAsync(
+            fixture.CollectionId, "installation-123456", CancellationToken.None);
+
+        receipt.ReceiptKind.Should().Be("COLLECTION");
+        receipt.CopyType.Should().Be("ORIGINAL");
+        receipt.CustomerCode.Should().Be("WALK-IN");
+        receipt.TotalAmount.Should().Be(75m);
+        receipt.Allocations.Should().ContainSingle().Which.InvoiceNumber.Should().Be("INV-POS-001");
+        receipt.Tenders.Should().HaveCount(2);
+        receipt.Tenders.Select(item => item.PaymentNumber).Should().Equal("COL-PAY-001", "COL-PAY-002");
+        receipt.QrReference.Should().Contain("COLLECTION").And.Contain(fixture.CollectionId.ToString("N"));
+    }
+
+    [Fact]
+    public async Task RecordCollectionReprintAsync_ShouldAppendOneIdempotentAuditEvent()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var request = new MobilePosReceiptReprintRequestDto
+        {
+            InstallationId = "installation-123456",
+            ClientEventId = "collection-reprint-001",
+            Reason = "Customer requested another collection receipt"
+        };
+
+        var first = await fixture.Service.RecordCollectionReprintAsync(
+            fixture.CollectionId, request, CancellationToken.None);
+        var replay = await fixture.Service.RecordCollectionReprintAsync(
+            fixture.CollectionId, request, CancellationToken.None);
+
+        first.CopyType.Should().Be("REPRINT");
+        first.CopyNumber.Should().Be(1);
+        replay.AuditEventId.Should().Be(first.AuditEventId);
+        (await fixture.Db.AuditLogs.CountAsync(item =>
+            item.Resource == "MobilePosCollectionReceipt")).Should().Be(1);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
-        private Fixture(ApplicationDbContext db, MobilePosReceiptService service, Guid saleId)
+        private Fixture(
+            ApplicationDbContext db,
+            MobilePosReceiptService service,
+            Guid saleId,
+            Guid collectionId)
         {
             Db = db;
             Service = service;
             SaleId = saleId;
+            CollectionId = collectionId;
         }
 
         public ApplicationDbContext Db { get; }
         public MobilePosReceiptService Service { get; }
         public Guid SaleId { get; }
+        public Guid CollectionId { get; }
 
         public static async Task<Fixture> CreateAsync(bool useDifferentAssignedStore = false)
         {
@@ -115,6 +162,7 @@ public sealed class MobilePosReceiptServiceTests
             var roleId = Guid.NewGuid();
             var invoiceId = Guid.NewGuid();
             var saleId = Guid.NewGuid();
+            var collectionId = Guid.NewGuid();
             var now = DateTime.UtcNow;
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase($"mobile-pos-receipt-{Guid.NewGuid():N}")
@@ -305,9 +353,63 @@ public sealed class MobilePosReceiptServiceTests
                 CreatedById = userId
             });
 
+            var collection = new MobilePosCollection
+            {
+                Id = collectionId,
+                TenantId = tenantId,
+                MobilePosStoreId = storeId,
+                MobilePosStore = store,
+                MobilePosTillId = tillId,
+                MobilePosTill = till,
+                CashierTillSessionId = sessionId,
+                CashierTillSession = session,
+                MobilePosDeviceId = deviceId,
+                MobilePosDevice = device,
+                OperatorUserId = userId,
+                OperatorUser = user,
+                ClientMutationId = "collection-mutation-001",
+                LocalReference = "COL-LOCAL-001",
+                BusinessPartnerId = partnerId,
+                BusinessPartner = partner,
+                BusinessPartnerRoleId = roleId,
+                BusinessPartnerRole = role,
+                BusinessDate = now.Date,
+                OccurredAtUtc = now,
+                CurrencyCode = "GHS",
+                TotalAmount = 75m,
+                Status = MobilePosCollectionStatus.Completed,
+                SynchronizedAtUtc = now,
+                CreatedAt = now,
+                CreatedBy = user.UserName,
+                CreatedById = userId
+            };
+            collection.Allocations.Add(new MobilePosCollectionAllocation
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, Sequence = 1, InvoiceId = invoiceId,
+                Invoice = invoice, InvoiceNumber = invoice.InvoiceNumber, Amount = 75m,
+                CreatedAt = now, CreatedBy = user.UserName, CreatedById = userId
+            });
+            collection.Tenders.Add(new MobilePosCollectionTender
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, Sequence = 1, PaymentMethodId = cash.Id,
+                PaymentMethod = cash, Amount = 50m, CustomerPaymentId = Guid.NewGuid(),
+                PaymentNumber = "COL-PAY-001", PaymentStatus = "Posted",
+                Status = MobilePosTenderStatus.Completed, CreatedAt = now, CreatedBy = user.UserName,
+                CreatedById = userId
+            });
+            collection.Tenders.Add(new MobilePosCollectionTender
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, Sequence = 2, PaymentMethodId = card.Id,
+                PaymentMethod = card, Amount = 25m, ExternalReference = "COL-AUTH-001",
+                CustomerPaymentId = Guid.NewGuid(), PaymentNumber = "COL-PAY-002", PaymentStatus = "Posted",
+                Status = MobilePosTenderStatus.Completed, CreatedAt = now, CreatedBy = user.UserName,
+                CreatedById = userId
+            });
+
             db.Tenants.Add(tenant);
             db.Users.Add(user);
             db.MobilePosSales.Add(sale);
+            db.MobilePosCollections.Add(collection);
             await db.SaveChangesAsync();
 
             var currentUser = new Mock<ICurrentUserService>();
@@ -335,7 +437,8 @@ public sealed class MobilePosReceiptServiceTests
             return new Fixture(
                 db,
                 new MobilePosReceiptService(db, currentUser.Object, foundation.Object),
-                saleId);
+                saleId,
+                collectionId);
         }
 
         public ValueTask DisposeAsync() => Db.DisposeAsync();

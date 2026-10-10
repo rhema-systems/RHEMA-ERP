@@ -1,25 +1,33 @@
-import type { MobilePosReceipt } from "@/src/types/api";
+import type { MobilePosPrintableReceipt } from "@/src/types/api";
 
-export function buildReceiptHtml(receipt: MobilePosReceipt): string {
-  const copyMark = receipt.copyType === "REPRINT"
-    ? `<div class="copy-mark">REPRINT &middot; COPY ${receipt.copyNumber}</div>`
+export function buildReceiptHtml(receipt: MobilePosPrintableReceipt): string {
+  const isSale = receipt.receiptKind === "SALE";
+  const isProvisional = receipt.receiptKind === "COLLECTION_PROVISIONAL";
+  const copyMark = isProvisional
+    ? `<div class="provisional-mark">PROVISIONAL &middot; PENDING SYNCHRONIZATION</div>`
+    : receipt.copyType === "REPRINT"
+      ? `<div class="copy-mark">REPRINT &middot; COPY ${receipt.copyNumber}</div>`
+      : "";
+  const detailRows = isSale
+    ? receipt.lines.map(line => `
+      <tr><td><strong>${escapeHtml(line.description)}</strong><span>${formatQuantity(line.quantity)} ${escapeHtml(line.unitOfMeasureCode)} &times; ${receiptMoney(line.unitPrice, receipt.currencyCode)}</span></td><td class="amount">${receiptMoney(line.lineTotal, receipt.currencyCode)}</td></tr>`).join("")
+    : receipt.allocations.map(allocation => `
+      <tr><td><strong>${escapeHtml(allocation.invoiceNumber)}</strong><span>Invoice allocation</span></td><td class="amount">${receiptMoney(allocation.amount, receipt.currencyCode)}</td></tr>`).join("");
+  const tenderRows = receipt.tenders.map(tender => {
+    const paymentNumber = "paymentNumber" in tender ? tender.paymentNumber : "Pending server payment number";
+    return `<tr><td><strong>${escapeHtml(tender.paymentMethodName)}</strong><span>${escapeHtml(paymentNumber)}${tender.externalReference ? ` &middot; ${escapeHtml(tender.externalReference)}` : ""}</span></td><td class="amount">${receiptMoney(tender.amount, receipt.currencyCode)}</td></tr>`;
+  }).join("");
+  const sourceFacts = isSale
+    ? `<tr><td>Invoice</td><td>${escapeHtml(receipt.invoiceNumber)}</td></tr><tr><td>Status</td><td>${escapeHtml(receipt.invoiceStatus)}</td></tr>`
+    : `<tr><td>Document</td><td>${isProvisional ? "Provisional collection" : "Customer collection"}</td></tr><tr><td>Status</td><td>${isProvisional ? "Pending synchronization" : "Payments posted"}</td></tr>`;
+  const totals = isSale
+    ? `<tr><td>Subtotal</td><td>${receiptMoney(receipt.subTotal, receipt.currencyCode)}</td></tr><tr><td>Discount</td><td>${receiptMoney(receipt.discountAmount, receipt.currencyCode)}</td></tr><tr><td>Tax</td><td>${receiptMoney(receipt.taxAmount, receipt.currencyCode)}</td></tr>`
     : "";
-  const lineRows = receipt.lines.map(line => `
-    <tr>
-      <td>
-        <strong>${escapeHtml(line.description)}</strong>
-        <span>${formatQuantity(line.quantity)} ${escapeHtml(line.unitOfMeasureCode)} &times; ${receiptMoney(line.unitPrice, receipt.currencyCode)}</span>
-      </td>
-      <td class="amount">${receiptMoney(line.lineTotal, receipt.currencyCode)}</td>
-    </tr>`).join("");
-  const tenderRows = receipt.tenders.map(tender => `
-    <tr>
-      <td>
-        <strong>${escapeHtml(tender.paymentMethodName)}</strong>
-        <span>${escapeHtml(tender.paymentNumber)}${tender.externalReference ? ` &middot; ${escapeHtml(tender.externalReference)}` : ""}</span>
-      </td>
-      <td class="amount">${receiptMoney(tender.amount, receipt.currencyCode)}</td>
-    </tr>`).join("");
+  const footer = isProvisional
+    ? "This is not a final Finance receipt. RHEMA payment numbers will be assigned after successful synchronization."
+    : isSale
+      ? "Generated from the canonical RHEMA invoice and allocated payments."
+      : "Generated from canonical RHEMA customer payments and invoice allocations.";
 
   return `<!doctype html>
 <html>
@@ -31,15 +39,17 @@ export function buildReceiptHtml(receipt: MobilePosReceipt): string {
     * { box-sizing: border-box; }
     body { margin: 0; color: #101828; font-family: Arial, Helvetica, sans-serif; font-size: 12px; }
     .receipt { width: 100%; max-width: 520px; margin: 0 auto; }
-    .copy-mark { margin-bottom: 12px; color: #b42318; font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-align: center; }
+    .copy-mark, .provisional-mark { margin-bottom: 12px; font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-align: center; }
+    .copy-mark { color: #b42318; }
+    .provisional-mark { padding: 8px; border: 2px solid #b54708; color: #b54708; }
     h1 { margin: 0; color: #0b2a5b; font-size: 21px; text-align: center; }
+    h2 { margin: 6px 0 0; color: #344054; font-size: 13px; letter-spacing: 1px; text-align: center; }
     .center { margin-top: 4px; color: #475467; text-align: center; }
     .rule { margin: 14px 0; border-top: 1px dashed #98a2b3; }
-    .facts { width: 100%; border-collapse: collapse; }
+    .facts, .items { width: 100%; border-collapse: collapse; }
     .facts td { padding: 3px 0; vertical-align: top; }
     .facts td:first-child { width: 34%; color: #667085; }
     .facts td:last-child { font-weight: 600; text-align: right; }
-    .items { width: 100%; border-collapse: collapse; }
     .items td { padding: 6px 0; border-bottom: 1px solid #eaecf0; vertical-align: top; }
     .items strong, .items span { display: block; }
     .items span { margin-top: 2px; color: #667085; font-size: 10px; }
@@ -53,38 +63,35 @@ export function buildReceiptHtml(receipt: MobilePosReceipt): string {
   <main class="receipt">
     ${copyMark}
     <h1>${escapeHtml(receipt.tenantName || "RHEMA ERP")}</h1>
+    <h2>${isSale ? "SALES RECEIPT" : "CUSTOMER COLLECTION RECEIPT"}</h2>
     <div class="center">${escapeHtml(receipt.storeName)} &middot; ${escapeHtml(receipt.locationName || receipt.storeCode)}</div>
     <div class="center">${escapeHtml(receipt.tillNumber)} &middot; ${escapeHtml(receipt.tillSessionNumber)}</div>
     <div class="rule"></div>
     <table class="facts">
       <tr><td>Customer</td><td>${escapeHtml(receipt.customerName)} (${escapeHtml(receipt.customerCode)})</td></tr>
       <tr><td>Cashier</td><td>${escapeHtml(receipt.cashierName)}</td></tr>
-      <tr><td>Invoice</td><td>${escapeHtml(receipt.invoiceNumber)}</td></tr>
-      <tr><td>Status</td><td>${escapeHtml(receipt.invoiceStatus)}</td></tr>
+      ${sourceFacts}
       <tr><td>Reference</td><td>${escapeHtml(receipt.localReference)}</td></tr>
       <tr><td>Date</td><td>${escapeHtml(formatReceiptDate(receipt.occurredAtUtc))}</td></tr>
     </table>
     <div class="rule"></div>
-    <table class="items">${lineRows}</table>
-    <table class="facts">
-      <tr><td>Subtotal</td><td>${receiptMoney(receipt.subTotal, receipt.currencyCode)}</td></tr>
-      <tr><td>Discount</td><td>${receiptMoney(receipt.discountAmount, receipt.currencyCode)}</td></tr>
-      <tr><td>Tax</td><td>${receiptMoney(receipt.taxAmount, receipt.currencyCode)}</td></tr>
-      <tr class="total"><td>Total</td><td>${receiptMoney(receipt.totalAmount, receipt.currencyCode)}</td></tr>
-    </table>
+    <table class="items">${detailRows}</table>
+    <table class="facts">${totals}<tr class="total"><td>Total</td><td>${receiptMoney(receipt.totalAmount, receipt.currencyCode)}</td></tr></table>
     <div class="rule"></div>
     <table class="items">${tenderRows}</table>
     <div class="reference">${escapeHtml(receipt.qrReference)}</div>
-    <div class="footer">Generated from the canonical RHEMA invoice and allocated payments.</div>
+    <div class="footer">${footer}</div>
   </main>
 </body>
 </html>`;
 }
 
-export function receiptPdfFileName(receipt: MobilePosReceipt): string {
-  const invoice = receipt.invoiceNumber.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "receipt";
-  const copy = receipt.copyType === "REPRINT" ? `reprint-${receipt.copyNumber}` : "original";
-  return `${invoice}-${copy}.pdf`;
+export function receiptPdfFileName(receipt: MobilePosPrintableReceipt): string {
+  const source = (receipt.receiptKind === "SALE" ? receipt.invoiceNumber : receipt.localReference)
+    .replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "receipt";
+  const kind = receipt.receiptKind === "SALE" ? "sale" : "collection";
+  const copy = receipt.copyType === "REPRINT" ? `reprint-${receipt.copyNumber}` : receipt.copyType === "PROVISIONAL" ? "provisional" : "original";
+  return `${source}-${kind}-${copy}.pdf`;
 }
 
 function receiptMoney(value: number, currency: string): string {
@@ -102,10 +109,5 @@ function formatReceiptDate(value: string): string {
 }
 
 function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }

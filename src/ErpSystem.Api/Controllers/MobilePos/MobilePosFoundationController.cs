@@ -329,6 +329,41 @@ public sealed class MobilePosRuntimeController : ControllerBase
         }
     }
 
+    [HttpGet("collection-receipts/{id:guid}")]
+    [Authorize(Policy = MobilePosPermissions.Access)]
+    public async Task<ActionResult<MobilePosCollectionReceiptDto>> GetCollectionReceipt(
+        Guid id,
+        [FromQuery] string installationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _receipts.GetCollectionAsync(id, installationId, cancellationToken));
+        }
+        catch (MobilePosCommandRejectedException exception)
+        {
+            return RejectedSale(exception, "Mobile POS collection receipt unavailable");
+        }
+    }
+
+    [HttpPost("collection-receipts/{id:guid}/reprint-events")]
+    [Authorize(Policy = MobilePosPermissions.Access)]
+    [Authorize(Policy = MobilePosPermissions.ReprintReceipt)]
+    public async Task<ActionResult<MobilePosCollectionReceiptDto>> RecordCollectionReceiptReprint(
+        Guid id,
+        [FromBody] MobilePosReceiptReprintRequestDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _receipts.RecordCollectionReprintAsync(id, dto, cancellationToken));
+        }
+        catch (MobilePosCommandRejectedException exception)
+        {
+            return RejectedSale(exception, "Mobile POS collection receipt reprint rejected");
+        }
+    }
+
     private BadRequestObjectResult RejectedSale(
         MobilePosCommandRejectedException exception,
         string title)

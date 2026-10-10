@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildReceiptText } from "@/src/printing/receipt-text";
-import type { MobilePosReceipt } from "@/src/types/api";
+import type { MobilePosCollectionReceipt, MobilePosReceipt } from "@/src/types/api";
 
 const receipt = {
+  receiptKind: "SALE",
   copyType: "REPRINT",
   copyNumber: 2,
   tenantName: "RHEMA Enterprise Resource Planning",
@@ -37,6 +38,29 @@ const receipt = {
   }],
 } as MobilePosReceipt;
 
+const collectionReceipt = {
+  ...receipt,
+  receiptKind: "COLLECTION",
+  receiptId: "collection-1",
+  copyType: "ORIGINAL",
+  copyNumber: 0,
+  reprintCount: 0,
+  qrReference: "RHEMA|MOBILEPOS|COLLECTION|COL-001|collection-1",
+  localReference: "COL-001",
+  totalAmount: 75,
+  wasRecordedOffline: false,
+  allocations: [{ sequence: 1, invoiceId: "invoice-1", invoiceNumber: "INV-001", amount: 75 }],
+  tenders: [{
+    sequence: 1,
+    paymentMethodCode: "CASH",
+    paymentMethodName: "Cash",
+    amount: 75,
+    customerPaymentId: "payment-1",
+    paymentNumber: "PAY-001",
+    paymentStatus: "Posted",
+  }],
+} as unknown as MobilePosCollectionReceipt;
+
 describe("Z92S receipt text", () => {
   it("renders deterministic compact text within the 32 character paper width", () => {
     const text = buildReceiptText(receipt);
@@ -51,5 +75,15 @@ describe("Z92S receipt text", () => {
 
   it("rejects unsupported paper widths", () => {
     expect(() => buildReceiptText(receipt, 12)).toThrow(/between 24 and 48/);
+  });
+
+  it("renders invoice allocations and canonical payment numbers for collections", () => {
+    const text = buildReceiptText(collectionReceipt);
+
+    expect(text).toContain("COLLECTION RECEIPT");
+    expect(text).toContain("INV-001");
+    expect(text).toContain("PAY-001");
+    expect(text).not.toContain("INV/2026/001");
+    expect(text.split("\n").every(line => line.length <= 32)).toBe(true);
   });
 });

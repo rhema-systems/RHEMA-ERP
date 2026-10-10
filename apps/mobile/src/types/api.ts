@@ -601,6 +601,7 @@ export interface MobilePosReceiptTender {
 }
 
 export interface MobilePosReceipt {
+  receiptKind: "SALE";
   receiptId: string;
   copyType: "ORIGINAL" | "REPRINT";
   copyNumber: number;
@@ -644,3 +645,101 @@ export interface MobilePosReceipt {
   lines: MobilePosReceiptLine[];
   tenders: MobilePosReceiptTender[];
 }
+
+export interface MobilePosCollectionReceiptAllocation {
+  sequence: number;
+  invoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+}
+
+export interface MobilePosCollectionReceipt {
+  receiptKind: "COLLECTION";
+  receiptId: string;
+  copyType: "ORIGINAL" | "REPRINT";
+  copyNumber: number;
+  reprintCount: number;
+  auditEventId?: string;
+  generatedAtUtc: string;
+  reprintReason?: string;
+  qrReference: string;
+  tenantId: string;
+  tenantCode: string;
+  tenantName: string;
+  storeId: string;
+  storeCode: string;
+  storeName: string;
+  locationName: string;
+  tillId: string;
+  tillNumber: string;
+  tillName: string;
+  tillSessionId: string;
+  tillSessionNumber: string;
+  businessDate: string;
+  deviceId: string;
+  deviceName: string;
+  cashierUserId: string;
+  cashierName: string;
+  businessPartnerId: string;
+  businessPartnerRoleId: string;
+  customerCode: string;
+  customerName: string;
+  localReference: string;
+  occurredAtUtc: string;
+  currencyCode: string;
+  totalAmount: number;
+  wasRecordedOffline: boolean;
+  allocations: MobilePosCollectionReceiptAllocation[];
+  tenders: MobilePosReceiptTender[];
+}
+
+export interface MobilePosProvisionalCollectionReceiptTender {
+  sequence: number;
+  paymentMethodCode: string;
+  paymentMethodName: string;
+  amount: number;
+  externalReference?: string;
+}
+
+export interface MobilePosProvisionalCollectionReceipt {
+  receiptKind: "COLLECTION_PROVISIONAL";
+  receiptId: string;
+  copyType: "PROVISIONAL";
+  copyNumber: 0;
+  reprintCount: 0;
+  generatedAtUtc: string;
+  qrReference: string;
+  tenantId: string;
+  tenantCode: string;
+  tenantName: string;
+  storeId: string;
+  storeCode: string;
+  storeName: string;
+  locationName: string;
+  tillId: string;
+  tillNumber: string;
+  tillName: string;
+  tillSessionId: string;
+  tillSessionNumber: string;
+  businessDate: string;
+  deviceId: string;
+  deviceName: string;
+  cashierUserId: string;
+  cashierName: string;
+  businessPartnerId: string;
+  businessPartnerRoleId: string;
+  customerCode: string;
+  customerName: string;
+  localReference: string;
+  occurredAtUtc: string;
+  currencyCode: string;
+  totalAmount: number;
+  wasRecordedOffline: true;
+  allocations: MobilePosCollectionReceiptAllocation[];
+  tenders: MobilePosProvisionalCollectionReceiptTender[];
+}
+
+export type MobilePosPrintableReceipt =
+  | MobilePosReceipt
+  | MobilePosCollectionReceipt
+  | MobilePosProvisionalCollectionReceipt;

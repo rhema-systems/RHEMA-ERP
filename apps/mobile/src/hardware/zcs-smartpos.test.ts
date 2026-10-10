@@ -56,6 +56,7 @@ describe("ZCS SmartPos adapters", () => {
   it("renders and submits a canonical receipt to the built-in printer", async () => {
     const native = nativeBridge();
     const receipt = {
+      receiptKind: "SALE",
       copyType: "ORIGINAL",
       copyNumber: 0,
       tenantName: "RHEMA ERP",

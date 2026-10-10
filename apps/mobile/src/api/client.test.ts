@@ -318,7 +318,7 @@ describe("Mobile POS API client", () => {
     });
   });
 
-  it("posts customer collections to the governed Mobile POS collection endpoint", async () => {
+  it("posts customer collections and uses the governed collection receipt endpoints", async () => {
     const fetchMock = vi.fn(async (_input: string | URL | Request) => jsonResponse({
       collectionId: "collection-1",
       allocations: [],
@@ -336,6 +336,12 @@ describe("Mobile POS API client", () => {
       allocations: [{ invoiceId: "invoice-1", amount: 75 }],
       tenders: [{ paymentMethodId: "cash-1", amount: 50 }, { paymentMethodId: "card-1", amount: 25 }],
     });
+    await mobileApi.getCollectionReceipt("collection/1", "install/01");
+    await mobileApi.recordCollectionReceiptReprint("collection/1", {
+      installationId: "install/01",
+      clientEventId: "collection-reprint-1",
+      reason: "Customer copy",
+    });
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url.toString()).toBe("https://erp.example.com/api/mobile-pos/v1/collections");
@@ -344,6 +350,19 @@ describe("Mobile POS API client", () => {
       clientMutationId: "collection-mutation-1",
       allocations: [{ invoiceId: "invoice-1", amount: 75 }],
       tenders: [{ paymentMethodId: "cash-1", amount: 50 }, { paymentMethodId: "card-1", amount: 25 }],
+    });
+    expect(fetchMock.mock.calls[1]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/collection-receipts/collection%2F1?installationId=install%2F01",
+    );
+    const [, reprintInit] = fetchMock.mock.calls[2] as unknown as [string, RequestInit];
+    expect(fetchMock.mock.calls[2]?.[0].toString()).toBe(
+      "https://erp.example.com/api/mobile-pos/v1/collection-receipts/collection%2F1/reprint-events",
+    );
+    expect(reprintInit.method).toBe("POST");
+    expect(JSON.parse(String(reprintInit.body))).toEqual({
+      installationId: "install/01",
+      clientEventId: "collection-reprint-1",
+      reason: "Customer copy",
     });
   });
 

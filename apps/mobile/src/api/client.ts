@@ -32,6 +32,7 @@ import type {
   MobilePosSyncPushResult,
   MobilePosReceipt,
   MobilePosReceiptReprintRequest,
+  MobilePosCollectionReceipt,
   MobilePosHeartbeatRequest,
   OutstandingInvoice,
   SelectTenantResponse,
@@ -248,6 +249,13 @@ export const mobileApi = {
   ),
   recordReceiptReprint: (saleId: string, request: MobilePosReceiptReprintRequest) => authorizedRequest<MobilePosReceipt>(
     `/api/mobile-pos/v1/receipts/${encodeURIComponent(saleId)}/reprint-events`,
+    { method: "POST", body: JSON.stringify(request) },
+  ),
+  getCollectionReceipt: (collectionId: string, installationId: string) => authorizedRequest<MobilePosCollectionReceipt>(
+    `/api/mobile-pos/v1/collection-receipts/${encodeURIComponent(collectionId)}?installationId=${encodeURIComponent(installationId)}`,
+  ),
+  recordCollectionReceiptReprint: (collectionId: string, request: MobilePosReceiptReprintRequest) => authorizedRequest<MobilePosCollectionReceipt>(
+    `/api/mobile-pos/v1/collection-receipts/${encodeURIComponent(collectionId)}/reprint-events`,
     { method: "POST", body: JSON.stringify(request) },
   ),
   requestEnrollment: (request: DeviceEnrollmentRequest) => authorizedRequest<MobilePosDevice>(

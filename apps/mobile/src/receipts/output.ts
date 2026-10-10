@@ -4,9 +4,9 @@ import * as Sharing from "expo-sharing";
 import { isZcsSmartPosAdapter, ZcsReceiptPrinterAdapter } from "@/src/hardware/zcs-smartpos";
 import type { ReceiptPrintResult } from "@/src/printing/receipt-printer";
 import { buildReceiptHtml, receiptPdfFileName } from "@/src/receipts/render";
-import type { MobilePosReceipt } from "@/src/types/api";
+import type { MobilePosPrintableReceipt } from "@/src/types/api";
 
-export async function printReceiptAsync(receipt: MobilePosReceipt, configuredAdapterKey?: string): Promise<ReceiptPrintResult> {
+export async function printReceiptAsync(receipt: MobilePosPrintableReceipt, configuredAdapterKey?: string): Promise<ReceiptPrintResult> {
   if (isZcsSmartPosAdapter(configuredAdapterKey)) {
     return new ZcsReceiptPrinterAdapter().print(receipt);
   }
@@ -14,7 +14,7 @@ export async function printReceiptAsync(receipt: MobilePosReceipt, configuredAda
   return { adapterKey: "system-print", adapterLabel: "Android system print" };
 }
 
-export async function persistReceiptPdfAsync(receipt: MobilePosReceipt): Promise<string> {
+export async function persistReceiptPdfAsync(receipt: MobilePosPrintableReceipt): Promise<string> {
   const generated = await Print.printToFileAsync({ html: buildReceiptHtml(receipt) });
   const receiptsDirectory = new Directory(Paths.document, "receipts");
   receiptsDirectory.create({ intermediates: true, idempotent: true });
@@ -26,7 +26,7 @@ export async function persistReceiptPdfAsync(receipt: MobilePosReceipt): Promise
   return target.uri;
 }
 
-export async function shareReceiptPdfAsync(receipt: MobilePosReceipt): Promise<string> {
+export async function shareReceiptPdfAsync(receipt: MobilePosPrintableReceipt): Promise<string> {
   if (!await Sharing.isAvailableAsync()) {
     throw new Error("Receipt sharing is not available on this device.");
   }
@@ -35,7 +35,7 @@ export async function shareReceiptPdfAsync(receipt: MobilePosReceipt): Promise<s
   await Sharing.shareAsync(uri, {
     mimeType: "application/pdf",
     UTI: "com.adobe.pdf",
-    dialogTitle: `Share receipt ${receipt.invoiceNumber}`,
+    dialogTitle: `Share receipt ${receipt.receiptKind === "SALE" ? receipt.invoiceNumber : receipt.localReference}`,
   });
   return uri;
 }
