@@ -1011,6 +1011,18 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankAccountService, ErpSystem.Api.Services.Finance.Cash.BankAccountService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankingSettlementService, ErpSystem.Api.Services.Finance.Cash.BankingSettlementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICashierTillService, ErpSystem.Api.Services.Finance.Cash.CashierTillService>();
+            services.AddSingleton<ErpSystem.Api.Services.MobilePos.IMobilePosOfflineGrantTokenService, ErpSystem.Api.Services.MobilePos.MobilePosOfflineGrantTokenService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosFoundationService, ErpSystem.Api.Services.MobilePos.MobilePosFoundationService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosFinanceReadService, ErpSystem.Api.Services.MobilePos.MobilePosFinanceReadService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosCheckoutReadService, ErpSystem.Api.Services.MobilePos.MobilePosCheckoutReadService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosMutationExecutionService, ErpSystem.Api.Services.MobilePos.MobilePosMutationExecutionService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosOfflineGrantValidationService, ErpSystem.Api.Services.MobilePos.MobilePosOfflineGrantValidationService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosSaleService, ErpSystem.Api.Services.MobilePos.MobilePosSaleService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosCollectionService, ErpSystem.Api.Services.MobilePos.MobilePosCollectionService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosSyncService, ErpSystem.Api.Services.MobilePos.MobilePosSyncService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosReceiptService, ErpSystem.Api.Services.MobilePos.MobilePosReceiptService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosTillSessionService, ErpSystem.Api.Services.MobilePos.MobilePosTillSessionService>();
+            services.AddScoped<ErpSystem.Api.Services.MobilePos.IMobilePosTillFinalizationGuard, ErpSystem.Api.Services.MobilePos.MobilePosTillFinalizationGuard>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReportExportService, ErpSystem.Api.Services.Finance.Reporting.FinanceReportExportService>();
             // FR-RP-010 deliberately extends the shared report/template model.
             // The processor is scoped because each scheduler pass owns one EF
@@ -1725,6 +1737,21 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 authorizationBuilder.AddPolicy(permission.Name, policy =>
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
+
+            foreach (var permission in MobilePosPermissions.All.Where(permission => permission.Name != MobilePosPermissions.ViewStore))
+            {
+                authorizationBuilder.AddPolicy(permission.Name, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Name)));
+            }
+
+            // Store managers and device approvers need the same tenant-scoped reference and
+            // store/till reads as a viewer. These remain capabilities assigned to dynamic roles;
+            // no role name is embedded in the policy.
+            authorizationBuilder.AddPolicy(MobilePosPermissions.ViewStore, policy =>
+                policy.Requirements.Add(new PermissionRequirement(
+                    MobilePosPermissions.ViewStore,
+                    MobilePosPermissions.ManageStore,
+                    MobilePosPermissions.ApproveDevice)));
 
             // CRM follows the same capability ladder as the other governed modules. Roles are
             // dynamic and are authorized by their assigned permissions; no Sales role name is

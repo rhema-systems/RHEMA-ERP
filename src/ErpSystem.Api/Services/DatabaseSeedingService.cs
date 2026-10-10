@@ -11257,6 +11257,13 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
+            .Concat(MobilePosPermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
             .Concat(PropertyManagementPermissions.All.Select(permission => new
             {
                 permission.Name,

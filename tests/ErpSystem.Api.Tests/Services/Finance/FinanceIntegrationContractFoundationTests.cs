@@ -87,14 +87,20 @@ public sealed class FinanceIntegrationContractFoundationTests
         sales.PostingSourceModule.Should().Be("AR");
         sales.DefaultState.Should().Be(FinanceDimensionCertificationState.CaptureOptional);
         sales.Notes.Should().Contain("contract only");
-        var customerPayment = routes.Should()
-            .ContainSingle(route => route.DocumentType == "CustomerPayment")
-            .Which;
+        var customerPayment = routes.Single(route => route.Id == FinanceDimensionRouteId.FinanceArCustomerPayment);
         customerPayment.Id.Should().Be(FinanceDimensionRouteId.FinanceArCustomerPayment);
         customerPayment.ProducerModule.Should().Be("Finance");
         customerPayment.PostingSourceModule.Should().Be("AR");
         customerPayment.SourceRoute.Should().Be("finance.ar.customer-payments.manual");
         customerPayment.Owner.Should().Be("Finance / Accounts Receivable");
+        var mobileInvoice = FinanceExternalProducerContractCatalog.GetRequired(
+            FinanceExternalProducerContractId.MobilePosCustomerInvoice).Definition;
+        var mobilePayment = FinanceExternalProducerContractCatalog.GetRequired(
+            FinanceExternalProducerContractId.MobilePosCustomerPayment).Definition;
+        mobileInvoice.ProducerModule.Should().Be("MobilePOS");
+        mobileInvoice.DocumentType.Should().Be("CustomerInvoice");
+        mobilePayment.ProducerModule.Should().Be("MobilePOS");
+        mobilePayment.DocumentType.Should().Be("CustomerPayment");
     }
 
     [Fact]

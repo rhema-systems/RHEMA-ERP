@@ -322,6 +322,7 @@ namespace ErpSystem.Api.Models
     public class SelectTenantResponse
     {
         public required string Token { get; set; }
+        public required string RefreshToken { get; set; }
         public DateTime ExpiresAt { get; set; }
         public required UserInfo User { get; set; }
     }

@@ -16,6 +16,7 @@ public static class FinanceModuleLockCatalog
     public const string Estate = "ESTATE";
     public const string Legal = "LEGAL";
     public const string Maintenance = "MAINT";
+    public const string MobilePos = "MOBILEPOS";
 
     public sealed record Definition(
         string Code,
@@ -53,7 +54,10 @@ public static class FinanceModuleLockCatalog
             "fa-scale-balanced", 8),
         new(Maintenance, "Maintenance", "Maintenance",
             "Accounting documents originating from billable maintenance work orders.",
-            "fa-screwdriver-wrench", 9)
+            "fa-screwdriver-wrench", 9),
+        new(MobilePos, "Mobile POS", "Sales",
+            "Customer invoices and receipts originating from governed Mobile POS stores and tills.",
+            "fa-mobile-screen-button", 10)
     ];
 
     private static readonly IReadOnlyDictionary<string, Definition> ByCode = Definitions
@@ -107,6 +111,12 @@ public static class FinanceModuleLockCatalog
         if (source.Equals("SALES", StringComparison.OrdinalIgnoreCase))
         {
             return Sales;
+        }
+
+        if (source.Equals("MOBILEPOS", StringComparison.OrdinalIgnoreCase)
+            || source.Equals("MOBILE POS", StringComparison.OrdinalIgnoreCase))
+        {
+            return MobilePos;
         }
 
         // Existing Finance services use several subledger source values. Unknown legacy

@@ -3032,7 +3032,8 @@ public class FinanceApprovalsController : ControllerBase
             FinanceDimensionRouteId.FinanceArCustomerInvoice,
             FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice,
             FinanceDimensionRouteId.InventoryDisposalAuctionInvoice,
-            FinanceDimensionRouteId.SalesOrderCustomerInvoice
+            FinanceDimensionRouteId.SalesOrderCustomerInvoice,
+            FinanceDimensionRouteId.MobilePosCustomerInvoice
         };
         var routes = await _db.FinanceSourceDimensionAssignments.AsNoTracking()
             .Where(item =>

@@ -16,7 +16,14 @@ export default function AdministrationLayout({
   let requiredPermissions: string[] | undefined;
   let requiredRoles: string[] | undefined;
   let accessMode: 'all' | 'any' = 'all';
-  if (pathname.startsWith('/administration/finance')) {
+  if (pathname.startsWith('/administration/mobile-pos')) {
+    requiredPermissions = [
+      'MobilePOS.Store.View',
+      'MobilePOS.Store.Manage',
+      'MobilePOS.Device.Approve',
+    ];
+    accessMode = 'any';
+  } else if (pathname.startsWith('/administration/finance')) {
     requiredPermissions = ['Finance.Admin'];
   } else if (pathname.startsWith('/administration/document-management')) {
     requiredPermissions = ['Finance.Admin'];

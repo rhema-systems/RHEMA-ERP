@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Shared;
 
 namespace ErpSystem.Core.Services.Projects;
@@ -22,6 +23,8 @@ internal enum ProjectAccessOperation
 
 public partial class ProjectService
 {
+    private Task<HashSet<Guid>>? _pendingBoqApprovalProjectIdsTask;
+
     private static readonly HashSet<string> ManagementProjectRoles =
     [
         "owner",
@@ -115,7 +118,12 @@ public partial class ProjectService
         var isFinanceContributor = membershipRoles.Any(IsFinancialProjectRole);
         var isGovernanceContributor = membershipRoles.Any(IsGovernanceProjectRole);
         var hasMembership = membershipRoles.Count > 0;
-        var canView = isLead || hasMembership || isExecutionContributor;
+        var hasPendingBoqApproval = !isLead
+            && !hasMembership
+            && !isExecutionContributor
+            && operation is ProjectAccessOperation.View or ProjectAccessOperation.ApproveWorkflow
+            && await HasPendingBoqApprovalForProjectAsync(project.Id);
+        var canView = isLead || hasMembership || isExecutionContributor || hasPendingBoqApproval;
 
         var allowed = operation switch
         {
@@ -129,12 +137,11 @@ public partial class ProjectService
             ProjectAccessOperation.ManageGovernance => !IsReadOnlyUser() && (isLead || membershipRoles.Any(IsManagementProjectRole) || isGovernanceContributor),
             ProjectAccessOperation.ManageExternalAccess => !IsReadOnlyUser() && (isLead || membershipRoles.Any(IsManagementProjectRole)),
             ProjectAccessOperation.SubmitForApproval => !IsReadOnlyUser() && (isLead || membershipRoles.Any(IsManagementProjectRole)),
-            // A configured QS project workflow may assign an independent QS
-            // approver who is not a project member. Keep the workflow engine's
-            // CanUserApproveAsync check as the final gate; this access check
-            // only lets that assigned approver reach it.
-            ProjectAccessOperation.ApproveWorkflow => canView ||
-                _currentUserProvider.HasRole("TDC_SUPERVISING_QUANTITY_SURVEYOR"),
+            // The shared workflow is the authority for the current approver.
+            // This permits a directly or role-assigned BOQ reviewer to reach
+            // the project without granting every user with a similarly named
+            // application role access to unrelated projects.
+            ProjectAccessOperation.ApproveWorkflow => canView,
             _ => false
         };
 
@@ -183,7 +190,42 @@ public partial class ProjectService
             x.TenantId == tenantId && x.UserId == userId);
         ids.UnionWith(expenses.Select(x => x.ProjectId));
 
+        ids.UnionWith(await GetCurrentUserPendingBoqApprovalProjectIdsAsync());
+
         return ids;
+    }
+
+    private async Task<bool> HasPendingBoqApprovalForProjectAsync(Guid projectId)
+        => (await GetCurrentUserPendingBoqApprovalProjectIdsAsync()).Contains(projectId);
+
+    private Task<HashSet<Guid>> GetCurrentUserPendingBoqApprovalProjectIdsAsync()
+        => _pendingBoqApprovalProjectIdsTask ??= LoadCurrentUserPendingBoqApprovalProjectIdsAsync();
+
+    private async Task<HashSet<Guid>> LoadCurrentUserPendingBoqApprovalProjectIdsAsync()
+    {
+        var approvals = await _workflowService.GetPendingApprovalsAsync(_currentUserProvider.UserId)
+            ?? [];
+        var boqVersionIds = approvals
+            .Where(item => string.Equals(
+                item.EntityType,
+                QuantitySurveyWorkflowBindingRegistry.Boq,
+                StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.EntityId)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToHashSet();
+        if (boqVersionIds.Count == 0)
+        {
+            return [];
+        }
+
+        var tenantId = _currentUserProvider.TenantId;
+        var versions = await _unitOfWork.Repository<ProjectBoqVersion>().FindAsync(version =>
+            version.TenantId == tenantId
+            && !version.IsDeleted
+            && version.Status == ProjectBoqVersionStatuses.PendingApproval
+            && boqVersionIds.Contains(version.Id));
+        return versions.Select(version => version.ProjectId).ToHashSet();
     }
 
     private async Task<List<Project>> GetAccessibleProjectsAsync(string? search = null, string? status = null, Guid? projectTypeId = null, Guid? portfolioId = null, Guid? programId = null, int take = 1000)

@@ -43,6 +43,17 @@
     <Compile Include="Services\Sms\MNotifySmsGatewayTests.cs" />
     <Compile Include="Services\ApplicationEnvironmentServiceTests.cs" />
     <Compile Include="Services\Identity\UserServiceTenantScopeTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosFoundationServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosFinanceReadServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosCheckoutReadServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosMutationExecutionServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosMutationExecutionRelationalTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosSaleServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosCollectionServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosOfflineGrantValidationServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosSyncServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosReceiptServiceTests.cs" />
+    <Compile Include="Services\MobilePos\MobilePosTillSessionServiceTests.cs" />
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
@@ -61,6 +72,7 @@
     <Compile Include="Controllers\Inventory\StockMovementCurrencyTests.cs" />
     <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
     <Compile Include="Authorization\CrmPermissionAuthorizationTests.cs" />
+    <Compile Include="Authorization\MobilePosFoundationTests.cs" />
     <Compile Include="Configuration\StartupInitializationPolicyTests.cs" />
     <Compile Include="Configuration\CandidatePortalOptionsTests.cs" />
     <Compile Include="Authorization\StructuredAuthorizationMiddlewareResultHandlerTests.cs" />

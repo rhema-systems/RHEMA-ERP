@@ -23,6 +23,7 @@ public sealed class FinanceApprovalInvoiceProducerRouteTests
     [InlineData(FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice)]
     [InlineData(FinanceDimensionRouteId.InventoryDisposalAuctionInvoice)]
     [InlineData(FinanceDimensionRouteId.SalesOrderCustomerInvoice)]
+    [InlineData(FinanceDimensionRouteId.MobilePosCustomerInvoice)]
     public async Task FinalApproval_ShouldRestoreTrustedCustomerInvoiceProducerRoute(
         FinanceDimensionRouteId routeId)
     {

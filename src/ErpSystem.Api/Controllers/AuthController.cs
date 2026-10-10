@@ -1518,6 +1518,17 @@ namespace ErpSystem.Api.Controllers
                     ? await _tokenService.GenerateTokenAsync(user)
                     : await _tokenService.GenerateTokenAsync(user, sessionId);
 
+                // Refresh tokens are tenant scoped. Issue one for the selected tenant so a later
+                // refresh cannot silently fall back to the tenant selected at initial login.
+                var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+                var userAgent = Request.Headers["User-Agent"].FirstOrDefault() ?? "Unknown";
+                var refreshToken = await _refreshTokenService.CreateRefreshTokenAsync(
+                    user.Id,
+                    tenant.Id,
+                    ipAddress,
+                    userAgent,
+                    GenerateDeviceFingerprint(ipAddress, userAgent));
+
                 // Extract JTI from the new token and update the current session
                 try
                 {
@@ -1599,6 +1610,7 @@ namespace ErpSystem.Api.Controllers
                 var response = new SelectTenantResponse
                 {
                     Token = newToken,
+                    RefreshToken = refreshToken.TokenHash,
                     ExpiresAt = GetJwtExpiryUtc(newToken),
                     User = new UserInfo
                     {

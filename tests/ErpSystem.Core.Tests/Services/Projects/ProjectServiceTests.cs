@@ -4082,6 +4082,227 @@ public class ProjectServiceTests
     }
 
     [Fact]
+    public async Task GetProjectsAsync_ShouldIncludeProjectAssignedForPendingBoqApproval()
+    {
+        var tenantId = Guid.NewGuid();
+        var reviewerId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-REVIEW",
+            Title = "BOQ review project",
+            CreatedById = Guid.NewGuid()
+        };
+        var version = new ProjectBoqVersion
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Status = ProjectBoqVersionStatuses.PendingApproval,
+            ApprovalStatus = ProjectBoqVersionStatuses.PendingApproval,
+            ChangeSummary = "Pending independent review",
+            SnapshotHash = new string('A', 64),
+            ActorRoles = string.Empty,
+            CorrelationId = "pending-review"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, reviewerId);
+        fixture.SetRoles();
+        fixture.Projects.Add(project);
+        fixture.ProjectBoqVersions.Add(version);
+        fixture.WorkflowService
+            .Setup(service => service.GetPendingApprovalsAsync(reviewerId))
+            .ReturnsAsync([
+                new WorkflowApprovalItem
+                {
+                    EntityId = version.Id,
+                    EntityType = QuantitySurveyWorkflowBindingRegistry.Boq,
+                    CurrentStep = "Technical review"
+                }
+            ]);
+
+        var result = await fixture.CreateService().GetProjectsAsync(1, 10);
+
+        result.Items.Should().ContainSingle(item => item.Id == project.Id);
+        result.TotalCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetProjectWorkspaceAsync_ShouldAllowCurrentBoqWorkflowReviewerWithoutMembership()
+    {
+        var tenantId = Guid.NewGuid();
+        var reviewerId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-WORKSPACE",
+            Title = "BOQ reviewer workspace",
+            CreatedById = Guid.NewGuid()
+        };
+        var version = new ProjectBoqVersion
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Status = ProjectBoqVersionStatuses.PendingApproval,
+            ApprovalStatus = ProjectBoqVersionStatuses.PendingApproval,
+            ChangeSummary = "Pending independent review",
+            SnapshotHash = new string('B', 64),
+            ActorRoles = string.Empty,
+            CorrelationId = "workspace-review"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, reviewerId);
+        fixture.SetRoles();
+        fixture.Projects.Add(project);
+        fixture.ProjectBoqVersions.Add(version);
+        fixture.WorkflowService
+            .Setup(service => service.GetPendingApprovalsAsync(reviewerId))
+            .ReturnsAsync([
+                new WorkflowApprovalItem
+                {
+                    EntityId = version.Id,
+                    EntityType = QuantitySurveyWorkflowBindingRegistry.Boq,
+                    CurrentStep = "Technical review"
+                }
+            ]);
+
+        var result = await fixture.CreateService().GetProjectWorkspaceAsync(project.Id);
+
+        result.Should().NotBeNull();
+        result!.Project.Id.Should().Be(project.Id);
+        fixture.WorkflowService.Verify(service => service.GetPendingApprovalsAsync(reviewerId), Times.Once);
+    }
+
+    [Fact]
+    public async Task ApproveProjectBoqVersionAsync_ShouldAllowAssignedReviewerWithoutMembership()
+    {
+        var tenantId = Guid.NewGuid();
+        var reviewerId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-APPROVER",
+            Title = "Assigned BOQ approval",
+            CreatedById = reviewerId
+        };
+        var package = new ProjectPackage
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Code = "WP-REVIEW",
+            Name = "Review works",
+            Currency = "GHS"
+        };
+        var line = new ProjectBoqItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            ProjectPackageId = package.Id,
+            VersionLineKey = Guid.NewGuid(),
+            LineNumber = "1",
+            ItemType = ProjectBoqItemTypes.Item,
+            Description = "Reviewable work",
+            Quantity = 1m,
+            UnitOfMeasure = "item",
+            UnitRate = 100m,
+            Currency = "GHS"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, reviewerId);
+        fixture.SetRoles();
+        fixture.Projects.Add(project);
+        fixture.ProjectPackages.Add(package);
+        fixture.ProjectBoqItems.Add(line);
+
+        var preparationService = fixture.CreateService();
+        var workspace = await preparationService.GetProjectBoqVersionWorkspaceAsync(project.Id);
+        var created = await preparationService.CreateProjectBoqVersionAsync(project.Id, new CreateProjectBoqVersionDto
+        {
+            VersionType = QuantitySurveyBoqVersionType.Original,
+            ExpectedWorkingSetHash = workspace.WorkingSetHash,
+            ChangeSummary = "Submit for independent review"
+        }, "qs-reviewer-access-create");
+        var version = fixture.ProjectBoqVersions.Single(item => item.Id == created.Id);
+        version.Status = ProjectBoqVersionStatuses.PendingApproval;
+        version.ApprovalStatus = ProjectBoqVersionStatuses.PendingApproval;
+        project.CreatedById = Guid.NewGuid();
+
+        fixture.WorkflowService
+            .Setup(service => service.GetPendingApprovalsAsync(reviewerId))
+            .ReturnsAsync([
+                new WorkflowApprovalItem
+                {
+                    EntityId = version.Id,
+                    EntityType = QuantitySurveyWorkflowBindingRegistry.Boq,
+                    CurrentStep = "Technical review"
+                }
+            ]);
+        fixture.WorkflowIntegrationService
+            .Setup(service => service.CanUserApproveAsync(
+                QuantitySurveyWorkflowBindingRegistry.Boq,
+                version.Id,
+                reviewerId))
+            .ReturnsAsync(true);
+        fixture.WorkflowIntegrationService
+            .Setup(service => service.ProcessApprovalAsync(
+                QuantitySurveyWorkflowBindingRegistry.Boq,
+                version.Id,
+                reviewerId,
+                "Approve",
+                "Reviewed"))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.InProgress,
+                    WorkflowInstanceId = Guid.NewGuid()
+                },
+                WorkflowOutcome.Pending));
+
+        var result = await fixture.CreateService().ApproveProjectBoqVersionAsync(
+            project.Id,
+            version.Id,
+            reviewerId,
+            "Reviewed",
+            "qs-reviewer-access-approve");
+
+        result.Status.Should().Be(ProjectBoqVersionStatuses.PendingApproval);
+        fixture.WorkflowIntegrationService.Verify(service => service.ProcessApprovalAsync(
+            QuantitySurveyWorkflowBindingRegistry.Boq,
+            version.Id,
+            reviewerId,
+            "Approve",
+            "Reviewed"), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetProjectWorkspaceAsync_ShouldRejectUnassignedNamedQsRole()
+    {
+        var tenantId = Guid.NewGuid();
+        var reviewerId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-NOT-ASSIGNED",
+            Title = "Unassigned project",
+            CreatedById = Guid.NewGuid()
+        };
+        var fixture = new ProjectServiceFixture(tenantId, reviewerId);
+        fixture.SetRoles("TDC_SUPERVISING_QUANTITY_SURVEYOR");
+        fixture.Projects.Add(project);
+        fixture.WorkflowService
+            .Setup(service => service.GetPendingApprovalsAsync(reviewerId))
+            .ReturnsAsync([]);
+
+        await FluentActions.Invoking(() => fixture.CreateService().GetProjectWorkspaceAsync(project.Id))
+            .Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
     public async Task HasProjectAccessAsync_ShouldAuthorizeThroughTheLightweightProjectBoundary()
     {
         var tenantId = Guid.NewGuid();

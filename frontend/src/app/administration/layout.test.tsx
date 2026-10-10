@@ -107,4 +107,23 @@ describe('QS administration route grants', () => {
     );
     expect(screen.getByText('Denied')).toBeTruthy();
   });
+
+  it.each([
+    'MobilePOS.Store.View',
+    'MobilePOS.Store.Manage',
+    'MobilePOS.Device.Approve',
+  ])('admits Mobile POS administration with %s', permission => {
+    state.path = '/administration/mobile-pos';
+    state.permissions = [permission];
+    render(<AdministrationLayout>Mobile POS workspace</AdministrationLayout>);
+    expect(screen.getByText('Mobile POS workspace')).toBeTruthy();
+  });
+
+  it('denies Mobile POS administration without a Mobile POS permission', () => {
+    state.path = '/administration/mobile-pos';
+    state.permissions = ['settings.read'];
+    state.roles = ['Administrator'];
+    render(<AdministrationLayout>Mobile POS workspace</AdministrationLayout>);
+    expect(screen.getByText('Denied')).toBeTruthy();
+  });
 });
