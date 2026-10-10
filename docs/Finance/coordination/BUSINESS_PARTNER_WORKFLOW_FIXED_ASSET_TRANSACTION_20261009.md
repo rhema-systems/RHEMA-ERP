@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-10-A
-integration_status: ready
+integration_status: integrated
 integration_decision: include
 candidate_branch: codex/business-partner-workflow-fixed-asset-transaction
 candidate_head: da2f39e4fc42c4e6db272bc003d3026db8deda83
@@ -9,7 +9,7 @@ target_ref: origin/master
 depends_on: none
 migration_status: 20261009143000 locally applied; remote unapplied
 verification_status: focused checks passed
-integration_commit: pending
+integration_commit: 74bb13b6f
 pull_request: pending
 ---
 
@@ -70,3 +70,9 @@ Changed files:
 - Authorized: local implementation, tests, local commits, and the 2026-10-10 migration application to local `RHEMAERP_BOOKV2_UAT_20260922`.
 - Authorized on 2026-10-10: push and consolidated pull-request creation for the outstanding code and documentation changes.
 - Not authorized: changing any remote database, merge, deployment, or changing remote runtime state.
+
+## Integration outcome
+
+- Integrated onto `codex/finance-uat-consolidated-20261010` from current `origin/master` without conflicts.
+- Integration content head before outcome-ledger updates: `74bb13b6f`.
+- Combined verification and pull-request details are recorded in `FIN_UAT_2026_10_10_A_CONSOLIDATION_LEDGER.md`.

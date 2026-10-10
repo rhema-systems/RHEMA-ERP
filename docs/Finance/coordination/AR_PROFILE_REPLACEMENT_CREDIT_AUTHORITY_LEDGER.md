@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-10-A
-integration_status: ready
+integration_status: integrated
 integration_decision: include
 candidate_branch: codex/ar-profile-replacement-credit-authority
 candidate_head: cfd5ab2ecb1a8c386dd3118f6ad711c6ff36933c
@@ -9,7 +9,7 @@ target_ref: origin/master
 depends_on: merged PR #384
 migration_status: no-new-migration; existing repository migrations applied locally only
 verification_status: focused checks passed; browser UAT and full type-check environment follow-up remain
-integration_commit: pending
+integration_commit: 74bb13b6f
 pull_request: pending
 ---
 
@@ -91,3 +91,9 @@ Resolve the UAT `PROFILE_EFFECTIVE_PERIOD_OVERLAP` failure when approving a late
 - Push and pull-request creation were authorized for the outstanding consolidated changes on 10 Oct 2026.
 - Backup plus application of the eight already-pending repository migrations to the named local BOOKV2 UAT database was authorized and completed on 09 Oct 2026.
 - Merge, deployment, any further database mutation, and remote-server changes remain unauthorized.
+
+## Integration outcome
+
+- Integrated onto `codex/finance-uat-consolidated-20261010` from current `origin/master` without conflicts.
+- Integration content head before outcome-ledger updates: `74bb13b6f`.
+- Combined verification and pull-request details are recorded in `FIN_UAT_2026_10_10_A_CONSOLIDATION_LEDGER.md`.

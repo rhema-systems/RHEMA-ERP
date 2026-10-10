@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-10-A
-integration_status: ready
+integration_status: integrated
 integration_decision: include
 candidate_branch: codex/business-partner-workflow-fixed-asset-transaction
 candidate_head: da2f39e4fc42c4e6db272bc003d3026db8deda83
@@ -9,7 +9,7 @@ target_ref: origin/master
 depends_on: none
 migration_status: none
 verification_status: focused checks passed; full type-check blocked by local dependency resolution
-integration_commit: pending
+integration_commit: 74bb13b6f
 pull_request: pending
 ---
 
@@ -116,3 +116,9 @@ pull_request: pending
 - Authorized: local date-label/report corrections, payment-on-account implementation, focused tests, investigation, and implementation planning.
 - Authorized on 2026-10-10: push and consolidated pull-request creation for the outstanding code and documentation changes.
 - Not authorized: database changes, migrations, merge, or deployment.
+
+## Integration outcome
+
+- Integrated onto `codex/finance-uat-consolidated-20261010` from current `origin/master` without conflicts.
+- Integration content head before outcome-ledger updates: `74bb13b6f`.
+- Combined verification and pull-request details are recorded in `FIN_UAT_2026_10_10_A_CONSOLIDATION_LEDGER.md`.
