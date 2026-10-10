@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `80c7df91da678203ff281575198cd6b23a842402`
+- Current implementation checkpoint: `81a60cab534742011977f75c7fec260f99577237`
 - Pull request: not created
 
 ## Source baselines
@@ -99,6 +99,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `f26ee11d155` - Online partial and multi-invoice customer collection, split-tender canonical payments, durable collection envelopes, migration, mobile flow, and focused tests.
 - `333d848a522` - Customer-collection implementation checkpoint and Finance coordination evidence.
 - `80c7df91da6` - Expanded Mobile POS acceptance contract for the fifth migration and customer-collection tables.
+- `81a60cab534` - Signed offline customer collections, scoped invoice/bank caches, canonical receipt synchronization, sixth migration, and focused coverage.
 
 ## Phase 2 application foundation
 
@@ -334,6 +335,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The complete migration-aware API Release build passed with zero errors after preserving 93 EF models, 367,956 ordered statements, and 9,069 distinct statements. Existing repository warnings and ImageSharp advisories remained warnings.
 - The 14,649-byte idempotent SQL from `20261010003147_LinkMobilePosTillCloseBankDeposit` to `20261010042645_AddMobilePosCustomerCollections` contains the three collection tables, mutation-receipt link, scoped indexes, foreign keys, check constraints, and collection migration-history marker. It was generated and inspected only; no database was changed.
 - The consolidated `acceptance:mobile-pos` gate passed on checkpoint `80c7df91da6` using the already restored mobile and HQ lockfile dependencies. It passed the Mobile and HQ TypeScript contracts, 87/87 mobile tests, Expo Doctor 18/18, Android Hermes export, the migration-aware API Release build, 68/68 focused API tests, idempotent SQL generation for all five Mobile POS migrations, and all 12 migration-content markers. Evidence is under the ignored `.artifacts/mobile-pos/acceptance/20261010-044637/` directory. Proprietary Z92S packaging and native Android compilation were not requested in this run and remain governed by their external approval and toolchain gates.
+- The exact-commit `acceptance:mobile-pos -SkipInstall` gate passed on checkpoint `81a60cab534` after the sixth migration. It passed Mobile and HQ TypeScript, 89/89 mobile tests, Expo Doctor 18/18, Android Hermes export, a migration-aware API Release build preserving 94 EF models and compiling 9,071 distinct statements, 81/81 focused Mobile POS API tests, idempotent SQL for all six Mobile POS migrations, and all 15 migration-content markers. Evidence is under the ignored `.artifacts/mobile-pos/acceptance/20261010-055550/` directory. Dependency restores were explicitly skipped because the existing lockfile installations were reused; proprietary Z92S packaging and native Android compilation were not requested.
 
 ## Known failures and constraints
 
