@@ -29,6 +29,7 @@ export interface MobilePosDimensionReference {
 
 export interface MobilePosAdministrationReferences {
   customers: MobilePosCustomerReference[];
+  currencies: MobilePosReferenceOption[];
   locations: MobilePosReferenceOption[];
   warehouses: MobilePosReferenceOption[];
   companyProfiles: MobilePosReferenceOption[];

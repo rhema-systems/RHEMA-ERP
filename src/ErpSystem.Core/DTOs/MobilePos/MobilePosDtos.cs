@@ -553,6 +553,7 @@ public sealed class MobilePosDimensionReferenceDto
 public sealed class MobilePosAdministrationReferencesDto
 {
     public IReadOnlyList<MobilePosCustomerReferenceDto> Customers { get; set; } = [];
+    public IReadOnlyList<MobilePosReferenceOptionDto> Currencies { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> Locations { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> Warehouses { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> CompanyProfiles { get; set; } = [];

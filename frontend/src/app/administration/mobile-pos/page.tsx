@@ -36,7 +36,7 @@ const TILL_CLOSE_STATUS: Record<number, string> = { 1: 'Ready for review', 2: 'P
 const BANK_DEPOSIT_STATUS: Record<number, string> = { 1: 'Draft', 2: 'Submitted', 3: 'Approved', 4: 'Posted', 5: 'Returned', 6: 'Rejected', 7: 'Cancelled', 8: 'Reversed' };
 const money = (value: number, currency = 'GHS') => `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const EMPTY_REFERENCES: MobilePosAdministrationReferences = {
-  customers: [], locations: [], warehouses: [], companyProfiles: [], cashTills: [], bankAccounts: [], paymentMethods: [], users: [], dimensions: [],
+  customers: [], currencies: [], locations: [], warehouses: [], companyProfiles: [], cashTills: [], bankAccounts: [], paymentMethods: [], users: [], dimensions: [],
 };
 
 const blankPolicy = (): MobilePosOfflinePolicyInput => ({
@@ -145,7 +145,9 @@ export default function MobilePosAdministrationPage() {
       notes: store.notes, rowVersion: store.rowVersion,
       dimensionDefaults: store.dimensionDefaults.map(item => ({ financeDimensionDefinitionId: item.financeDimensionDefinitionId, financeDimensionValueId: item.financeDimensionValueId })),
     } : {
-      code: '', name: '', status: 1, locationId: '', currencyCode: 'GHS', timeZoneId: 'Africa/Accra',
+      code: '', name: '', status: 1, locationId: '',
+      currencyCode: references.currencies.find(item => item.secondary === 'Base currency')?.code || references.currencies[0]?.code || '',
+      timeZoneId: 'Africa/Accra',
       defaultWalkInBusinessPartnerId: '', defaultWalkInBusinessPartnerRoleId: '', dimensionDefaults: [],
     },
   });
@@ -153,12 +155,25 @@ export default function MobilePosAdministrationPage() {
   const saveStore = async () => {
     if (!storeEditor) return;
     const value = storeEditor.value;
-    if (!value.code.trim() || !value.name.trim() || !value.locationId || !value.defaultWalkInBusinessPartnerId || !value.defaultWalkInBusinessPartnerRoleId) {
-      toast.error('Store code, name, location, and an approved default walk-in customer are required.'); return;
+    if (!value.code.trim() || !value.name.trim() || !value.locationId || !value.currencyCode || !value.defaultWalkInBusinessPartnerId || !value.defaultWalkInBusinessPartnerRoleId) {
+      toast.error('Store code, name, location, currency, and an approved default walk-in customer are required.'); return;
     }
     setSaving(true);
     try { await mobilePosAdminService.saveStore(storeEditor.id, value); toast.success(`Store ${storeEditor.id ? 'updated' : 'created'}.`); setStoreEditor(undefined); await load(); }
-    catch (error) { toast.error(errorMessage(error, 'Failed to save the store.')); }
+    catch (error) {
+      const candidate = error as { response?: { status?: number } };
+      if (storeEditor.id && candidate.response?.status === 409) {
+        try {
+          const latestStores = await mobilePosAdminService.stores();
+          setStores(latestStores);
+          const latest = latestStores.find(item => item.id === storeEditor.id);
+          if (latest) setStoreEditor(current => current ? { ...current, value: { ...current.value, rowVersion: latest.rowVersion } } : current);
+          toast.error(`${errorMessage(error, 'The store changed while you were editing it.')} The latest version is loaded; review and save again.`);
+        } catch {
+          toast.error(errorMessage(error, 'The store changed while you were editing it. Refresh and try again.'));
+        }
+      } else toast.error(errorMessage(error, 'Failed to save the store.'));
+    }
     finally { setSaving(false); }
   };
 
@@ -351,8 +366,11 @@ export default function MobilePosAdministrationPage() {
       <SearchChoice label="Warehouse default" value={storeEditor.value.warehouseId} options={references.warehouses} onChange={value => setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, warehouseId: value || undefined } })} />
       <SearchChoice label="Company profile" value={storeEditor.value.companyProfileId} options={references.companyProfiles} onChange={value => setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, companyProfileId: value || undefined } })} />
       <SearchChoice label="Default walk-in customer" required value={storeEditor.value.defaultWalkInBusinessPartnerRoleId} options={customerOptions} onChange={roleId => { const customer = references.customers.find(item => item.businessPartnerRoleId === roleId); setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, defaultWalkInBusinessPartnerRoleId: roleId, defaultWalkInBusinessPartnerId: customer?.businessPartnerId || '' } }); }} />
-      <SelectField label="Offline policy" value={storeEditor.value.offlinePolicyId || 'none'} onChange={value => setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, offlinePolicyId: value === 'none' ? undefined : value } })} options={[{ value: 'none', label: 'Online only' }, ...policies.filter(item => item.isActive).map(item => ({ value: item.id, label: item.name }))]} />
-      <Field label="Currency *"><Input maxLength={3} value={storeEditor.value.currencyCode} onChange={e => setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, currencyCode: e.target.value.toUpperCase() } })} /></Field><Field label="Time zone *"><Input value={storeEditor.value.timeZoneId} onChange={e => setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, timeZoneId: e.target.value } })} /></Field>
+      <div className="space-y-2">
+        <SelectField label="Operating mode / offline policy" value={storeEditor.value.offlinePolicyId || 'none'} onChange={value => setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, offlinePolicyId: value === 'none' ? undefined : value } })} options={[{ value: 'none', label: 'Online only (offline transactions blocked)' }, ...policies.filter(item => item.isActive).map(item => ({ value: item.id, label: item.name }))]} />
+        <p className="text-xs text-muted-foreground">{policies.some(item => item.isActive) ? 'Choose Online only or one active policy. A policy controls the offline authorization window, transaction limits, and permitted operations.' : 'No active offline policy is configured. Create and activate one on the Offline policies tab before enabling offline transactions for this store.'}</p>
+      </div>
+      <SearchChoice label="Currency" required value={storeEditor.value.currencyCode} options={references.currencies.map(item => ({ ...item, selectionId: item.code }))} onChange={value => setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, currencyCode: value } })} placeholder="Search configured currencies" /><Field label="Time zone *"><Input value={storeEditor.value.timeZoneId} onChange={e => setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, timeZoneId: e.target.value } })} /></Field>
       {references.dimensions.map(dimension => <SelectField key={dimension.definitionId} label={`${dimension.name} default`} value={storeEditor.value.dimensionDefaults.find(item => item.financeDimensionDefinitionId === dimension.definitionId)?.financeDimensionValueId || 'none'} onChange={value => { const without = storeEditor.value.dimensionDefaults.filter(item => item.financeDimensionDefinitionId !== dimension.definitionId); setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, dimensionDefaults: value === 'none' ? without : [...without, { financeDimensionDefinitionId: dimension.definitionId, financeDimensionValueId: value }] } }); }} options={[{ value: 'none', label: 'No default' }, ...dimension.values.map(item => ({ value: item.id, label: `${item.code} · ${item.name}` }))]} />)}
       <div className="md:col-span-2"><Field label="Notes"><Textarea value={storeEditor.value.notes || ''} onChange={e => setStoreEditor({ ...storeEditor, value: { ...storeEditor.value, notes: e.target.value } })} /></Field></div>
     </div>}<DialogFooter><Button variant="outline" onClick={() => setStoreEditor(undefined)}>Cancel</Button><Button onClick={() => void saveStore()} disabled={saving}>{saving ? 'Saving...' : 'Save store'}</Button></DialogFooter></DialogContent></Dialog>

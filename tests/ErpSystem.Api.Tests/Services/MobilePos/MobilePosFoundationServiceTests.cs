@@ -8,6 +8,7 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.MobilePos;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -52,6 +53,85 @@ public sealed class MobilePosFoundationServiceTests
         result.DefaultWalkInCustomerCode.Should().Be("WALK-IN");
         result.DefaultWalkInCustomerName.Should().Be("Default shop customer");
         (await fixture.Db.AuditLogs.SingleAsync()).Action.Should().Be("MobilePOS.Store.Created");
+    }
+
+    [Fact]
+    public async Task AdministrationReferences_ShouldReturnOnlyActiveEffectiveTenantCurrencies()
+    {
+        await using var fixture = Fixture.Create();
+        fixture.Db.Currencies.AddRange(
+            new Currency
+            {
+                Id = Guid.NewGuid(), TenantId = fixture.TenantId, CurrencyCode = "USD", NumericCode = "840",
+                CurrencyName = "United States Dollar", Status = "Inactive", IsActive = false
+            },
+            new Currency
+            {
+                Id = Guid.NewGuid(), TenantId = Guid.NewGuid(), CurrencyCode = "EUR", NumericCode = "978",
+                CurrencyName = "Euro", Status = "Active"
+            });
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.GetAdministrationReferencesAsync(CancellationToken.None);
+
+        result.Currencies.Should().ContainSingle(item => item.Code == "GHS" && item.Name == "Ghana Cedi");
+    }
+
+    [Fact]
+    public async Task SaveStoreAsync_ShouldRejectCurrencyThatIsNotActiveInFinanceMaster()
+    {
+        await using var fixture = Fixture.Create();
+        var customer = fixture.SeedCustomer("Approved");
+        await fixture.Db.SaveChangesAsync();
+        var input = fixture.StoreInput(customer);
+        input.CurrencyCode = "XYZ";
+
+        var action = () => fixture.Service.SaveStoreAsync(null, input, CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*active Finance currency*");
+    }
+
+    [Fact]
+    public async Task SaveStoreAsync_ShouldUpdateWithTheCurrentRowVersion()
+    {
+        await using var fixture = Fixture.Create();
+        var customer = fixture.SeedCustomer("Approved");
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Service.SaveStoreAsync(null, fixture.StoreInput(customer), CancellationToken.None);
+        var store = await fixture.Db.MobilePosStores.SingleAsync();
+        store.RowVersion = [1, 2, 3, 4, 5, 6, 7, 8];
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        var snapshot = (await fixture.Service.GetStoresAsync(CancellationToken.None)).Single();
+        var input = fixture.StoreInput(customer);
+        input.Name = "Renamed shop";
+        input.RowVersion = snapshot.RowVersion;
+
+        var result = await fixture.Service.SaveStoreAsync(snapshot.Id, input, CancellationToken.None);
+
+        result.Name.Should().Be("Renamed shop");
+    }
+
+    [Fact]
+    public async Task SaveStoreAsync_ShouldReturnAStableConflictForAStaleRowVersion()
+    {
+        await using var fixture = Fixture.Create();
+        var customer = fixture.SeedCustomer("Approved");
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Service.SaveStoreAsync(null, fixture.StoreInput(customer), CancellationToken.None);
+        var store = await fixture.Db.MobilePosStores.SingleAsync();
+        store.RowVersion = [1, 2, 3, 4, 5, 6, 7, 8];
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        var input = fixture.StoreInput(customer);
+        input.RowVersion = Convert.ToBase64String([8, 7, 6, 5, 4, 3, 2, 1]);
+
+        var action = () => fixture.Service.SaveStoreAsync(store.Id, input, CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<BusinessRuleException>();
+        exception.Which.Code.Should().Be("MOBILE_POS_VERSION_CONFLICT");
+        exception.Which.StatusCode.Should().Be(409);
     }
 
     [Fact]
@@ -364,6 +444,17 @@ public sealed class MobilePosFoundationServiceTests
                 StructureId = Guid.NewGuid(),
                 LocationLevelId = Guid.NewGuid(),
                 IsActive = true
+            });
+            Db.Currencies.Add(new Currency
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                CurrencyCode = "GHS",
+                NumericCode = "936",
+                CurrencyName = "Ghana Cedi",
+                CurrencySymbol = "GHS",
+                IsBaseCurrency = true,
+                Status = "Active"
             });
         }
 

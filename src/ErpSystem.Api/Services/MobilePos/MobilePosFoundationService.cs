@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.MobilePos;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -82,6 +83,22 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
                 BusinessPartnerRoleId = role.Id,
                 Code = role.BusinessPartner.PartnerCode,
                 Name = role.BusinessPartner.PartnerName
+            })
+            .ToListAsync(cancellationToken);
+
+        var currencies = await _db.Currencies.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+            .OrderByDescending(item => item.IsBaseCurrency)
+            .ThenBy(item => item.DisplayOrder)
+            .ThenBy(item => item.CurrencyName)
+            .Select(item => new MobilePosReferenceOptionDto
+            {
+                Id = item.Id,
+                Code = item.CurrencyCode,
+                Name = item.CurrencyName,
+                Secondary = item.IsBaseCurrency
+                    ? "Base currency"
+                    : item.CurrencySymbol
             })
             .ToListAsync(cancellationToken);
 
@@ -182,6 +199,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         return new MobilePosAdministrationReferencesDto
         {
             Customers = eligibleCustomerRoles,
+            Currencies = currencies,
             Locations = locations,
             Warehouses = warehouses,
             CompanyProfiles = companyProfiles,
@@ -224,7 +242,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         if (currency.Length != 3)
             throw new InvalidOperationException("Currency must be a three-character code.");
 
-        await ValidateStoreReferencesAsync(dto, cancellationToken);
+        await ValidateStoreReferencesAsync(dto, currency, cancellationToken);
 
         var duplicate = await _db.MobilePosStores.AnyAsync(item =>
             item.TenantId == tenantId && item.Code == code && (!id.HasValue || item.Id != id.Value), cancellationToken);
@@ -291,7 +309,17 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             store.Id,
             before,
             StoreAuditSnapshot(store));
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new BusinessRuleException(
+                "MOBILE_POS_STORE_VERSION_CONFLICT",
+                "This Mobile POS store changed after it was opened. Reload the latest store details, review your changes, and save again.",
+                StatusCodes.Status409Conflict);
+        }
         return await GetStoreRequiredAsync(store.Id, cancellationToken);
     }
 
@@ -998,9 +1026,17 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         return MapDevice(device);
     }
 
-    private async Task ValidateStoreReferencesAsync(MobilePosStoreUpsertDto dto, CancellationToken cancellationToken)
+    private async Task ValidateStoreReferencesAsync(
+        MobilePosStoreUpsertDto dto,
+        string currencyCode,
+        CancellationToken cancellationToken)
     {
         var tenantId = TenantId;
+        var now = DateTime.UtcNow;
+        if (!await _db.Currencies.AsNoTracking().AnyAsync(
+                item => item.TenantId == tenantId && !item.IsDeleted &&
+                        item.CurrencyCode == currencyCode && item.IsActive, cancellationToken))
+            throw new InvalidOperationException("Select an active Finance currency belonging to the current tenant.");
         if (!await _db.Locations.AsNoTracking().AnyAsync(
                 item => item.TenantId == tenantId && item.Id == dto.LocationId && item.IsActive, cancellationToken))
             throw new InvalidOperationException("Select an active operating location belonging to the current tenant.");
@@ -1016,7 +1052,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         await ValidateApprovedWalkInCustomerAsync(
             dto.DefaultWalkInBusinessPartnerId,
             dto.DefaultWalkInBusinessPartnerRoleId,
-            DateTime.UtcNow,
+            now,
             cancellationToken);
 
         if (dto.DimensionDefaults.Count != dto.DimensionDefaults.Select(item => item.FinanceDimensionDefinitionId).Distinct().Count())
@@ -1028,8 +1064,8 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
                 .AnyAsync(item => item.TenantId == tenantId && item.Id == input.FinanceDimensionValueId &&
                                   item.FinanceDimensionDefinitionId == input.FinanceDimensionDefinitionId &&
                                   item.IsActive && item.FinanceDimensionDefinition.IsActive &&
-                                  item.EffectiveDate <= DateTime.UtcNow &&
-                                  (!item.ExpiryDate.HasValue || item.ExpiryDate > DateTime.UtcNow), cancellationToken);
+                                  item.EffectiveDate <= now &&
+                                  (!item.ExpiryDate.HasValue || item.ExpiryDate > now), cancellationToken);
             if (!valid)
                 throw new InvalidOperationException("Every store Finance dimension value must be active, effective, and belong to its selected dimension.");
         }
@@ -1184,7 +1220,14 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         byte[] bytes;
         try { bytes = Convert.FromBase64String(value); }
         catch (FormatException) { throw new InvalidOperationException("The row version is invalid."); }
-        _db.Entry(entity).Property("RowVersion").OriginalValue = bytes;
+        var property = _db.Entry(entity).Property<byte[]>("RowVersion");
+        var current = property.CurrentValue;
+        if (bytes.Length == 0 || current == null || current.Length == 0 || !current.AsSpan().SequenceEqual(bytes))
+            throw new BusinessRuleException(
+                "MOBILE_POS_VERSION_CONFLICT",
+                "This Mobile POS record changed after it was opened. Reload the latest details, review your changes, and save again.",
+                StatusCodes.Status409Conflict);
+        property.OriginalValue = bytes;
     }
 
     private async Task AddAuditAsync(
