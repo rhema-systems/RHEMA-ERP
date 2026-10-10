@@ -1,7 +1,8 @@
 # RHEMA Mobile POS threat review
 
-**Review date:** 2026-10-10  
-**Source checkpoint:** `b69159ea281589d0e196a0d95a8c04d8d1ecefcc` plus the hardening changes described below  
+**Review date:** 2026-10-10
+
+**Source checkpoint:** `b69159ea281589d0e196a0d95a8c04d8d1ecefcc` plus the hardening changes described below
 **Target:** Expo/React Native Android application, Mobile POS API boundary, offline store, Z92S adapter, and HQ administration surface
 
 ## Status

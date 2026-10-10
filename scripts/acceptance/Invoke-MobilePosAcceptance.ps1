@@ -436,4 +436,3 @@ if ($failure) {
 }
 
 Write-Host "PASS acceptance:mobile-pos"
-
