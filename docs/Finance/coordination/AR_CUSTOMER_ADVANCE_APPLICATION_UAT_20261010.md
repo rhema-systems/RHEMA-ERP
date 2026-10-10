@@ -1,3 +1,18 @@
+---
+integration_cycle: FIN-UAT-2026-10-10-A
+integration_status: ready
+integration_decision: include
+candidate_branch: codex/business-partner-workflow-fixed-asset-transaction
+candidate_head: da2f39e4fc42c4e6db272bc003d3026db8deda83
+base_commit: dd6fb224a1eaa7512087ed3bf0dd767d490c0f12
+target_ref: origin/master
+depends_on: none
+migration_status: none
+verification_status: focused checks passed; full type-check blocked by local dependency resolution
+integration_commit: pending
+pull_request: pending
+---
+
 # AR customer-advance application and date clarity UAT
 
 ## Objective
@@ -99,4 +114,5 @@
 ## Authorization boundaries
 
 - Authorized: local date-label/report corrections, payment-on-account implementation, focused tests, investigation, and implementation planning.
-- Not authorized: database changes, migrations, push, pull request creation, merge, or deployment.
+- Authorized on 2026-10-10: push and consolidated pull-request creation for the outstanding code and documentation changes.
+- Not authorized: database changes, migrations, merge, or deployment.

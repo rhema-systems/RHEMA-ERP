@@ -1,3 +1,18 @@
+---
+integration_cycle: FIN-UAT-2026-10-10-A
+integration_status: ready
+integration_decision: include
+candidate_branch: codex/business-partner-workflow-fixed-asset-transaction
+candidate_head: da2f39e4fc42c4e6db272bc003d3026db8deda83
+base_commit: dd6fb224a1eaa7512087ed3bf0dd767d490c0f12
+target_ref: origin/master
+depends_on: none
+migration_status: 20261009143000 locally applied; remote unapplied
+verification_status: focused checks passed
+integration_commit: pending
+pull_request: pending
+---
+
 # Business Partner Workflow and Fixed Asset Transaction — 2026-10-09
 
 ## Objective and scope
@@ -53,4 +68,5 @@ Changed files:
 ## Authorization boundaries
 
 - Authorized: local implementation, tests, local commits, and the 2026-10-10 migration application to local `RHEMAERP_BOOKV2_UAT_20260922`.
-- Not authorized: changing any remote database, pushing, creating a pull request, deployment, or changing remote runtime state.
+- Authorized on 2026-10-10: push and consolidated pull-request creation for the outstanding code and documentation changes.
+- Not authorized: changing any remote database, merge, deployment, or changing remote runtime state.
