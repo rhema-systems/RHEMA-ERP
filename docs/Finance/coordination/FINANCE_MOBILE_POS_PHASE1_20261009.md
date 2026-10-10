@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `66f48e66ccb70ceb093d86416383a549496daec4`
+- Current implementation checkpoint: `36d7eaf3612d3b99c2814692befd7252d5c1a2ee`
 - Pull request: not created
 
 ## Source baselines
@@ -91,6 +91,8 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `022a6ef825e` - Repeatable Mobile POS host recovery rehearsal, 1,000-command regression thresholds, evidence wrapper, and device/UAT test matrix.
 - `28c965bf589` - Fail-closed Android release signing, exact-commit signed build/evidence script, and staged deployment, upgrade, and rollback runbook.
 - `66f48e66ccb` - Privacy-limited device support bundle, correlation-aware sync errors, and Mobile POS operational support handoff.
+- `9e58fad7a33` - Strengthened Mobile POS accounting contract coverage for invoice lines, split-tender allocations, till liquidity, canonical links, and replay identity.
+- `36d7eaf3612` - Deterministic offline-grant signature tampering regression that changes significant Base64URL signature bits.
 
 ## Phase 2 application foundation
 
@@ -295,6 +297,8 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The MPOS-0806 source passed TypeScript and 81/81 mobile tests, including three signing-plugin controls for release gating, idempotent generation, and secret non-interpolation. Expo Doctor passed 18/18 and Android Hermes export passed. PowerShell parsed the signed-build script without errors. Clean production prebuilds produced backup-disabled/cleartext-disabled manifests and the signing guard; the Z92S-enabled prebuild also matched the exact JAR and two JNI hashes.
 - The MPOS-0807 source passed TypeScript and 83/83 mobile tests. Support-bundle coverage proves required operational identifiers/counts are present while signed tokens, queued payloads, user/customer IDs, liquidity IDs, and policy hashes are absent. Expo Doctor passed 18/18 and Android Hermes export passed with the support-share boundary included.
 - The consolidated `acceptance:mobile-pos` gate passed on current checkpoint `45483a784b3` using the already restored lockfile dependencies. It passed 83/83 mobile tests, Expo Doctor 18/18, Android Hermes export, HQ TypeScript, the migration-aware API Release build, 63/63 focused API tests, all eight migration-content markers, production Android backup/cleartext controls, the generated release-signing guard, and exact hashes for the SmartPos JAR plus both JNI libraries. Native Gradle was not requested because this host still lacks Java/Android SDK. Local evidence is under the ignored `.artifacts/mobile-pos/acceptance/20261010-023752/` directory.
+- MPOS-0308 accounting assertions passed 6/6 focused `MobilePosSaleServiceTests` on checkpoint `9e58fad7a33`. The test contract now verifies the dedicated invoice/payment producer routes, GHS invoice and tender commands, sale-line revenue account and `EA` UOM, split-tender totals, till-liquidity destination, one exact invoice allocation per payment, unique canonical payment links, persisted invoice identity, and mutation-replay identity. The remaining MPOS-0308 gates require relational failure injection and authorized live accounting certification.
+- The current focused Mobile POS API suite passed 63/63 after making the offline-grant tamper case deterministic. The prior last-character mutation could alter only unused Base64URL padding bits and intermittently decode to the original signature; the test now changes the first signature character so the cryptographic rejection assertion is stable.
 
 ## Known failures and constraints
 
@@ -308,6 +312,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - MPOS-0805 remains open for signed-Z92S timing and resource measurements, controlled real-network loss, process/device restart, APK upgrade preservation, API/SQL queue-drain evidence, hardware fault recovery, and an eight-hour battery run.
 - MPOS-0806 remains open until the organization supplies and registers the secure signing identity, stores CI/build credentials, records written SDK redistribution approval, produces and verifies signed APK/AAB artifacts, and completes physical Z92S install, upgrade, and higher-version-code rollback rehearsal.
 - MPOS-0807 remains open until management assigns named primary/backup owners, approves support hours/SLA/RPO/RTO/alert thresholds, configures environment monitoring and fleet tooling, completes role training and rehearsals, and signs the environment-specific production-readiness checklist.
+- MPOS-0308 source-level accounting contract coverage is complete, but SQL Server failure-injection and the authorized nonzero accounting certification remain open.
 - Offline grant consumption and cash-sale Finance orchestration are implemented for schema version 1. Physical disconnect/reconnect, concurrent SQL Server aggregate consumption, and process/APK persistence remain unverified outside the automated in-memory and client test boundaries.
 - The repository currently reports pre-existing ImageSharp package advisories and compiler warnings; the verified Mobile POS builds completed with zero errors.
 
