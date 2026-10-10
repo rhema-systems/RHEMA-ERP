@@ -10,7 +10,7 @@ depends_on: none
 migration_status: 20261009143000 locally applied; remote unapplied
 verification_status: focused checks passed
 integration_commit: 74bb13b6f
-pull_request: pending
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/398
 ---
 
 # Business Partner Workflow and Fixed Asset Transaction — 2026-10-09

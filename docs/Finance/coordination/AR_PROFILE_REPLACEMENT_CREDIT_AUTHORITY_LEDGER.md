@@ -10,7 +10,7 @@ depends_on: merged PR #384
 migration_status: no-new-migration; existing repository migrations applied locally only
 verification_status: focused checks passed; browser UAT and full type-check environment follow-up remain
 integration_commit: 74bb13b6f
-pull_request: pending
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/398
 ---
 
 # AR Profile Replacement and Credit Authority

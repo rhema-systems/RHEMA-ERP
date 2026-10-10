@@ -10,7 +10,7 @@ depends_on: none
 migration_status: none
 verification_status: focused checks passed; full type-check blocked by local dependency resolution
 integration_commit: 74bb13b6f
-pull_request: pending
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/398
 ---
 
 # AR customer-advance application and date clarity UAT

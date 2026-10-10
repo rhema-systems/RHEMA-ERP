@@ -10,7 +10,7 @@ depends_on: merged PR #384
 migration_status: one data-repair migration; locally applied in source UAT database; remote unapplied
 verification_status: focused backend/frontend tests and changed-file lint passed
 integration_commit: 74bb13b6f
-pull_request: pending
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/398
 ---
 
 # Finance UAT consolidation — 2026-10-10 A
@@ -87,4 +87,4 @@ Explicitly excluded:
 ## Integration outcome
 
 - Consolidation branch created and verified.
-- Pull request: pending creation.
+- Pull request: [#398](https://github.com/rhema-systems/RHEMA-ERP/pull/398).
