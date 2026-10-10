@@ -20,6 +20,33 @@ namespace ErpSystem.Api.Tests.Services;
 public partial class DatabaseSeedingServiceTests
 {
     [Fact]
+    public void MobilePosRoleSeeder_ShouldGrantCompleteCatalogueToPlatformAdministrators()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs"));
+        var superAdminStart = source.IndexOf(
+            "[Constants.Roles.SuperAdmin] = FinancePermissions.AllNames",
+            StringComparison.Ordinal);
+        var tenantAdminStart = source.IndexOf(
+            "[Constants.Roles.TenantAdmin] = FinancePermissions.AllNames",
+            superAdminStart,
+            StringComparison.Ordinal);
+        var nextRoleStart = source.IndexOf(
+            "[PropertyManagementRoles.Officer]",
+            tenantAdminStart,
+            StringComparison.Ordinal);
+
+        superAdminStart.Should().BeGreaterThan(-1);
+        tenantAdminStart.Should().BeGreaterThan(superAdminStart);
+        nextRoleStart.Should().BeGreaterThan(tenantAdminStart);
+        source[superAdminStart..tenantAdminStart]
+            .Should().Contain(".Concat(MobilePosPermissions.AllNames)");
+        source[tenantAdminStart..nextRoleStart]
+            .Should().Contain(".Concat(MobilePosPermissions.AllNames)");
+    }
+
+    [Fact]
     public void FinanceRoleSeeder_ShouldGrantChiefAccountantAssignedPaymentApprovalPermission()
     {
         var root = FindRepositoryRoot();

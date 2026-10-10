@@ -48,7 +48,8 @@ public sealed class MobilePosFoundationTests
                 requirement.Permissions.Should().BeEquivalentTo(
                     MobilePosPermissions.ViewStore,
                     MobilePosPermissions.ManageStore,
-                    MobilePosPermissions.ApproveDevice);
+                    MobilePosPermissions.ApproveDevice,
+                    MobilePosPermissions.ReviewTill);
             }
             else
             {

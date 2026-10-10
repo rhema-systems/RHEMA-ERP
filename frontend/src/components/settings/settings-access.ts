@@ -245,6 +245,7 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
       'MobilePOS.Store.View',
       'MobilePOS.Store.Manage',
       'MobilePOS.Device.Approve',
+      'MobilePOS.Till.Review',
     ],
   },
   anyAccess(

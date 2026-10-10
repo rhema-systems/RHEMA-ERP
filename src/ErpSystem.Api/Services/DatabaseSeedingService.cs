@@ -11404,6 +11404,7 @@ namespace ErpSystem.Web.Services
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
                     .Concat(CrmPermissions.AllNames)
+                    .Concat(MobilePosPermissions.AllNames)
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.SuperAdmin))
                     .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.SuperAdmin))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
@@ -11426,6 +11427,7 @@ namespace ErpSystem.Web.Services
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
                     .Concat(CrmPermissions.AllNames)
+                    .Concat(MobilePosPermissions.AllNames)
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.TenantAdmin))
                     .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.TenantAdmin))
                     .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
