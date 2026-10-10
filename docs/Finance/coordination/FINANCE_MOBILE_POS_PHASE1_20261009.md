@@ -13,7 +13,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Exact starting commit: `9044371f533ee3fac77472d74aecfe006e8c6872`
 - Starting ref: `origin/master`
 - Current integrated master baseline: `7b4a23a71f6e3d3c2f58950d69fd99cfedce8f0b`
-- Current implementation checkpoint: `28c965bf589012b94a56048de3eb6b0316eaeeff`
+- Current implementation checkpoint: `66f48e66ccb70ceb093d86416383a549496daec4`
 - Pull request: not created
 
 ## Source baselines
@@ -90,6 +90,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - `c1da9bab395` - Read-only Mobile POS accounting reconciliation SQL, guarded evidence wrapper, certification procedure, and tracker state.
 - `022a6ef825e` - Repeatable Mobile POS host recovery rehearsal, 1,000-command regression thresholds, evidence wrapper, and device/UAT test matrix.
 - `28c965bf589` - Fail-closed Android release signing, exact-commit signed build/evidence script, and staged deployment, upgrade, and rollback runbook.
+- `66f48e66ccb` - Privacy-limited device support bundle, correlation-aware sync errors, and Mobile POS operational support handoff.
 
 ## Phase 2 application foundation
 
@@ -235,6 +236,8 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Added a generated-Gradle signing guard that blocks every Android release task unless external signing is explicitly enabled and the keystore path/password, alias, and key password are present. Signing values are read only from the process environment and are not rendered into generated Gradle source.
 - Added an exact-commit signed release script. It requires a clean tree, matching passing native acceptance evidence, an HTTPS origin, an external keystore, written-SDK-approval acknowledgement, Android signing verification, and hashes for the APK, AAB, certificate, acceptance file, and audited Z92S artifacts.
 - Added the staged UAT/pilot/production rollout, in-place upgrade, stop/recovery, and last-good replacement procedure. Rollback uses the same signer and a higher version code and preserves governed local state; it never clears app data or rolls back posted Finance records.
+- Added a privacy-limited support bundle on the Account & access screen. It captures environment/release, device/assignment/adapters, offline authorization timing, and bounded unresolved-queue counts while excluding credentials, signed tokens, user/customer data, sale/tender payloads, liquidity details, and queued message bodies.
+- Added an operational handoff with concrete cashier, supervisor, support, Finance, Security, release, and vendor responsibilities; daily controls; incident priorities; mutation/accounting-first triage; recovery playbooks; monitoring cadence; and environment-specific go-live acceptance gates.
 
 ## Verification evidence
 
@@ -290,6 +293,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - The MPOS-0803 accounting certification pack adds eleven read-only controls for completed sale arithmetic, line/tender totals, posted invoice and source-book linkage, one posted CustomerPayment/allocation per tender, mutation-receipt identity, closed Finance till sessions, deposit proposals and uniqueness. The PowerShell wrapper validates the server/database/tenant/time window, rejects system databases, pins the committed SQL hash in its local evidence, and passed its fail-closed system-database guard. It has not been executed against a business database.
 - The MPOS-0805 release-form host rehearsal passed after a fresh mobile lockfile restore. Mobile TypeScript passed; 1,000 distinct sale-shaped payloads canonicalized in 28 ms against a 5,000 ms limit; the actual dispatcher processed 1,000 commands in 101 ms against a 10,000 ms limit; response-loss replay, retry cap, and stale-claim recovery checks passed. The complete mobile regression suite passes 78/78. Detailed local evidence is under the ignored `.artifacts/mobile-pos/recovery-rehearsal/20261010-021850/` directory.
 - The MPOS-0806 source passed TypeScript and 81/81 mobile tests, including three signing-plugin controls for release gating, idempotent generation, and secret non-interpolation. Expo Doctor passed 18/18 and Android Hermes export passed. PowerShell parsed the signed-build script without errors. Clean production prebuilds produced backup-disabled/cleartext-disabled manifests and the signing guard; the Z92S-enabled prebuild also matched the exact JAR and two JNI hashes.
+- The MPOS-0807 source passed TypeScript and 83/83 mobile tests. Support-bundle coverage proves required operational identifiers/counts are present while signed tokens, queued payloads, user/customer IDs, liquidity IDs, and policy hashes are absent. Expo Doctor passed 18/18 and Android Hermes export passed with the support-share boundary included.
 
 ## Known failures and constraints
 
@@ -302,6 +306,7 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - MPOS-0803 remains open until the committed reconciliation runs with nonzero completed sales against an authorized UAT copy and Finance reviews the same invoice, receipt, journal, liquidity, till-close and deposit sample.
 - MPOS-0805 remains open for signed-Z92S timing and resource measurements, controlled real-network loss, process/device restart, APK upgrade preservation, API/SQL queue-drain evidence, hardware fault recovery, and an eight-hour battery run.
 - MPOS-0806 remains open until the organization supplies and registers the secure signing identity, stores CI/build credentials, records written SDK redistribution approval, produces and verifies signed APK/AAB artifacts, and completes physical Z92S install, upgrade, and higher-version-code rollback rehearsal.
+- MPOS-0807 remains open until management assigns named primary/backup owners, approves support hours/SLA/RPO/RTO/alert thresholds, configures environment monitoring and fleet tooling, completes role training and rehearsals, and signs the environment-specific production-readiness checklist.
 - Offline grant consumption and cash-sale Finance orchestration are implemented for schema version 1. Physical disconnect/reconnect, concurrent SQL Server aggregate consumption, and process/APK persistence remain unverified outside the automated in-memory and client test boundaries.
 - The repository currently reports pre-existing ImageSharp package advisories and compiler warnings; the verified Mobile POS builds completed with zero errors.
 
