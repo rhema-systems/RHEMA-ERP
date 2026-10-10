@@ -329,8 +329,11 @@ public sealed class MobilePosFoundationServiceTests
         var token = fixture.GrantTokens.Sign(payload);
 
         fixture.GrantTokens.Validate(token, now.AddMinutes(1)).Should().Be(payload);
-        var replacement = token[^1] == 'A' ? 'B' : 'A';
-        var tampered = token[..^1] + replacement;
+        var segments = token.Split('.');
+        segments.Should().HaveCount(3);
+        var replacement = segments[2][0] == 'A' ? 'B' : 'A';
+        segments[2] = replacement + segments[2][1..];
+        var tampered = string.Join('.', segments);
         var tamperAction = () => fixture.GrantTokens.Validate(tampered, now.AddMinutes(1));
         tamperAction.Should().Throw<UnauthorizedAccessException>().WithMessage("*signature*");
         var expiryAction = () => fixture.GrantTokens.Validate(token, now.AddMinutes(31));
