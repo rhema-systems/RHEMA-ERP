@@ -262,8 +262,10 @@ try {
     $stages.Add((Invoke-LoggedCommand 'Verify APK signature and certificates' $apksigner @('verify', '--verbose', '--print-certs', $apkPath) $releaseDirectory $apkVerifyLog))
     $aabVerifyLog = Join-Path $releaseDirectory 'jarsigner-verify.log'
     $stages.Add((Invoke-LoggedCommand 'Verify AAB JAR signature' $jarsigner @('-verify', '-verbose', '-certs', $aabPath) $releaseDirectory $aabVerifyLog))
-    $aabVerifyOutput = Get-Content -LiteralPath $aabVerifyLog -Raw
-    if ($aabVerifyOutput -notmatch '(?m)^jar verified\.$') {
+    $aabVerified = Get-Content -LiteralPath $aabVerifyLog |
+        Where-Object { $_.Trim() -ceq 'jar verified.' } |
+        Select-Object -First 1
+    if (-not $aabVerified) {
         throw 'AAB JAR signature verification did not report a verified archive.'
     }
 
