@@ -200,8 +200,8 @@ try {
         Add-SkippedStage 'Restore locked HQ frontend dependencies' 'Explicitly skipped; existing node_modules is being reused.'
     }
     else {
-        Invoke-CheckedCommand 'Restore locked mobile dependencies' $npm @('ci', '--no-audit', '--no-fund') $mobileRoot
-        Invoke-CheckedCommand 'Restore locked HQ frontend dependencies' $npm @('ci', '--no-audit', '--no-fund') $frontendRoot
+        Invoke-CheckedCommand 'Restore locked mobile dependencies' $npm @('ci', '--include=dev', '--no-audit', '--no-fund') $mobileRoot
+        Invoke-CheckedCommand 'Restore locked HQ frontend dependencies' $npm @('ci', '--include=dev', '--no-audit', '--no-fund') $frontendRoot
     }
 
     Invoke-CheckedCommand 'Mobile TypeScript contract' $npm @('run', 'typecheck') $mobileRoot
@@ -217,7 +217,7 @@ try {
 
     $trxPath = Join-Path $runDirectory 'mobile-pos-api-tests.trx'
     Invoke-CheckedCommand 'Focused Mobile POS API tests' $dotnet @(
-        'test', $testProject, '--configuration', 'Release', '--nologo', '--no-restore',
+        'test', $testProject, '--configuration', 'Release', '--nologo',
         '--filter', 'FullyQualifiedName~MobilePos',
         '--logger', 'trx;LogFileName=mobile-pos-api-tests.trx',
         '--results-directory', $runDirectory

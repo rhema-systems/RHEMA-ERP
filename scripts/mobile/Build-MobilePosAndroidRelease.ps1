@@ -221,7 +221,7 @@ try {
     [Environment]::SetEnvironmentVariable('RHEMA_ANDROID_KEYSTORE_PATH', $resolvedKeystore, 'Process')
 
     if (-not $SkipInstall) {
-        $stages.Add((Invoke-LoggedCommand 'Restore locked mobile dependencies' $npm @('ci', '--no-audit', '--no-fund') $mobileRoot (Join-Path $releaseDirectory 'npm-ci.log')))
+        $stages.Add((Invoke-LoggedCommand 'Restore locked mobile dependencies' $npm @('ci', '--include=dev', '--no-audit', '--no-fund') $mobileRoot (Join-Path $releaseDirectory 'npm-ci.log')))
     }
     $prebuildName = if ($PortableFallback) { 'Clean Android prebuild without proprietary SDK' } else { 'Clean Android prebuild with audited Z92S SDK' }
     $stages.Add((Invoke-LoggedCommand $prebuildName $npm @('run', 'prebuild:android') $mobileRoot (Join-Path $releaseDirectory 'prebuild.log')))
