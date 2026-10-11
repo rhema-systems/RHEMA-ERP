@@ -51,6 +51,7 @@ import {
   CreatePurchaseRequisitionItemDto,
   PurchaseRequisitionLinkageOptionDto,
   PurchaseRequisitionLinkageOptionsDto,
+  PurchaseRequisitionPolicyOptionDto,
   SavePurchaseRequisitionLinkageRequest
 } from '@/services/purchasingService';
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
@@ -109,6 +110,10 @@ export default function EditPurchaseRequisitionPage() {
   const [items, setItems] = useState<PRItemFormData[]>([]);
   const [rowVersion, setRowVersion] = useState('');
   const [linkage, setLinkage] = useState<SavePurchaseRequisitionLinkageRequest>({ ...EMPTY_REQUISITION_LINKAGE });
+  const [procurementPolicySetId, setProcurementPolicySetId] = useState('');
+  const [policyOptions, setPolicyOptions] = useState<PurchaseRequisitionPolicyOptionDto[]>([]);
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policyError, setPolicyError] = useState('');
   
   // Reference data
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
@@ -165,6 +170,7 @@ export default function EditPurchaseRequisitionPage() {
         setNotes(pr.notes || '');
         setRowVersion(pr.rowVersion);
         setLinkage(toEditableRequisitionLinkage(pr.linkage));
+        setProcurementPolicySetId(pr.procurementPolicySetId || '');
         
         // Load items
         const loadedItems: PRItemFormData[] = pr.items.map((item, index) => ({
@@ -263,6 +269,37 @@ export default function EditPurchaseRequisitionPage() {
   const totalAmount = items.reduce((sum, item) => 
     sum + calculateLineTotal(item.quantity, item.estimatedUnitPrice), 0
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const category = linkage.procurementCategory;
+    if (!category || totalAmount <= 0 || !documentCurrency) {
+      setPolicyOptions([]);
+      setPolicyError('');
+      return () => { cancelled = true; };
+    }
+    setPolicyLoading(true);
+    setPolicyError('');
+    purchasingService.getPurchaseRequisitionPolicyOptions(category, totalAmount, documentCurrency)
+      .then((options) => {
+        if (cancelled) return;
+        setPolicyOptions(options);
+        setProcurementPolicySetId((current) => {
+          if (options.some((option) => option.policySetId === current)) return current;
+          return options.length === 1 ? options[0].policySetId : '';
+        });
+      })
+      .catch((error: Error) => {
+        if (cancelled) return;
+        setPolicyOptions([]);
+        setProcurementPolicySetId('');
+        setPolicyError(error.message || 'Eligible procurement policies could not be loaded.');
+      })
+      .finally(() => {
+        if (!cancelled) setPolicyLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [linkage.procurementCategory, totalAmount, documentCurrency]);
   // Handle inventory item selection
   const handleInventoryItemSelect = async (itemId: string) => {
     const item = inventoryItems.find(i => i.id === itemId);
@@ -401,6 +438,22 @@ export default function EditPurchaseRequisitionPage() {
       toast.error('Select an active HR organization unit before saving');
       return;
     }
+    if (policyLoading) {
+      toast.error('Wait for procurement policy validation to finish');
+      return;
+    }
+    if (policyError) {
+      toast.error('Resolve the procurement policy loading error before saving');
+      return;
+    }
+    if (linkage.procurementCategory && totalAmount > 0 && policyOptions.length === 0) {
+      toast.error('No Published procurement policy covers this category, currency, and value');
+      return;
+    }
+    if (policyOptions.length > 1 && !procurementPolicySetId) {
+      toast.error('Select the exact procurement policy for this requisition');
+      return;
+    }
     const linkageError = validateExceptionLinkage(linkage);
     if (linkageError) {
       toast.error(linkageError);
@@ -420,6 +473,7 @@ export default function EditPurchaseRequisitionPage() {
       }
 
       const updateData: UpdatePurchaseRequisitionDto = {
+        procurementPolicySetId: procurementPolicySetId || undefined,
         requestedById,
         rowVersion,
         requiredDate: requiredDate || undefined,
@@ -639,6 +693,54 @@ export default function EditPurchaseRequisitionPage() {
         loading={loadingData}
         onPlanItemChange={applyPlanItemDepartment}
       />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Procurement policy</CardTitle>
+          <CardDescription>
+            The eligible Published policy is determined from category, transaction currency, and total estimated value.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="procurementPolicySetId">Applicable policy *</Label>
+          <Select
+            value={procurementPolicySetId}
+            onValueChange={setProcurementPolicySetId}
+            disabled={policyLoading || policyOptions.length <= 1}
+          >
+            <SelectTrigger id="procurementPolicySetId">
+              <SelectValue placeholder={
+                policyLoading
+                  ? 'Checking eligible policies...'
+                  : !linkage.procurementCategory || totalAmount <= 0
+                    ? 'Select category and add priced items first'
+                    : policyOptions.length === 0
+                      ? 'No eligible Published policy'
+                      : 'Select the exact policy'
+              } />
+            </SelectTrigger>
+            <SelectContent>
+              {policyOptions.map((option) => (
+                <SelectItem key={option.policySetId} value={option.policySetId}>
+                  {option.policyCode} · {option.policyName} · {option.method}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {policyOptions.length === 1 && (
+            <p className="text-xs text-muted-foreground">
+              Auto-selected because this is the only policy matching {linkage.procurementCategory}, {documentCurrency}, and {formatProcurementMoney(totalAmount, documentCurrency)}.
+            </p>
+          )}
+          {policyOptions.length > 1 && !procurementPolicySetId && (
+            <p className="text-xs text-amber-700">More than one policy applies. Select the governing policy before saving.</p>
+          )}
+          {!policyLoading && linkage.procurementCategory && totalAmount > 0 && policyOptions.length === 0 && !policyError && (
+            <p className="text-xs text-red-700">No Published policy covers this category, currency, and value.</p>
+          )}
+          {policyError && <p className="text-xs text-red-700">{policyError}</p>}
+        </CardContent>
+      </Card>
 
       {/* Items Section */}
       <Card>

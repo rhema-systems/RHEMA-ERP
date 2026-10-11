@@ -10,6 +10,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -126,6 +127,15 @@ public class PurchaseRequisitionsController : ControllerBase
             requisition.Justification = TrimOrNull(updateDto.Justification, 2000);
             requisition.Notes = TrimOrNull(updateDto.Notes, 2000);
             requisition.TotalAmount = updateDto.Items.Sum(item => item.Quantity * item.EstimatedUnitPrice);
+            requisition.ProcurementPolicySetId = (await new ProcurementRequisitionPolicySelectionService(_unitOfWork)
+                .ResolveAsync(
+                    requisition.TenantId,
+                    updateDto.ProcurementPolicySetId,
+                    requisition.ProcurementCategory,
+                    requisition.TotalAmount,
+                    requisition.Currency,
+                    DateTime.UtcNow,
+                    cancellationToken))?.Id;
             requisition.UpdatedAt = DateTime.UtcNow;
 
             await _unitOfWork.ExecuteInStrategyAsync(async () =>
@@ -174,6 +184,10 @@ public class PurchaseRequisitionsController : ControllerBase
         {
             return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
         }
+        catch (ProcurementRequisitionPolicySelectionException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating purchase requisition {RequisitionId}", id);
@@ -191,6 +205,29 @@ public class PurchaseRequisitionsController : ControllerBase
         catch (ProcurementRequisitionLinkageAuthorizationException ex)
         {
             return StatusCode(403, Problem("PR_LINKAGE_FORBIDDEN", ex.Message, 403));
+        }
+    }
+
+    [HttpGet("policy-options")]
+    public async Task<ActionResult<IReadOnlyList<PurchaseRequisitionPolicyOptionDto>>> GetPolicyOptions(
+        [FromQuery] ProcurementCategoryClass category,
+        [FromQuery] decimal amount,
+        [FromQuery] string currency,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await new ProcurementRequisitionPolicySelectionService(_unitOfWork).GetEligibleAsync(
+                _tenantContext.GetCurrentTenantId(),
+                category,
+                amount,
+                currency,
+                DateTime.UtcNow,
+                cancellationToken));
+        }
+        catch (ProcurementRequisitionPolicySelectionException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
         }
     }
 
@@ -590,6 +627,15 @@ public class PurchaseRequisitionsController : ControllerBase
                 UpdatedAt = DateTime.UtcNow
             };
             await _linkageService.PrepareAsync(requisition, createDto.Linkage, CorrelationId, cancellationToken);
+            requisition.ProcurementPolicySetId = (await new ProcurementRequisitionPolicySelectionService(_unitOfWork)
+                .ResolveAsync(
+                    tenantId,
+                    createDto.ProcurementPolicySetId,
+                    requisition.ProcurementCategory,
+                    requisition.TotalAmount,
+                    requisition.Currency,
+                    DateTime.UtcNow,
+                    cancellationToken))?.Id;
 
             await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
@@ -657,6 +703,10 @@ public class PurchaseRequisitionsController : ControllerBase
             return Conflict(Problem(ex.Code, ex.Message, 409));
         }
         catch (ProcurementRequisitionLinkageValidationException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
+        }
+        catch (ProcurementRequisitionPolicySelectionException ex)
         {
             return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
         }
@@ -1498,6 +1548,10 @@ public class PurchaseRequisitionsController : ControllerBase
         SourcePlanItemDescription = requisition.SourcePlanItemDescription,
         BudgetCode = requisition.BudgetCode,
         ProcurementCategory = requisition.ProcurementCategory,
+        ProcurementPolicySetId = requisition.ProcurementPolicySetId,
+        ProcurementPolicyCode = requisition.ProcurementPolicySet?.Code,
+        ProcurementPolicyName = requisition.ProcurementPolicySet?.Name,
+        ProcurementPolicyVersion = requisition.ProcurementPolicySet?.Version,
         ProjectCode = requisition.ProjectCode,
         RequisitionType = requisition.RequisitionType,
         SpecificationTemplateReference = SpecificationReference(requisition),
@@ -1542,6 +1596,10 @@ public class PurchaseRequisitionsController : ControllerBase
             SourcePlanItemDescription = requisition.SourcePlanItemDescription,
             BudgetCode = requisition.BudgetCode,
             ProcurementCategory = requisition.ProcurementCategory,
+            ProcurementPolicySetId = requisition.ProcurementPolicySetId,
+            ProcurementPolicyCode = requisition.ProcurementPolicySet?.Code,
+            ProcurementPolicyName = requisition.ProcurementPolicySet?.Name,
+            ProcurementPolicyVersion = requisition.ProcurementPolicySet?.Version,
             ProjectCode = requisition.ProjectCode,
             RequisitionType = requisition.RequisitionType,
             SpecificationTemplateReference = SpecificationReference(requisition),

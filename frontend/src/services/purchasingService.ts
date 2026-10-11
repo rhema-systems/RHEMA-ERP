@@ -130,6 +130,10 @@ export interface PurchaseRequisitionSummaryDto {
   sourcePlanItemDescription?: string;
   budgetCode?: string;
   procurementCategory?: ProcurementCategoryClass;
+  procurementPolicySetId?: string;
+  procurementPolicyCode?: string;
+  procurementPolicyName?: string;
+  procurementPolicyVersion?: number;
   projectCode?: string;
   requisitionType: PurchaseRequisitionType;
   specificationTemplateReference?: string;
@@ -529,6 +533,7 @@ export interface CreateRfqFromPurchaseRequisitionResponseDto {
 }
 
 export interface CreatePurchaseRequisitionDto {
+  procurementPolicySetId?: string;
   requestedById: string;
   requiredDate?: string;
   priority: string;
@@ -541,6 +546,21 @@ export interface CreatePurchaseRequisitionDto {
   notes?: string;
   linkage: SavePurchaseRequisitionLinkageRequest;
   items: CreatePurchaseRequisitionItemDto[];
+}
+
+export interface PurchaseRequisitionPolicyOptionDto {
+  policySetId: string;
+  policyCode: string;
+  policyName: string;
+  policyVersion: number;
+  category: ProcurementCategoryClass;
+  method: string;
+  currencyCode: string;
+  lowerBound: number;
+  upperBound?: number;
+  lowerInclusive: boolean;
+  upperInclusive: boolean;
+  serviceClass?: string;
 }
 
 export interface UpdatePurchaseRequisitionDto extends CreatePurchaseRequisitionDto {
@@ -1407,6 +1427,23 @@ export const purchasingService = {
     } catch (e) {
       throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
     }
+  },
+
+  async getPurchaseRequisitionPolicyOptions(
+    category: ProcurementCategoryClass,
+    amount: number,
+    currency: string
+  ): Promise<PurchaseRequisitionPolicyOptionDto[]> {
+    const params = new URLSearchParams({
+      category,
+      amount: amount.toString(),
+      currency,
+    });
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/policy-options?${params}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
   },
 
   /**

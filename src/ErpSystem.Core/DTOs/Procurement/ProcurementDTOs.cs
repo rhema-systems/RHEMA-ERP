@@ -564,6 +564,10 @@ public class PurchaseRequisitionSummaryDto
     public string? SourcePlanItemDescription { get; set; }
     public string? BudgetCode { get; set; }
     public ProcurementCategoryClass? ProcurementCategory { get; set; }
+    public Guid? ProcurementPolicySetId { get; set; }
+    public string? ProcurementPolicyCode { get; set; }
+    public string? ProcurementPolicyName { get; set; }
+    public int? ProcurementPolicyVersion { get; set; }
     public string? ProjectCode { get; set; }
     public PurchaseRequisitionType RequisitionType { get; set; }
     public string? SpecificationTemplateReference { get; set; }
@@ -620,6 +624,13 @@ public class PurchaseRequisitionItemDto
 /// </summary>
 public class CreatePurchaseRequisitionDto
 {
+    /// <summary>
+    /// Exact eligible Published policy. May be omitted when the server finds one
+    /// unambiguous eligible policy (or when only one Published policy exists for
+    /// backward-compatible Draft creation).
+    /// </summary>
+    public Guid? ProcurementPolicySetId { get; set; }
+
     public DateTime? RequiredDate { get; set; }
     public string Priority { get; set; } = "Normal";
     public string? Department { get; set; }
@@ -650,6 +661,22 @@ public class CreatePurchaseRequisitionDto
 
     [Required]
     public List<CreatePurchaseRequisitionItemDto> Items { get; set; } = new();
+}
+
+public sealed class PurchaseRequisitionPolicyOptionDto
+{
+    public Guid PolicySetId { get; set; }
+    public string PolicyCode { get; set; } = string.Empty;
+    public string PolicyName { get; set; } = string.Empty;
+    public int PolicyVersion { get; set; }
+    public ProcurementCategoryClass Category { get; set; }
+    public ProcurementMethodType Method { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal LowerBound { get; set; }
+    public decimal? UpperBound { get; set; }
+    public bool LowerInclusive { get; set; }
+    public bool UpperInclusive { get; set; }
+    public string? ServiceClass { get; set; }
 }
 
 public sealed class UpdatePurchaseRequisitionDto : CreatePurchaseRequisitionDto

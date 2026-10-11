@@ -12652,6 +12652,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.ProjectId });
             entity.HasIndex(item => new { item.TenantId, item.OrganizationUnitId });
             entity.HasIndex(item => new { item.TenantId, item.ProcurementCategory });
+            entity.HasIndex(item => new { item.TenantId, item.ProcurementPolicySetId });
             entity.HasIndex(item => new { item.TenantId, item.SpecificationTemplateId });
             entity.HasIndex(item => new { item.TenantId, item.ApprovedExceptionRuleId });
             entity.ToTable("PurchaseRequisitions", table =>
@@ -12679,6 +12680,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(item => item.ProjectId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.SpecificationTemplate).WithMany()
                 .HasForeignKey(item => item.SpecificationTemplateId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ProcurementPolicySet).WithMany()
+                .HasForeignKey(item => item.ProcurementPolicySetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.ApprovedExceptionRule).WithMany()
                 .HasForeignKey(item => item.ApprovedExceptionRuleId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<WorkflowInstance>().WithMany()

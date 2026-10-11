@@ -807,6 +807,13 @@ public class PurchaseRequisition : TenantEntity
 
     public ProcurementCategoryClass? ProcurementCategory { get; set; }
 
+    /// <summary>
+    /// Exact Published procurement policy selected while the requisition is a Draft.
+    /// The immutable authority route and sourcing case retain their own versioned
+    /// snapshots when the requisition is submitted and released.
+    /// </summary>
+    public Guid? ProcurementPolicySetId { get; set; }
+
     public Guid? SpecificationTemplateId { get; set; }
 
     [MaxLength(50)]
@@ -898,6 +905,7 @@ public class PurchaseRequisition : TenantEntity
     public virtual OrganizationUnit? OrganizationUnit { get; set; }
     public virtual ProcurementBudget? Budget { get; set; }
     public virtual ProcurementSpecificationTemplate? SpecificationTemplate { get; set; }
+    public virtual ProcurementPolicySet? ProcurementPolicySet { get; set; }
     public virtual ProcurementPolicyExceptionRule? ApprovedExceptionRule { get; set; }
     public virtual ProcurementBudgetCommitment? BudgetCommitment { get; set; }
     public virtual ICollection<ProcurementRequisitionSourcingRelease> SourcingReleases { get; set; } = new List<ProcurementRequisitionSourcingRelease>();
