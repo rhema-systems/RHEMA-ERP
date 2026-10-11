@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.MobilePos;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -82,6 +83,22 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
                 BusinessPartnerRoleId = role.Id,
                 Code = role.BusinessPartner.PartnerCode,
                 Name = role.BusinessPartner.PartnerName
+            })
+            .ToListAsync(cancellationToken);
+
+        var currencies = await _db.Currencies.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+            .OrderByDescending(item => item.IsBaseCurrency)
+            .ThenBy(item => item.DisplayOrder)
+            .ThenBy(item => item.CurrencyName)
+            .Select(item => new MobilePosReferenceOptionDto
+            {
+                Id = item.Id,
+                Code = item.CurrencyCode,
+                Name = item.CurrencyName,
+                Secondary = item.IsBaseCurrency
+                    ? "Base currency"
+                    : item.CurrencySymbol
             })
             .ToListAsync(cancellationToken);
 
@@ -163,7 +180,14 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         var definitions = await _db.FinanceDimensionDefinitions.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.IsActive)
             .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Name)
-            .Select(item => new { item.Id, item.Code, item.Name })
+            .Select(item => new
+            {
+                item.Id,
+                item.Code,
+                item.Name,
+                item.Description,
+                item.ValueSourceType
+            })
             .ToListAsync(cancellationToken);
         var dimensionValues = await _db.FinanceDimensionValues.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.IsActive &&
@@ -182,6 +206,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         return new MobilePosAdministrationReferencesDto
         {
             Customers = eligibleCustomerRoles,
+            Currencies = currencies,
             Locations = locations,
             Warehouses = warehouses,
             CompanyProfiles = companyProfiles,
@@ -194,6 +219,8 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
                 DefinitionId = definition.Id,
                 Code = definition.Code,
                 Name = definition.Name,
+                Description = definition.Description,
+                ValueSourceType = definition.ValueSourceType,
                 Values = dimensionValues
                     .Where(value => value.FinanceDimensionDefinitionId == definition.Id)
                     .Select(value => value.Option)
@@ -224,7 +251,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         if (currency.Length != 3)
             throw new InvalidOperationException("Currency must be a three-character code.");
 
-        await ValidateStoreReferencesAsync(dto, cancellationToken);
+        await ValidateStoreReferencesAsync(dto, currency, cancellationToken);
 
         var duplicate = await _db.MobilePosStores.AnyAsync(item =>
             item.TenantId == tenantId && item.Code == code && (!id.HasValue || item.Id != id.Value), cancellationToken);
@@ -291,7 +318,17 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             store.Id,
             before,
             StoreAuditSnapshot(store));
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new BusinessRuleException(
+                "MOBILE_POS_STORE_VERSION_CONFLICT",
+                "This Mobile POS store changed after it was opened. Reload the latest store details, review your changes, and save again.",
+                StatusCodes.Status409Conflict);
+        }
         return await GetStoreRequiredAsync(store.Id, cancellationToken);
     }
 
@@ -376,7 +413,16 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         if (storeId.HasValue)
             query = query.Where(item => item.MobilePosStoreId == storeId.Value);
         var tills = await query.OrderBy(item => item.TillNumber).ToListAsync(cancellationToken);
-        return tills.Select(MapTill).ToList();
+        var tillIds = tills.Select(item => item.Id).ToArray();
+        var heartbeatByTill = await _db.MobilePosDevices.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && item.MobilePosTillId.HasValue &&
+                           tillIds.Contains(item.MobilePosTillId.Value) && item.LastSeenAtUtc.HasValue)
+            .GroupBy(item => item.MobilePosTillId!.Value)
+            .Select(group => new { TillId = group.Key, LastSeenAtUtc = group.Max(item => item.LastSeenAtUtc) })
+            .ToDictionaryAsync(item => item.TillId, item => item.LastSeenAtUtc, cancellationToken);
+        return tills.Select(item => MapTill(
+            item,
+            heartbeatByTill.TryGetValue(item.Id, out var lastSeenAtUtc) ? lastSeenAtUtc : null)).ToList();
     }
 
     public async Task<MobilePosTillDto> SaveTillAsync(
@@ -425,9 +471,8 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             till = await _db.MobilePosTills.Include(item => item.PaymentMethods).SingleOrDefaultAsync(
                 item => item.TenantId == tenantId && item.Id == id.Value, cancellationToken)
                 ?? throw new KeyNotFoundException("The Mobile POS till was not found.");
-            ApplyRowVersion(till, dto.RowVersion);
+            ApplyTillRowVersion(till, dto.RowVersion);
             before = TillAuditSnapshot(till);
-            _db.MobilePosTillPaymentMethods.RemoveRange(till.PaymentMethods);
         }
         else
         {
@@ -452,23 +497,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             till.LastActivatedAtUtc = DateTime.UtcNow;
         StampUpdated(till);
 
-        foreach (var method in dto.PaymentMethods)
-        {
-            till.PaymentMethods.Add(new MobilePosTillPaymentMethod
-            {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                MobilePosTillId = till.Id,
-                PaymentMethodId = method.PaymentMethodId,
-                AllowOnline = method.AllowOnline,
-                AllowOffline = method.AllowOffline,
-                RequireExternalAuthorizationReference = method.RequireExternalAuthorizationReference,
-                DisplayOrder = method.DisplayOrder,
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = UserName,
-                CreatedById = UserId
-            });
-        }
+        ReconcileTillPaymentMethods(till, dto.PaymentMethods, tenantId);
 
         await AddAuditAsync(
             id.HasValue ? "MobilePOS.Till.Updated" : "MobilePOS.Till.Created",
@@ -476,7 +505,14 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             till.Id,
             before,
             TillAuditSnapshot(till));
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            throw TillConcurrencyConflict(exception);
+        }
         return await GetTillRequiredAsync(till.Id, cancellationToken);
     }
 
@@ -709,13 +745,10 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         if (dto.LastSyncAtUtc.HasValue && (!device.LastSyncAtUtc.HasValue || dto.LastSyncAtUtc > device.LastSyncAtUtc))
             device.LastSyncAtUtc = dto.LastSyncAtUtc.Value;
         StampUpdated(device);
-        if (device.MobilePosTillId.HasValue)
-        {
-            var till = await _db.MobilePosTills.SingleAsync(item =>
-                item.TenantId == TenantId && item.Id == device.MobilePosTillId.Value, cancellationToken);
-            till.LastHeartbeatAtUtc = device.LastSeenAtUtc;
-            StampUpdated(till);
-        }
+        // Heartbeats are operational telemetry. Updating the till configuration row here used to
+        // rotate its SQL rowversion and invalidate an administrator's open edit dialog even though
+        // no till configuration had changed. Till reads derive their last heartbeat from assigned
+        // devices instead, so telemetry no longer competes with governed configuration edits.
         await _db.SaveChangesAsync(cancellationToken);
         return await GetDeviceRequiredAsync(device.Id, cancellationToken);
     }
@@ -988,7 +1021,10 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
     {
         var till = await TillQuery().SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("The Mobile POS till was not found.");
-        return MapTill(till);
+        var lastHeartbeatAtUtc = await _db.MobilePosDevices.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && item.MobilePosTillId == id && item.LastSeenAtUtc.HasValue)
+            .MaxAsync(item => item.LastSeenAtUtc, cancellationToken);
+        return MapTill(till, lastHeartbeatAtUtc);
     }
 
     private async Task<MobilePosDeviceDto> GetDeviceRequiredAsync(Guid id, CancellationToken cancellationToken)
@@ -998,9 +1034,17 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         return MapDevice(device);
     }
 
-    private async Task ValidateStoreReferencesAsync(MobilePosStoreUpsertDto dto, CancellationToken cancellationToken)
+    private async Task ValidateStoreReferencesAsync(
+        MobilePosStoreUpsertDto dto,
+        string currencyCode,
+        CancellationToken cancellationToken)
     {
         var tenantId = TenantId;
+        var now = DateTime.UtcNow;
+        if (!await _db.Currencies.AsNoTracking().AnyAsync(
+                item => item.TenantId == tenantId && !item.IsDeleted &&
+                        item.CurrencyCode == currencyCode && item.IsActive, cancellationToken))
+            throw new InvalidOperationException("Select an active Finance currency belonging to the current tenant.");
         if (!await _db.Locations.AsNoTracking().AnyAsync(
                 item => item.TenantId == tenantId && item.Id == dto.LocationId && item.IsActive, cancellationToken))
             throw new InvalidOperationException("Select an active operating location belonging to the current tenant.");
@@ -1016,7 +1060,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         await ValidateApprovedWalkInCustomerAsync(
             dto.DefaultWalkInBusinessPartnerId,
             dto.DefaultWalkInBusinessPartnerRoleId,
-            DateTime.UtcNow,
+            now,
             cancellationToken);
 
         if (dto.DimensionDefaults.Count != dto.DimensionDefaults.Select(item => item.FinanceDimensionDefinitionId).Distinct().Count())
@@ -1028,8 +1072,8 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
                 .AnyAsync(item => item.TenantId == tenantId && item.Id == input.FinanceDimensionValueId &&
                                   item.FinanceDimensionDefinitionId == input.FinanceDimensionDefinitionId &&
                                   item.IsActive && item.FinanceDimensionDefinition.IsActive &&
-                                  item.EffectiveDate <= DateTime.UtcNow &&
-                                  (!item.ExpiryDate.HasValue || item.ExpiryDate > DateTime.UtcNow), cancellationToken);
+                                  item.EffectiveDate <= now &&
+                                  (!item.ExpiryDate.HasValue || item.ExpiryDate > now), cancellationToken);
             if (!valid)
                 throw new InvalidOperationException("Every store Finance dimension value must be active, effective, and belong to its selected dimension.");
         }
@@ -1121,7 +1165,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         RowVersion = Convert.ToBase64String(item.RowVersion)
     };
 
-    private static MobilePosTillDto MapTill(MobilePosTill item) => new()
+    private static MobilePosTillDto MapTill(MobilePosTill item, DateTime? lastHeartbeatAtUtc) => new()
     {
         Id = item.Id,
         MobilePosStoreId = item.MobilePosStoreId,
@@ -1134,7 +1178,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         LiquidityAccountCode = item.LiquidityAccount.Code,
         CurrencyCode = item.LiquidityAccount.Currency,
         Notes = item.Notes,
-        LastHeartbeatAtUtc = item.LastHeartbeatAtUtc,
+        LastHeartbeatAtUtc = lastHeartbeatAtUtc,
         RowVersion = Convert.ToBase64String(item.RowVersion),
         PaymentMethods = item.PaymentMethods.OrderBy(value => value.DisplayOrder).Select(value => new MobilePosPaymentMethodDto
         {
@@ -1184,7 +1228,97 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         byte[] bytes;
         try { bytes = Convert.FromBase64String(value); }
         catch (FormatException) { throw new InvalidOperationException("The row version is invalid."); }
-        _db.Entry(entity).Property("RowVersion").OriginalValue = bytes;
+        var property = _db.Entry(entity).Property<byte[]>("RowVersion");
+        var current = property.CurrentValue;
+        if (bytes.Length == 0 || current == null || current.Length == 0 || !current.AsSpan().SequenceEqual(bytes))
+            throw new BusinessRuleException(
+                "MOBILE_POS_VERSION_CONFLICT",
+                "This Mobile POS record changed after it was opened. Reload the latest details, review your changes, and save again.",
+                StatusCodes.Status409Conflict);
+        property.OriginalValue = bytes;
+    }
+
+    private void ApplyTillRowVersion(MobilePosTill till, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new BusinessRuleException(
+                "MOBILE_POS_TILL_ROW_VERSION_REQUIRED",
+                "Refresh the Mobile POS tills and reopen this till before saving.",
+                StatusCodes.Status409Conflict);
+
+        byte[] expected;
+        try
+        {
+            expected = Convert.FromBase64String(value);
+        }
+        catch (FormatException)
+        {
+            throw new BusinessRuleException(
+                "MOBILE_POS_TILL_ROW_VERSION_INVALID",
+                "The till edit token is invalid. Refresh the Mobile POS tills and reopen this till.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (expected.Length == 0 || till.RowVersion.Length == 0 ||
+            expected.Length != till.RowVersion.Length ||
+            !CryptographicOperations.FixedTimeEquals(expected, till.RowVersion))
+            throw TillConcurrencyConflict();
+
+        _db.Entry(till).Property(item => item.RowVersion).OriginalValue = expected;
+    }
+
+    private void ReconcileTillPaymentMethods(
+        MobilePosTill till,
+        IReadOnlyCollection<MobilePosTillPaymentMethodInputDto> requestedMethods,
+        Guid tenantId)
+    {
+        var requestedIds = requestedMethods.Select(item => item.PaymentMethodId).ToHashSet();
+        var obsolete = till.PaymentMethods.Where(item => !requestedIds.Contains(item.PaymentMethodId)).ToArray();
+        _db.MobilePosTillPaymentMethods.RemoveRange(obsolete);
+
+        var currentByMethod = till.PaymentMethods
+            .Where(item => requestedIds.Contains(item.PaymentMethodId))
+            .ToDictionary(item => item.PaymentMethodId);
+        foreach (var requested in requestedMethods)
+        {
+            if (!currentByMethod.TryGetValue(requested.PaymentMethodId, out var configured))
+            {
+                configured = new MobilePosTillPaymentMethod
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    MobilePosTillId = till.Id,
+                    PaymentMethodId = requested.PaymentMethodId,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = UserName,
+                    CreatedById = UserId
+                };
+                till.PaymentMethods.Add(configured);
+            }
+            else if (configured.AllowOnline != requested.AllowOnline ||
+                     configured.AllowOffline != requested.AllowOffline ||
+                     configured.RequireExternalAuthorizationReference != requested.RequireExternalAuthorizationReference ||
+                     configured.DisplayOrder != requested.DisplayOrder)
+            {
+                StampUpdated(configured);
+            }
+
+            configured.AllowOnline = requested.AllowOnline;
+            configured.AllowOffline = requested.AllowOffline;
+            configured.RequireExternalAuthorizationReference = requested.RequireExternalAuthorizationReference;
+            configured.DisplayOrder = requested.DisplayOrder;
+        }
+    }
+
+    private static BusinessRuleException TillConcurrencyConflict(Exception? innerException = null)
+    {
+        var conflict = new BusinessRuleException(
+            "MOBILE_POS_TILL_CONCURRENCY_CONFLICT",
+            "This till changed after you opened it. The latest till configuration must be loaded before you save again.",
+            StatusCodes.Status409Conflict);
+        if (innerException != null)
+            conflict.Data[nameof(innerException)] = innerException.GetType().Name;
+        return conflict;
     }
 
     private async Task AddAuditAsync(

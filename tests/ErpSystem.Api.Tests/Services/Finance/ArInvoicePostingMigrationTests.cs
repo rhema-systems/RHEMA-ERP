@@ -391,6 +391,62 @@ public sealed partial class ArInvoicePostingMigrationTests
     }
 
     [Theory]
+    [MemberData(nameof(NonEnforcedCreditLimits))]
+    public async Task CreateInvoice_ShouldTreatNullOrZeroApprovedProfileCreditLimitAsUnlimited(decimal? creditLimit)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var profile = await db.Set<BusinessPartnerArProfileVersion>().SingleAsync();
+        profile.CreditLimit = creditLimit;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var created = await service.CreateAsync(CreditLimitRequest(fixture));
+
+        created.TotalAmount.Should().Be(100m);
+    }
+
+    public static TheoryData<decimal?> NonEnforcedCreditLimits => new()
+    {
+        null,
+        0m
+    };
+
+    [Fact]
+    public async Task CreateInvoice_ShouldEnforcePositiveApprovedProfileCreditLimit()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var profile = await db.Set<BusinessPartnerArProfileVersion>().SingleAsync();
+        profile.CreditLimit = 50m;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var action = () => service.CreateAsync(CreditLimitRequest(fixture));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*exceed the customer's credit limit of 50.00 GHS*");
+    }
+
+    private static InvoiceCreateDto CreditLimitRequest(ArInvoiceFixture fixture) => new()
+    {
+        BusinessPartnerId = fixture.Customer.Id,
+        InvoiceDate = new DateTime(2026, 7, 6),
+        CurrencyCode = "GHS",
+        LineItems =
+        [
+            new InvoiceLineItemCreateDto
+            {
+                LineItemType = "GLAccount", GLAccountId = fixture.RevenueAccount.Id,
+                Description = "Credit limit regression", Quantity = 1m, UnitPrice = 100m,
+                TaxTreatment = TaxTreatment.OutOfScope
+            }
+        ]
+    };
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task UpdateInvoiceDate_ShouldCaptureEffectiveProfileAndPreserveAcceptedTerms(bool savedTerm)

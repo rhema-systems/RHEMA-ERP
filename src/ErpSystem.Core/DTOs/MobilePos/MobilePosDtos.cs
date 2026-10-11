@@ -547,12 +547,15 @@ public sealed class MobilePosDimensionReferenceDto
     public Guid DefinitionId { get; set; }
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string ValueSourceType { get; set; } = string.Empty;
     public IReadOnlyList<MobilePosReferenceOptionDto> Values { get; set; } = [];
 }
 
 public sealed class MobilePosAdministrationReferencesDto
 {
     public IReadOnlyList<MobilePosCustomerReferenceDto> Customers { get; set; } = [];
+    public IReadOnlyList<MobilePosReferenceOptionDto> Currencies { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> Locations { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> Warehouses { get; set; } = [];
     public IReadOnlyList<MobilePosReferenceOptionDto> CompanyProfiles { get; set; } = [];

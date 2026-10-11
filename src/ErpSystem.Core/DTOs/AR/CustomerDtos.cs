@@ -34,6 +34,7 @@ public class CustomerDto
     public string? Country { get; set; }
     public string? TaxId { get; set; }
     public decimal CreditLimit { get; set; }
+    public bool IsUnlimitedCredit { get; set; }
     public decimal OutstandingBalance { get; set; }
     public decimal CustomerCreditBalance { get; set; }
     public int PaymentTermsDays { get; set; }
@@ -123,6 +124,7 @@ public class CustomerBalanceDto
     public decimal Days90Plus { get; set; }
     public decimal CreditLimit { get; set; }
     public decimal AvailableCredit { get; set; }
+    public bool IsUnlimitedCredit { get; set; }
 }
 
 public class CreditCheckResultDto
@@ -132,5 +134,6 @@ public class CreditCheckResultDto
     public decimal CurrentOutstanding { get; set; }
     public decimal CreditLimit { get; set; }
     public decimal AvailableCredit { get; set; }
+    public bool IsUnlimitedCredit { get; set; }
     public string? Message { get; set; }
 }

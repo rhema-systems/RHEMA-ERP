@@ -288,7 +288,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// **Business Rules:**
         /// - Available credit = Credit Limit - (Outstanding Balance + Pending Orders)
         /// - If the requested amount exceeds available credit, the result indicates a credit hold
-        /// - Customers with no credit limit configured are treated as unlimited (always approved)
+        /// - Customers with a null or zero credit limit are treated as unlimited; only positive limits are enforced
         /// - Zero or negative amounts are rejected as invalid
         ///
         /// **Authorization:** Requires authenticated user

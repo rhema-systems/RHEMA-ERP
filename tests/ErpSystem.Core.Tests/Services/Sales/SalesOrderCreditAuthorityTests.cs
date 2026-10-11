@@ -17,6 +17,32 @@ public sealed class SalesOrderCreditAuthorityTests
     [Fact]
     public async Task Legacy_business_partner_limit_cannot_authorize_order_above_approved_ar_profile_limit()
     {
+        var (service, partnerId) = CreateService(500m);
+
+        var allowed = await service.ValidateCreditLimitAsync(partnerId, 501m);
+
+        allowed.Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(NonEnforcedCreditLimits))]
+    public async Task Null_or_zero_approved_ar_profile_limit_authorizes_unlimited_credit(decimal? creditLimit)
+    {
+        var (service, partnerId) = CreateService(creditLimit);
+
+        var allowed = await service.ValidateCreditLimitAsync(partnerId, 10_000_000m);
+
+        allowed.Should().BeTrue();
+    }
+
+    public static TheoryData<decimal?> NonEnforcedCreditLimits => new()
+    {
+        null,
+        0m
+    };
+
+    private static (SalesOrderService Service, Guid PartnerId) CreateService(decimal? profileCreditLimit)
+    {
         var tenantId = Guid.NewGuid();
         var partnerId = Guid.NewGuid();
         var role = new BusinessPartnerRole
@@ -45,7 +71,7 @@ public sealed class SalesOrderCreditAuthorityTests
             VersionNumber = 1,
             Status = BusinessPartnerFinanceProfileStatus.Approved,
             EffectiveFrom = DateTime.UtcNow.Date.AddDays(-1),
-            CreditLimit = 500m
+            CreditLimit = profileCreditLimit
         };
 
         var partnerRepository = new Mock<IGenericRepository<BusinessPartner>>();
@@ -78,8 +104,6 @@ public sealed class SalesOrderCreditAuthorityTests
             Mock.Of<IWorkflowStatusAdapterRegistry>(),
             NullLogger<SalesOrderService>.Instance);
 
-        var allowed = await service.ValidateCreditLimitAsync(partnerId, 501m);
-
-        allowed.Should().BeFalse();
+        return (service, partnerId);
     }
 }

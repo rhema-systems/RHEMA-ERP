@@ -164,6 +164,7 @@ export interface NavItem {
   children?: NavItem[];
   roles?: string[];
   permissions?: string[];
+  permissionMode?: 'all' | 'any';
   accessMode?: 'all' | 'any';
   navigationSurface?: 'operations' | 'settings';
   /**
@@ -176,7 +177,7 @@ export interface NavItem {
 }
 
 export function canAccessNavItem(
-  item: Pick<NavItem, 'roles' | 'permissions' | 'accessMode'>,
+  item: Pick<NavItem, 'roles' | 'permissions' | 'permissionMode' | 'accessMode'>,
   hasAnyRole: (roles: string[]) => boolean,
   hasAnyPermission: (permissions: string[]) => boolean
 ): boolean {
@@ -187,7 +188,11 @@ export function canAccessNavItem(
   }
 
   if (item.permissions?.length) {
-    checks.push(hasAnyPermission(item.permissions));
+    checks.push(
+      item.permissionMode === 'all'
+        ? item.permissions.every(permission => hasAnyPermission([permission]))
+        : hasAnyPermission(item.permissions)
+    );
   }
 
   if (checks.length === 0) {
@@ -2879,6 +2884,38 @@ export const navigationItems: NavItem[] = [
       { title: 'Delivery Notes', href: '/sales/deliveries', icon: Truck },
       { title: 'Sales Agreements', href: '/sales/agreements', icon: FileText },
       {
+        title: 'Point of Sales',
+        href: '/sales/point-of-sales/day-end',
+        icon: Smartphone,
+        permissions: [
+          'MobilePOS.Till.Review',
+          'MobilePOS.Reports.View',
+          'MobilePOS.Device.Approve',
+        ],
+        children: [
+          {
+            title: 'Day End',
+            href: '/sales/point-of-sales/day-end',
+            icon: CalendarClock,
+            permissions: ['MobilePOS.Till.Review', 'Finance.CashTills.Closures.Review'],
+            permissionMode: 'all',
+          },
+          {
+            title: 'Till Report',
+            href: '/sales/point-of-sales/till-report',
+            icon: BarChart3,
+            permissions: ['MobilePOS.Reports.View', 'Finance.CashTills.Closures.Review'],
+            permissionMode: 'all',
+          },
+          {
+            title: 'Devices',
+            href: '/sales/point-of-sales/devices',
+            icon: Smartphone,
+            permissions: ['MobilePOS.Device.Approve'],
+          },
+        ],
+      },
+      {
         title: 'CRM',
         href: '/sales/crm',
         icon: Users,
@@ -4439,8 +4476,6 @@ export const navigationItems: NavItem[] = [
             permissions: [
               'MobilePOS.Store.View',
               'MobilePOS.Store.Manage',
-              'MobilePOS.Device.Approve',
-              'MobilePOS.Till.Review',
             ],
             accessMode: 'any',
           },

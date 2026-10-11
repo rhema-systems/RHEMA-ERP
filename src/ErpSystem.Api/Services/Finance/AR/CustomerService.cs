@@ -169,7 +169,10 @@ public class CustomerService : ICustomerService
 
         var outstandingBalance = settlementBalances.Sum(b => b.OutstandingAmount);
         var readiness = (await ResolveCustomerProfilesAsync(new[] { partner }, asOfDate, cancellationToken))[partner.Id];
-        var creditLimit = readiness.ArProfile?.CreditLimit ?? 0m;
+        var configuredCreditLimit = readiness.ArProfile?.CreditLimit;
+        var creditLimit = configuredCreditLimit ?? 0m;
+        var isUnlimitedCredit = readiness.IsReady &&
+            !BusinessPartnerFinanceProfilePolicy.IsCreditLimitEnforced(configuredCreditLimit);
 
         var balance = new CustomerBalanceDto
         {
@@ -177,7 +180,8 @@ public class CustomerService : ICustomerService
             CustomerName = partner.PartnerName,
             TotalOutstanding = outstandingBalance,
             CreditLimit = creditLimit,
-            AvailableCredit = Math.Max(0m, creditLimit - outstandingBalance)
+            AvailableCredit = isUnlimitedCredit ? 0m : Math.Max(0m, creditLimit - outstandingBalance),
+            IsUnlimitedCredit = isUnlimitedCredit
         };
 
         foreach (var settlementBalance in settlementBalances)
@@ -201,10 +205,15 @@ public class CustomerService : ICustomerService
             CurrentOutstanding = balance.TotalOutstanding,
             RequestedAmount = amount,
             AvailableCredit = availableCredit,
-            IsApproved = readiness.IsReady && amount <= availableCredit,
-            Message = !readiness.IsReady ? $"{readiness.Code}: {readiness.Message}" : amount > availableCredit
-                ? $"Requested amount exceeds available credit by {amount - availableCredit:C}."
-                : null
+            IsUnlimitedCredit = balance.IsUnlimitedCredit,
+            IsApproved = readiness.IsReady && (balance.IsUnlimitedCredit || amount <= availableCredit),
+            Message = !readiness.IsReady
+                ? $"{readiness.Code}: {readiness.Message}"
+                : balance.IsUnlimitedCredit
+                    ? "No numeric credit limit is enforced for this customer."
+                    : amount > availableCredit
+                        ? $"Requested amount exceeds available credit by {amount - availableCredit:C}."
+                        : null
         };
     }
 
@@ -396,6 +405,8 @@ public class CustomerService : ICustomerService
             Country = partner.PhysicalCountry ?? partner.MailingCountry,
             TaxId = partner.TaxIdentificationNumber,
             CreditLimit = readiness.ArProfile?.CreditLimit ?? 0m,
+            IsUnlimitedCredit = readiness.IsReady &&
+                !BusinessPartnerFinanceProfilePolicy.IsCreditLimitEnforced(readiness.ArProfile?.CreditLimit),
             OutstandingBalance = outstandingBalance ?? partner.OutstandingBalance ?? 0m,
             CustomerCreditBalance = customerCreditBalance,
             PaymentTermsDays = paymentTerm?.DueDays ?? 30,

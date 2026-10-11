@@ -34,7 +34,8 @@ public interface ICustomerService
 
     /// <summary>
     /// Validates if a customer can have additional credit.
-    /// Checks credit limit vs outstanding balance.
+    /// Checks positive credit limits against outstanding balance. Null or zero means unlimited;
+    /// partner readiness and explicit credit hold controls remain applicable.
     /// </summary>
     Task<CreditCheckResultDto> CheckCreditLimitAsync(Guid customerId, decimal additionalAmount, CancellationToken cancellationToken = default);
 

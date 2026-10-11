@@ -20,8 +20,6 @@ export default function AdministrationLayout({
     requiredPermissions = [
       'MobilePOS.Store.View',
       'MobilePOS.Store.Manage',
-      'MobilePOS.Device.Approve',
-      'MobilePOS.Till.Review',
     ];
     accessMode = 'any';
   } else if (pathname.startsWith('/administration/finance')) {

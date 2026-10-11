@@ -443,11 +443,14 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Check credit limit before saving (using Base Currency)
             // Note: Customer.OutstandingBalance is now assumed to be in Base Currency
             var newOutstanding = customer.OutstandingBalance + invoice.BaseCurrencyAmount;
-            if (newOutstanding > counterparty.Profile.CreditLimit)
+            var creditLimit = counterparty.Profile.CreditLimit;
+            if (BusinessPartnerFinanceProfilePolicy.IsCreditLimitEnforced(creditLimit) &&
+                newOutstanding > creditLimit!.Value)
             {
                 _logger.LogWarning("Credit limit exceeded for customer {CustomerId}. Limit: {Limit} {BaseCurrency}, New Outstanding: {Outstanding} {BaseCurrency}",
-                    customer.Id, counterparty.Profile.CreditLimit, tenant.BaseCurrency, newOutstanding, tenant.BaseCurrency);
-                // Allow creation but might flag for approval in a real system
+                    customer.Id, creditLimit, tenant.BaseCurrency, newOutstanding, tenant.BaseCurrency);
+                throw new InvalidOperationException(
+                    $"Invoice would exceed the customer's credit limit of {creditLimit.Value:0.00} {tenant.BaseCurrency}.");
             }
 
             if (producer is not null)

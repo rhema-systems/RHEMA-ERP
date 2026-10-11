@@ -404,7 +404,7 @@ public sealed class MobilePosAdministrationController : ControllerBase
         => Ok(await _tillSessions.GetReviewQueueAsync(cancellationToken));
 
     [HttpGet("till-close-report")]
-    [Authorize(Policy = MobilePosPermissions.ReviewTill)]
+    [Authorize(Policy = MobilePosPermissions.ViewReports)]
     [Authorize(Policy = FinancePermissions.ReviewCashTillClosures)]
     public async Task<ActionResult<IReadOnlyList<MobilePosTillCloseSubmissionDto>>> GetTillCloseReport(
         CancellationToken cancellationToken)

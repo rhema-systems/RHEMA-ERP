@@ -172,7 +172,7 @@ export default function CustomersPage() {
                                                 </span>
                                             </TableCell>
                                             <TableCell className="text-right text-muted-foreground">
-                                                {formatCurrency(customer.creditLimit, customer.currencyCode)}
+                                                {customer.isUnlimitedCredit ? 'Unlimited' : formatCurrency(customer.creditLimit, customer.currencyCode)}
                                             </TableCell>
                                             <TableCell>
                                                 <Badge

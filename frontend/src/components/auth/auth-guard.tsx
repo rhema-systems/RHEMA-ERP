@@ -9,6 +9,7 @@ import {
   getCurrentRelativeUrl,
 } from '../../lib/auth-redirect';
 import {
+  hasAllPermissionsAccess,
   hasAnyPermissionAccess,
   hasAnyRoleAccess,
 } from '../../lib/permissions';
@@ -20,6 +21,7 @@ interface AuthGuardProps {
   requiredPermissions?: string[];
   requiredRoles?: string[];
   accessMode?: 'all' | 'any';
+  permissionMode?: 'all' | 'any';
 }
 
 export function AuthGuard({
@@ -29,6 +31,7 @@ export function AuthGuard({
   requiredPermissions,
   requiredRoles,
   accessMode = 'all',
+  permissionMode = 'any',
 }: AuthGuardProps) {
   const router = useRouter();
   const { user, isLoading } = useAuth();
@@ -41,7 +44,9 @@ export function AuthGuard({
   const accessResolved =
     !hasAccessRequirements || !!effectiveUser || !isLoading;
   const hasRequiredPermission = requiredPermissions?.length
-    ? hasAnyPermissionAccess(effectiveUser, requiredPermissions)
+    ? permissionMode === 'all'
+      ? hasAllPermissionsAccess(effectiveUser, requiredPermissions)
+      : hasAnyPermissionAccess(effectiveUser, requiredPermissions)
     : true;
   const hasRequiredRole = requiredRoles?.length
     ? hasAnyRoleAccess(effectiveUser, requiredRoles)

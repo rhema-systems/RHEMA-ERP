@@ -189,6 +189,21 @@ public sealed class MobilePosFoundationTests
     }
 
     [Fact]
+    public void TillCloseReportEndpoint_ShouldRequireReportAndFinanceClosureReviewPermissions()
+    {
+        var action = typeof(MobilePosAdministrationController)
+            .GetMethod(nameof(MobilePosAdministrationController.GetTillCloseReport));
+
+        action.Should().NotBeNull();
+        action!.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .Should().BeEquivalentTo(
+                MobilePosPermissions.ViewReports,
+                FinancePermissions.ReviewCashTillClosures);
+    }
+
+    [Fact]
     public void Model_ShouldEnforceTenantScopedStoreTillAssignmentAndDeviceIdentityKeys()
     {
         using var db = CreateContext();

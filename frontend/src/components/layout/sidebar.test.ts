@@ -71,4 +71,17 @@ describe('canAccessNavItem', () => {
       )
     ).toBe(false);
   });
+
+  it('requires every permission when permission mode is all', () => {
+    expect(
+      canAccessNavItem(
+        {
+          permissions: ['MobilePOS.Till.Review', 'Finance.CashTills.Closures.Review'],
+          permissionMode: 'all',
+        },
+        denyRoles,
+        permissions => permissions.includes('MobilePOS.Till.Review')
+      )
+    ).toBe(false);
+  });
 });
