@@ -9,8 +9,6 @@ describe('Mobile POS settings access', () => {
       permissions: [
         'MobilePOS.Store.View',
         'MobilePOS.Store.Manage',
-        'MobilePOS.Device.Approve',
-        'MobilePOS.Till.Review',
       ],
       roles: undefined,
       accessMode: undefined,
@@ -28,10 +26,10 @@ describe('Mobile POS settings access', () => {
     })).toBe(false);
   });
 
-  it('admits an HQ till reviewer to the shared administration surface', () => {
+  it('keeps operational review permissions on the Sales Point of Sales pages', () => {
     expect(canAccessSettingsItem(subject, {
       hasAnyRole: () => false,
       hasAnyPermission: permissions => permissions.includes('MobilePOS.Till.Review'),
-    })).toBe(true);
+    })).toBe(false);
   });
 });
