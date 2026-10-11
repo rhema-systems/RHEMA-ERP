@@ -57,6 +57,26 @@ const errorMessage = (error: unknown, fallback: string) => {
   return candidate?.message || fallback;
 };
 
+const errorStatus = (error: unknown) => (error as { status?: number; response?: { status?: number } })?.status
+  ?? (error as { response?: { status?: number } })?.response?.status;
+
+const tillInput = (till: MobilePosTill): MobilePosTillInput => ({
+  mobilePosStoreId: till.mobilePosStoreId,
+  tillNumber: till.tillNumber,
+  name: till.name,
+  status: till.status,
+  liquidityAccountId: till.liquidityAccountId,
+  notes: till.notes,
+  rowVersion: till.rowVersion,
+  paymentMethods: till.paymentMethods.map(item => ({
+    paymentMethodId: item.paymentMethodId,
+    allowOnline: item.allowOnline,
+    allowOffline: item.allowOffline,
+    requireExternalAuthorizationReference: item.requireExternalAuthorizationReference,
+    displayOrder: item.displayOrder,
+  })),
+});
+
 function SearchChoice({
   label, value, options, onChange, required = false, placeholder = 'Search by code or name',
 }: {
@@ -179,11 +199,7 @@ export default function MobilePosAdministrationPage() {
 
   const openTill = (till?: MobilePosTill) => setTillEditor({
     id: till?.id,
-    value: till ? {
-      mobilePosStoreId: till.mobilePosStoreId, tillNumber: till.tillNumber, name: till.name, status: till.status,
-      liquidityAccountId: till.liquidityAccountId, notes: till.notes, rowVersion: till.rowVersion,
-      paymentMethods: till.paymentMethods.map(item => ({ paymentMethodId: item.paymentMethodId, allowOnline: item.allowOnline, allowOffline: item.allowOffline, requireExternalAuthorizationReference: item.requireExternalAuthorizationReference, displayOrder: item.displayOrder })),
-    } : { mobilePosStoreId: '', tillNumber: '', name: '', status: 1, liquidityAccountId: '', paymentMethods: [] },
+    value: till ? tillInput(till) : { mobilePosStoreId: '', tillNumber: '', name: '', status: 1, liquidityAccountId: '', paymentMethods: [] },
   });
 
   const saveTill = async () => {
@@ -193,7 +209,21 @@ export default function MobilePosAdministrationPage() {
     }
     setSaving(true);
     try { await mobilePosAdminService.saveTill(tillEditor.id, tillEditor.value); toast.success(`Till ${tillEditor.id ? 'updated' : 'created'}.`); setTillEditor(undefined); await load(); }
-    catch (error) { toast.error(errorMessage(error, 'Failed to save the till.')); }
+    catch (error) {
+      if (tillEditor.id && errorStatus(error) === 409) {
+        try {
+          const latestTills = await mobilePosAdminService.tills();
+          setTills(latestTills);
+          const latest = latestTills.find(item => item.id === tillEditor.id);
+          if (latest) setTillEditor({ id: latest.id, value: tillInput(latest) });
+          toast.error(`${errorMessage(error, 'This till changed after you opened it.')} Latest values were loaded; review them before saving again.`);
+        } catch (refreshError) {
+          toast.error(errorMessage(refreshError, 'The till changed and its latest values could not be loaded. Close the dialog and refresh the page.'));
+        }
+      } else {
+        toast.error(errorMessage(error, 'Failed to save the till.'));
+      }
+    }
     finally { setSaving(false); }
   };
 

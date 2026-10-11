@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using ErpSystem.Api.Services.MobilePos;
 using ErpSystem.Core.DTOs.MobilePos;
@@ -132,6 +132,113 @@ public sealed class MobilePosFoundationServiceTests
         var exception = await action.Should().ThrowAsync<BusinessRuleException>();
         exception.Which.Code.Should().Be("MOBILE_POS_VERSION_CONFLICT");
         exception.Which.StatusCode.Should().Be(409);
+    public async Task SaveTillAsync_ShouldUpdateConfigurationWithoutReplacingAnUnchangedPaymentMethod()
+    {
+        await using var fixture = Fixture.Create();
+        var store = fixture.SeedActiveStore("STORE-A");
+        var till = fixture.SeedActiveTill(store);
+        var cash = new FinancePaymentMethod
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "CASH", Name = "Cash",
+            Type = PaymentMethodType.Cash, IsActive = true, RequiresBankAccount = false
+        };
+        var existingConfiguration = new MobilePosTillPaymentMethod
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, MobilePosTillId = till.Id,
+            MobilePosTill = till, PaymentMethodId = cash.Id, PaymentMethod = cash,
+            AllowOnline = true, AllowOffline = false, DisplayOrder = 0
+        };
+        fixture.Db.PaymentMethods.Add(cash);
+        fixture.Db.MobilePosTillPaymentMethods.Add(existingConfiguration);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.SaveTillAsync(till.Id, new MobilePosTillUpsertDto
+        {
+            MobilePosStoreId = store.Id,
+            TillNumber = till.TillNumber,
+            Name = "Updated shop till",
+            Status = MobilePosTillStatus.Active,
+            LiquidityAccountId = till.LiquidityAccountId,
+            RowVersion = Convert.ToBase64String(till.RowVersion),
+            PaymentMethods =
+            [
+                new MobilePosTillPaymentMethodInputDto
+                {
+                    PaymentMethodId = cash.Id,
+                    AllowOnline = true,
+                    AllowOffline = true,
+                    DisplayOrder = 1
+                }
+            ]
+        }, CancellationToken.None);
+
+        result.Name.Should().Be("Updated shop till");
+        result.PaymentMethods.Should().ContainSingle(item => item.PaymentMethodId == cash.Id && item.AllowOffline);
+        var persisted = await fixture.Db.MobilePosTillPaymentMethods.SingleAsync();
+        persisted.Id.Should().Be(existingConfiguration.Id,
+            "editing a till must reconcile payment methods instead of deleting and recreating every row");
+        persisted.AllowOffline.Should().BeTrue();
+        (await fixture.Db.AuditLogs.SingleAsync()).Action.Should().Be("MobilePOS.Till.Updated");
+    }
+
+    [Fact]
+    public async Task SaveTillAsync_ShouldRejectAStaleTokenBeforeChangingTillOrPaymentMethods()
+    {
+        await using var fixture = Fixture.Create();
+        var store = fixture.SeedActiveStore("STORE-A");
+        var till = fixture.SeedActiveTill(store);
+        await fixture.Db.SaveChangesAsync();
+
+        var action = () => fixture.Service.SaveTillAsync(till.Id, new MobilePosTillUpsertDto
+        {
+            MobilePosStoreId = store.Id,
+            TillNumber = till.TillNumber,
+            Name = "Must not be applied",
+            Status = MobilePosTillStatus.Active,
+            LiquidityAccountId = till.LiquidityAccountId,
+            RowVersion = Convert.ToBase64String([9, 9, 9, 9, 9, 9, 9, 9])
+        }, CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<BusinessRuleException>();
+        exception.Which.Code.Should().Be("MOBILE_POS_TILL_CONCURRENCY_CONFLICT");
+        exception.Which.StatusCode.Should().Be(409);
+        (await fixture.Db.MobilePosTills.SingleAsync()).Name.Should().Be(till.Name);
+        (await fixture.Db.AuditLogs.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RecordHeartbeatAsync_ShouldPreserveTillConfigurationTokenAndDeriveItsHeartbeatFromTheDevice()
+    {
+        await using var fixture = Fixture.Create();
+        var store = fixture.SeedActiveStore("STORE-A");
+        var till = fixture.SeedActiveTill(store);
+        const string installationId = "installed-device-001";
+        fixture.Db.MobilePosDevices.Add(new MobilePosDevice
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            InstallationIdHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(installationId))),
+            DeviceName = "Till device", Status = MobilePosDeviceStatus.Active,
+            RequestedByUserId = fixture.ActorId, RequestedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+            MobilePosStoreId = store.Id, MobilePosStore = store,
+            MobilePosTillId = till.Id, MobilePosTill = till
+        });
+        await fixture.Db.SaveChangesAsync();
+        var rowVersionBeforeHeartbeat = till.RowVersion.ToArray();
+        var tillUpdatedAtBeforeHeartbeat = till.UpdatedAt;
+
+        var device = await fixture.Service.RecordHeartbeatAsync(new MobilePosHeartbeatDto
+        {
+            InstallationId = installationId,
+            AppVersion = "1.0.1"
+        }, CancellationToken.None);
+        var tillRead = (await fixture.Service.GetTillsAsync(store.Id, CancellationToken.None)).Single();
+
+        device.LastSeenAtUtc.Should().NotBeNull();
+        till.RowVersion.Should().Equal(rowVersionBeforeHeartbeat);
+        till.UpdatedAt.Should().Be(tillUpdatedAtBeforeHeartbeat);
+        till.LastHeartbeatAtUtc.Should().BeNull("heartbeat telemetry must not mutate the till configuration row");
+        tillRead.LastHeartbeatAtUtc.Should().Be(device.LastSeenAtUtc,
+            "the administration read model derives the till heartbeat from its assigned device");
     }
 
     [Fact]

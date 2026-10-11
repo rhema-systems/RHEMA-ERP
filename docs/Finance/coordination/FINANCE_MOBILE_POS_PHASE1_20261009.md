@@ -1,4 +1,4 @@
-# Finance mobile POS architecture and foundation workstream - 2026-10-09
+﻿# Finance mobile POS architecture and foundation workstream - 2026-10-09
 
 ## Objective and scope
 
@@ -389,6 +389,16 @@ The architecture and contract mapping are complete. Phase 2 now contains an isol
 - Verification: the focused `MobilePosFoundationServiceTests` suite passed 10/10 on .NET SDK 9.0.315, including tenant/active currency filtering, rejection of unconfigured currency, current-version update, and stale-version 409 behavior. HQ frontend TypeScript passed by using the repository's existing lockfile dependency cache with a local Node runtime. `git diff --check` passed.
 - Remaining work: integrate the companion cost-center, customer-credit, till-concurrency, and Sales Point of Sales navigation workstreams, then run the combined build and focused tests before publication.
 - Authorization boundary: source changes and local validation are authorized. No migration, database write, Git publication, workflow dispatch, VPS activation, or production deployment was performed by this workstream.
+## Till edit concurrency correction - 2026-10-11
+
+- Objective: correct the `DbUpdateConcurrencyException` raised while editing a Mobile POS till, preserve genuine optimistic-concurrency protection, and avoid replacing unchanged till-payment-method rows.
+- Worktree and branch: `.worktrees/mobile-pos-till-concurrency` on `codex/mobile-pos-till-concurrency`, created from exact `origin/master` base `ed768bc0f5cd1177c4a60af66fa35791555aae67`.
+- Verified cause: `RecordHeartbeatAsync` updated `MobilePosTill.LastHeartbeatAtUtc` for every assigned-device heartbeat. SQL Server therefore rotated the till configuration rowversion even when no administrator changed its configuration. An already-open edit dialog then supplied the prior rowversion, while `SaveTillAsync` blindly installed that token as EF's original value and allowed the provider to raise an unhandled concurrency exception. The same save path also deleted and recreated every `MobilePosTillPaymentMethod`, increasing the aggregate's write surface unnecessarily.
+- Backend correction: heartbeat telemetry updates only the device row; till read models derive the latest heartbeat from assigned device `LastSeenAtUtc` values. Till updates validate a present, valid Base64 token against the freshly loaded current rowversion before changing the aggregate, reconcile payment-method children in place, and translate both an early stale-token check and a provider-detected race into HTTP 409 `MOBILE_POS_TILL_CONCURRENCY_CONFLICT` business ProblemDetails.
+- Frontend correction: a 409 during till editing refreshes the till list and reloads the latest server values into the open editor. The toast tells the administrator to review the refreshed values before saving again; the UI never silently resubmits or overwrites another administrator's change.
+- Tests and verification: `git diff --check` passed. A direct MSBuild compile using the installed .NET 10 SDK with the repository's `TdcFastEfBuild=true` switch produced `ErpSystem.Api.Tests.dll` with zero errors. The focused VSTest filter passed 10/10 Mobile POS foundation and relational tests, covering unchanged child identity, stale-token rejection before mutation, heartbeat/token separation, SQLite relational rowversion rotation, and prevention of partial payment-method changes after a conflict. The normal repository SDK entrypoint is unavailable on this host because `global.json` requests SDK `9.0.315` while only SDK `10.0.401` is installed. Frontend TypeScript execution was not available because this host has no Node executable; the frontend change remains source-reviewed and requires the standard CI/frontend check after integration.
+- Migrations and application status: no entity shape changed, no migration was added or applied, and no database, VPS, or device was changed. This isolated change is authorized for a local commit only; it has not been pushed, merged, dispatched, or deployed.
+- Remaining work: integrate with the concurrent Mobile POS store-dialog changes, run the standard frontend TypeScript/build gates in a Node-enabled environment, and exercise a real SQL Server/browser edit while an assigned device is heartbeating. Existing clients with an already-stale edit token will receive one actionable 409 and can review the automatically refreshed editor before retrying.
 
 ## Known failures and constraints
 

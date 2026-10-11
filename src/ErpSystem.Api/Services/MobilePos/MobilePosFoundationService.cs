@@ -404,7 +404,16 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         if (storeId.HasValue)
             query = query.Where(item => item.MobilePosStoreId == storeId.Value);
         var tills = await query.OrderBy(item => item.TillNumber).ToListAsync(cancellationToken);
-        return tills.Select(MapTill).ToList();
+        var tillIds = tills.Select(item => item.Id).ToArray();
+        var heartbeatByTill = await _db.MobilePosDevices.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && item.MobilePosTillId.HasValue &&
+                           tillIds.Contains(item.MobilePosTillId.Value) && item.LastSeenAtUtc.HasValue)
+            .GroupBy(item => item.MobilePosTillId!.Value)
+            .Select(group => new { TillId = group.Key, LastSeenAtUtc = group.Max(item => item.LastSeenAtUtc) })
+            .ToDictionaryAsync(item => item.TillId, item => item.LastSeenAtUtc, cancellationToken);
+        return tills.Select(item => MapTill(
+            item,
+            heartbeatByTill.TryGetValue(item.Id, out var lastSeenAtUtc) ? lastSeenAtUtc : null)).ToList();
     }
 
     public async Task<MobilePosTillDto> SaveTillAsync(
@@ -453,9 +462,8 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             till = await _db.MobilePosTills.Include(item => item.PaymentMethods).SingleOrDefaultAsync(
                 item => item.TenantId == tenantId && item.Id == id.Value, cancellationToken)
                 ?? throw new KeyNotFoundException("The Mobile POS till was not found.");
-            ApplyRowVersion(till, dto.RowVersion);
+            ApplyTillRowVersion(till, dto.RowVersion);
             before = TillAuditSnapshot(till);
-            _db.MobilePosTillPaymentMethods.RemoveRange(till.PaymentMethods);
         }
         else
         {
@@ -480,23 +488,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             till.LastActivatedAtUtc = DateTime.UtcNow;
         StampUpdated(till);
 
-        foreach (var method in dto.PaymentMethods)
-        {
-            till.PaymentMethods.Add(new MobilePosTillPaymentMethod
-            {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                MobilePosTillId = till.Id,
-                PaymentMethodId = method.PaymentMethodId,
-                AllowOnline = method.AllowOnline,
-                AllowOffline = method.AllowOffline,
-                RequireExternalAuthorizationReference = method.RequireExternalAuthorizationReference,
-                DisplayOrder = method.DisplayOrder,
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = UserName,
-                CreatedById = UserId
-            });
-        }
+        ReconcileTillPaymentMethods(till, dto.PaymentMethods, tenantId);
 
         await AddAuditAsync(
             id.HasValue ? "MobilePOS.Till.Updated" : "MobilePOS.Till.Created",
@@ -504,7 +496,14 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
             till.Id,
             before,
             TillAuditSnapshot(till));
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            throw TillConcurrencyConflict(exception);
+        }
         return await GetTillRequiredAsync(till.Id, cancellationToken);
     }
 
@@ -737,13 +736,10 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         if (dto.LastSyncAtUtc.HasValue && (!device.LastSyncAtUtc.HasValue || dto.LastSyncAtUtc > device.LastSyncAtUtc))
             device.LastSyncAtUtc = dto.LastSyncAtUtc.Value;
         StampUpdated(device);
-        if (device.MobilePosTillId.HasValue)
-        {
-            var till = await _db.MobilePosTills.SingleAsync(item =>
-                item.TenantId == TenantId && item.Id == device.MobilePosTillId.Value, cancellationToken);
-            till.LastHeartbeatAtUtc = device.LastSeenAtUtc;
-            StampUpdated(till);
-        }
+        // Heartbeats are operational telemetry. Updating the till configuration row here used to
+        // rotate its SQL rowversion and invalidate an administrator's open edit dialog even though
+        // no till configuration had changed. Till reads derive their last heartbeat from assigned
+        // devices instead, so telemetry no longer competes with governed configuration edits.
         await _db.SaveChangesAsync(cancellationToken);
         return await GetDeviceRequiredAsync(device.Id, cancellationToken);
     }
@@ -1016,7 +1012,10 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
     {
         var till = await TillQuery().SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("The Mobile POS till was not found.");
-        return MapTill(till);
+        var lastHeartbeatAtUtc = await _db.MobilePosDevices.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && item.MobilePosTillId == id && item.LastSeenAtUtc.HasValue)
+            .MaxAsync(item => item.LastSeenAtUtc, cancellationToken);
+        return MapTill(till, lastHeartbeatAtUtc);
     }
 
     private async Task<MobilePosDeviceDto> GetDeviceRequiredAsync(Guid id, CancellationToken cancellationToken)
@@ -1157,7 +1156,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         RowVersion = Convert.ToBase64String(item.RowVersion)
     };
 
-    private static MobilePosTillDto MapTill(MobilePosTill item) => new()
+    private static MobilePosTillDto MapTill(MobilePosTill item, DateTime? lastHeartbeatAtUtc) => new()
     {
         Id = item.Id,
         MobilePosStoreId = item.MobilePosStoreId,
@@ -1170,7 +1169,7 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         LiquidityAccountCode = item.LiquidityAccount.Code,
         CurrencyCode = item.LiquidityAccount.Currency,
         Notes = item.Notes,
-        LastHeartbeatAtUtc = item.LastHeartbeatAtUtc,
+        LastHeartbeatAtUtc = lastHeartbeatAtUtc,
         RowVersion = Convert.ToBase64String(item.RowVersion),
         PaymentMethods = item.PaymentMethods.OrderBy(value => value.DisplayOrder).Select(value => new MobilePosPaymentMethodDto
         {
@@ -1228,6 +1227,89 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
                 "This Mobile POS record changed after it was opened. Reload the latest details, review your changes, and save again.",
                 StatusCodes.Status409Conflict);
         property.OriginalValue = bytes;
+    }
+
+    private void ApplyTillRowVersion(MobilePosTill till, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new BusinessRuleException(
+                "MOBILE_POS_TILL_ROW_VERSION_REQUIRED",
+                "Refresh the Mobile POS tills and reopen this till before saving.",
+                StatusCodes.Status409Conflict);
+
+        byte[] expected;
+        try
+        {
+            expected = Convert.FromBase64String(value);
+        }
+        catch (FormatException)
+        {
+            throw new BusinessRuleException(
+                "MOBILE_POS_TILL_ROW_VERSION_INVALID",
+                "The till edit token is invalid. Refresh the Mobile POS tills and reopen this till.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (expected.Length == 0 || till.RowVersion.Length == 0 ||
+            expected.Length != till.RowVersion.Length ||
+            !CryptographicOperations.FixedTimeEquals(expected, till.RowVersion))
+            throw TillConcurrencyConflict();
+
+        _db.Entry(till).Property(item => item.RowVersion).OriginalValue = expected;
+    }
+
+    private void ReconcileTillPaymentMethods(
+        MobilePosTill till,
+        IReadOnlyCollection<MobilePosTillPaymentMethodInputDto> requestedMethods,
+        Guid tenantId)
+    {
+        var requestedIds = requestedMethods.Select(item => item.PaymentMethodId).ToHashSet();
+        var obsolete = till.PaymentMethods.Where(item => !requestedIds.Contains(item.PaymentMethodId)).ToArray();
+        _db.MobilePosTillPaymentMethods.RemoveRange(obsolete);
+
+        var currentByMethod = till.PaymentMethods
+            .Where(item => requestedIds.Contains(item.PaymentMethodId))
+            .ToDictionary(item => item.PaymentMethodId);
+        foreach (var requested in requestedMethods)
+        {
+            if (!currentByMethod.TryGetValue(requested.PaymentMethodId, out var configured))
+            {
+                configured = new MobilePosTillPaymentMethod
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    MobilePosTillId = till.Id,
+                    PaymentMethodId = requested.PaymentMethodId,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = UserName,
+                    CreatedById = UserId
+                };
+                till.PaymentMethods.Add(configured);
+            }
+            else if (configured.AllowOnline != requested.AllowOnline ||
+                     configured.AllowOffline != requested.AllowOffline ||
+                     configured.RequireExternalAuthorizationReference != requested.RequireExternalAuthorizationReference ||
+                     configured.DisplayOrder != requested.DisplayOrder)
+            {
+                StampUpdated(configured);
+            }
+
+            configured.AllowOnline = requested.AllowOnline;
+            configured.AllowOffline = requested.AllowOffline;
+            configured.RequireExternalAuthorizationReference = requested.RequireExternalAuthorizationReference;
+            configured.DisplayOrder = requested.DisplayOrder;
+        }
+    }
+
+    private static BusinessRuleException TillConcurrencyConflict(Exception? innerException = null)
+    {
+        var conflict = new BusinessRuleException(
+            "MOBILE_POS_TILL_CONCURRENCY_CONFLICT",
+            "This till changed after you opened it. The latest till configuration must be loaded before you save again.",
+            StatusCodes.Status409Conflict);
+        if (innerException != null)
+            conflict.Data[nameof(innerException)] = innerException.GetType().Name;
+        return conflict;
     }
 
     private async Task AddAuditAsync(
