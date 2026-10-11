@@ -214,6 +214,7 @@
     <Compile Include="Services\DatabaseSeedingWorkflowPreservationTests.cs" />
     <Compile Include="Services\DatabaseSeedingDependencyGraphTests.cs" />
     <Compile Include="Services\OperationalUatBaselineSeederTests.cs" />
+    <Compile Include="Services\ProcurementUatPolicySetSeederTests.cs" />
     <Compile Include="Services\UnitOfWorkTransactionLockTests.cs" />
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />

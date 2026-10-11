@@ -55,6 +55,9 @@ Before transactional testing, confirm the following configuration exists. These 
    - Contract Approval, where applicable
 5. Workflow stages use controlled tenant roles and have at least one eligible user for each stage.
 6. An effective procurement policy exists for the test date and currency. For automatic routing, it must contain matching enabled Category, Method and Threshold rules for the test category and amount.
+   - Open `Administration → Procurement → Policy Sets` and confirm `UAT-WORKS-TENDER-50K-100K` is Published with Works, National Competitive Tendering, GHS 50,000 through GHS 100,000 inclusive.
+   - Confirm `UAT-CLEANING-RFQ-1K-50K` is Published with General Services, Request for Quotation, GHS 1,000 through GHS 50,000 inclusive.
+   - These are two separate, non-default UAT policies. A Purchase Request binds the exact eligible policy; one matching policy is auto-selected and multiple matches require an explicit selection.
 7. Authority, evidence, exception and policy SOD rules are optional unless the business has explicitly configured them for the route under test.
 8. Approved items, units of measure and supplier categories exist.
 9. DMS document types required for supplier and tender evidence exist.
@@ -216,15 +219,18 @@ Expected:
 4. Confirm the linked approved budget is loaded automatically.
 5. Confirm the department-derived cost centre is not displayed as a user-entry field.
 6. Confirm currency defaults to the Finance base currency `GHS`.
-7. Enter justification, required date and a positive specification for every line, or select an approved requisition specification template.
-8. Save as Draft and reopen it.
-9. Submit the PR.
-10. Attempt approval as the requester.
-11. Sign in as a different configured PR approver and approve it.
+7. Select the procurement category and enter priced lines, then review the `Procurement policy` card.
+8. Confirm it lists only Published policies matching the tenant, date, category, GHS currency and inclusive value band. If one policy matches it is auto-selected; if several match, select the exact policy before saving.
+9. Enter justification, required date and a positive specification for every line, or select an approved requisition specification template.
+10. Save as Draft and reopen it; confirm the governing policy code, name and version remain visible.
+11. Submit the PR.
+12. Attempt approval as the requester.
+13. Sign in as a different configured PR approver and approve it.
 
 Expected:
 
 - Plan, plan-item, budget, department and cost-centre lineage is retained automatically.
+- The selected Published policy identity is retained on the PR and is reused by authority routing and sourcing release; a stale, cross-tenant or out-of-band policy is rejected.
 - A user may select a different permitted currency only when the transaction requires it; GHS is the default.
 - Missing line specifications produce clear actionable guidance.
 - APP exchange and optional policy-authority metadata are advisory and do not block ordinary PR submission.
@@ -283,12 +289,12 @@ Expected:
 
 ## UAT-PRC-008: Standard RFQ route
 
-Use a fresh approved PR whose published policy resolves to Request for Quotation.
+Use a fresh approved PR whose published policy resolves to Request for Quotation. For the Facilities cleaning-service rehearsal, create a General Services PR in GHS between 1,000 and 50,000 inclusive and confirm policy `UAT-CLEANING-RFQ-1K-50K` is selected.
 
 1. Select `Create RFQ` from the approved PR or eligible plan-item action.
 2. Confirm PR, sourcing release, items, quantities, currency, estimate and specification are pre-populated.
 3. Add the required controlled documents and dates.
-4. Add at least the policy-required number of approved eligible suppliers.
+4. Add at least the policy-required number of approved eligible suppliers. The cleaning UAT policy requires three responsive supplier quotations.
 5. Publish/dispatch the RFQ.
 6. Record at least two supplier quotations/bids.
 7. Complete committee, conflict-of-interest and quorum controls where configured.
@@ -306,6 +312,7 @@ Expected:
 - Evaluation result is calculated and retained; users cannot alter a completed server result outside the governed process.
 - Dispatch, opening, evaluation, recommendation and approval are audited.
 - Retrying creation/dispatch/award does not duplicate the RFQ or award.
+- The cleaning RFQ retains `UAT-CLEANING-RFQ-1K-50K`, General Services, GHS value-band and evaluation-workflow lineage through the approved award.
 
 ## UAT-PRC-009: Tender route from publication to award
 
@@ -381,7 +388,7 @@ Expected:
 
 ### B. Contract register and monitoring
 
-1. From an approved award, select `Create Contract`.
+1. From an approved award, select `Create Contract`. For the Facilities rehearsal, use the approved cleaning-services RFQ award created under `UAT-CLEANING-RFQ-1K-50K`.
 2. Complete contract dates, value, supplier, milestones, deliverables and required documents.
 3. Submit and approve with separate users.
 4. Activate the contract.
@@ -390,6 +397,7 @@ Expected:
 Expected:
 
 - Contract retains award, supplier, budget and approval lineage.
+- The awarded cleaning-services contract is available as the governed service-provider contract for the Facilities module; the tester does not create an unawarded substitute contract.
 - The published Contract approval workflow and maker-checker remain mandatory.
 - Policy authority, GHANEPS, DEC-004/DEC-008 evidence and performance security are enforced only when configured for the contract route.
 - Contract activation does not require an unrelated fixed fourteen-decision profile or fixed legal/Internal Audit evidence when those controls were not configured.

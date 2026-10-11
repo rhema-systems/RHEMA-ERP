@@ -38,8 +38,8 @@ public sealed class OperationalUatBaselineSeeder(
             ["Procurement User", "TDC_HEAD_OF_PROCUREMENT", "TDC_STORES_MANAGER"]),
         new("procurementevaluator", "Procurement", "Evaluator", ["TDC_EVALUATOR"]),
         new("tdc0102-checker-201531", "Procurement", "Committee Checker", ["TDC_EVALUATOR"]),
-        new("financereviewer", "Finance", "Reviewer", ["TDC_FINANCE_REVIEWER"]),
-        new("financeapprover", "Finance", "Approver", ["Finance User"]),
+        new("financereviewer", "Finance", "Reviewer", ["TDC_FINANCE_REVIEWER", "TDC_LEGAL_REVIEWER"]),
+        new("financeapprover", "Finance", "Approver", ["Finance User", "TDC_ETC_MEMBER"]),
         new("storesofficer", "Stores", "Officer", ["Inventory User", "TDC_STORES_OFFICER"]),
         new("storesmanager", "Stores", "Manager", ["Inventory User", "TDC_STORES_MANAGER"]),
         new("uat.qs.preparer", "UAT QS", "Preparer", [Constants.Roles.Employee, "TDC_QUANTITY_SURVEYOR"]),
@@ -135,6 +135,13 @@ public sealed class OperationalUatBaselineSeeder(
         foreach (var augmentation in ExistingActorRoles)
             addedRoles += await EnsureExistingActorRolesAsync(augmentation, cancellationToken);
 
+        var policySeedActor = await userManager.FindByNameAsync("procurementapprover")
+            ?? throw new InvalidOperationException("Required UAT actor is missing: procurementapprover");
+        var policySeedResult = await new ProcurementUatPolicySetSeeder(db).SeedTenantAsync(
+            tenant.Id,
+            policySeedActor.Id,
+            cancellationToken);
+
         // Identity and Procurement reconciliation materialize a broad graph in this scoped
         // context. Finance seeding updates deterministic system accounts and must begin with a
         // clean tracker; otherwise a stale tracked account can produce a false concurrency
@@ -170,9 +177,11 @@ public sealed class OperationalUatBaselineSeeder(
             createdResponsibilities);
 
         logger.LogInformation(
-            "Operational UAT baseline reconciled. Created users={CreatedUsers}, role links={AddedRoles}, UOM={Units}, categories={Categories}, warehouses={Warehouses}, locations={Locations}, items={Items}, suppliers={Suppliers}, responsibility scopes={Responsibilities}.",
+            "Operational UAT baseline reconciled. Created users={CreatedUsers}, role links={AddedRoles}, procurement policies={ProcurementPolicies}, procurement workflows={ProcurementWorkflows}, UOM={Units}, categories={Categories}, warehouses={Warehouses}, locations={Locations}, items={Items}, suppliers={Suppliers}, responsibility scopes={Responsibilities}.",
             result.CreatedUsers,
             result.AddedRoleAssignments,
+            policySeedResult.CreatedPolicies,
+            policySeedResult.CreatedWorkflows,
             result.CreatedUnitsOfMeasure,
             result.CreatedCategories,
             result.CreatedWarehouses,

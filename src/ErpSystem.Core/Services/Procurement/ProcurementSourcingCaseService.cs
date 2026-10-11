@@ -1191,6 +1191,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         string correlationId,
         CancellationToken cancellationToken) => _compliance.EvaluateAsync(new ProcurementComplianceDecisionRequest
     {
+        PolicySetId = requisition.ProcurementPolicySetId,
         Category = requisition.ProcurementCategory ?? ProcurementCategoryClass.Goods,
         Amount = requisition.TotalAmount,
         CurrencyCode = NormalizeCurrency(requisition.Currency),

@@ -34,6 +34,7 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
             .Where(pr => pr.Status == status && !pr.IsDeleted)
             .Include(pr => pr.RequestedBy)
             .Include(pr => pr.ApprovedBy)
+            .Include(pr => pr.ProcurementPolicySet)
             .Include(pr => pr.Items)
             .OrderByDescending(pr => pr.RequisitionDate)
             .ToListAsync();
@@ -50,6 +51,7 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
             .Where(pr => pr.RequestedById == requesterId && !pr.IsDeleted)
             .Include(pr => pr.RequestedBy)
             .Include(pr => pr.ApprovedBy)
+            .Include(pr => pr.ProcurementPolicySet)
             .Include(pr => pr.Items)
             .OrderByDescending(pr => pr.RequisitionDate)
             .ToListAsync();
@@ -66,6 +68,7 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
             .Where(pr => pr.RequisitionNumber == requisitionNumber && !pr.IsDeleted)
             .Include(pr => pr.RequestedBy)
             .Include(pr => pr.ApprovedBy)
+            .Include(pr => pr.ProcurementPolicySet)
             .Include(pr => pr.Items)
             .FirstOrDefaultAsync();
     }
@@ -81,6 +84,7 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
             .Where(pr => pr.Id == requisitionId && !pr.IsDeleted)
             .Include(pr => pr.RequestedBy)
             .Include(pr => pr.ApprovedBy)
+            .Include(pr => pr.ProcurementPolicySet)
             .Include(pr => pr.Items)
             .FirstOrDefaultAsync();
     }
@@ -231,6 +235,7 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
         var query = _dbSet.Where(pr => !pr.IsDeleted)
             .Include(pr => pr.RequestedBy)
             .Include(pr => pr.ApprovedBy)
+            .Include(pr => pr.ProcurementPolicySet)
             .Include(pr => pr.Items)
             .AsQueryable();
 

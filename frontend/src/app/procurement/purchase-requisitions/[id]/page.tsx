@@ -1529,6 +1529,14 @@ export default function PurchaseRequisitionDetailPage() {
                   </p>
                 </div>
                 <div>
+                  <Label className="text-muted-foreground">Governing policy</Label>
+                  <p className="mt-1 font-medium">
+                    {requisition.procurementPolicyCode
+                      ? `${requisition.procurementPolicyCode}/v${requisition.procurementPolicyVersion} — ${requisition.procurementPolicyName}`
+                      : 'Not selected'}
+                  </p>
+                </div>
+                <div>
                   <Label className="text-muted-foreground">Project</Label>
                   <p className="mt-1 font-medium">
                     {requisition.linkage.projectCode

@@ -348,6 +348,7 @@ public sealed class ProcurementRequisitionAuthorityRouteService : IProcurementRe
 
         return await _compliance.EvaluateAuthorityRouteAsync(new ProcurementAuthorityRouteDecisionRequest
         {
+            PolicySetId = requisition.ProcurementPolicySetId,
             Category = requisition.ProcurementCategory.Value,
             Amount = requisition.TotalAmount,
             CurrencyCode = currency,
