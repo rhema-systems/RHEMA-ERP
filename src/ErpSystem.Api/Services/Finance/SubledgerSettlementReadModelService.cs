@@ -984,16 +984,11 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
         }
 
         var receiptIds = postedReceiptEvents.Keys.ToList();
-        var receipts = await _context.Set<CustomerPayment>()
-            .AsNoTracking()
-            .Where(p =>
-                p.TenantId == tenantId &&
-                receiptIds.Contains(p.Id) &&
-                !p.IsCreditNote &&
-                p.PaymentDate.Date <= asOfDate.Date &&
-                !string.Equals(p.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(p.Status, "Bounced", StringComparison.OrdinalIgnoreCase) &&
-                !p.IsDeleted)
+        var receipts = await BuildArReceiptRebuildQuery(
+                _context.Set<CustomerPayment>().AsNoTracking(),
+                tenantId,
+                receiptIds,
+                asOfDate)
             .ToListAsync(cancellationToken);
 
         var allocations = await _context.Set<PaymentAllocation>()
@@ -1055,6 +1050,22 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
         }
 
         return count;
+    }
+
+    internal static IQueryable<CustomerPayment> BuildArReceiptRebuildQuery(
+        IQueryable<CustomerPayment> receipts,
+        Guid tenantId,
+        List<Guid> receiptIds,
+        DateTime asOfDate)
+    {
+        return receipts.Where(p =>
+                p.TenantId == tenantId &&
+                receiptIds.Contains(p.Id) &&
+                !p.IsCreditNote &&
+                p.PaymentDate.Date <= asOfDate.Date &&
+                p.Status != "Cancelled" &&
+                p.Status != "Bounced" &&
+                !p.IsDeleted);
     }
 
     private async Task AddOpeningAdvancePostingEventsAsync(

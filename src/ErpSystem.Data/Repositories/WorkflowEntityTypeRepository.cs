@@ -18,17 +18,18 @@ public class WorkflowEntityTypeRepository : GenericRepository<WorkflowEntityType
     /// </summary>
     public async Task<WorkflowEntityType?> GetByNameAsync(string name, Guid tenantId, CancellationToken cancellationToken = default)
     {
+        // Runtime callers submit the canonical workflow entity code. Resolve that
+        // identity before considering a display-name/legacy alias: older tenants can
+        // contain a BUSINESS_PARTNER row whose Name is "BusinessPartner" alongside
+        // the canonical BusinessPartner row that owns the published definition.
         var exact = await _dbSet
-            .FirstOrDefaultAsync(et => et.Name == name && et.TenantId == tenantId && !et.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(et => et.Code == name && et.TenantId == tenantId && !et.IsDeleted, cancellationToken);
         if (exact is not null) return exact;
 
-        // Runtime services normally pass the configured entity code back into this
-        // repository after a page-level alias has been resolved. Prefer that exact
-        // code before the normalized fallback below. Older tenants can contain both
-        // a legacy SalesOrder row and the catalog SALES_ORDER row; treating those as
-        // ambiguous makes otherwise valid entity-summary reads fail with HTTP 500.
+        // Display names remain a supported lookup for configuration screens, but
+        // must not shadow an exact code.
         exact = await _dbSet
-            .FirstOrDefaultAsync(et => et.Code == name && et.TenantId == tenantId && !et.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(et => et.Name == name && et.TenantId == tenantId && !et.IsDeleted, cancellationToken);
         if (exact is not null) return exact;
 
         // An entity type may be disabled after an approval has started. Resolve

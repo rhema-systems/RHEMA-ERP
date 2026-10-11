@@ -48,7 +48,7 @@ export default function CustomersPage() {
     const [pageSize] = useState(10);
     const [readiness, setReadiness] = useState<'All' | 'Ready' | 'NotReady'>('All');
 
-    const { data: customersData, isLoading } = useQuery({
+    const { data: customersData, isLoading, isError, error, refetch } = useQuery({
         queryKey: ['customers', page, pageSize, debouncedSearchTerm, readiness],
         queryFn: () => arService.getCustomers({
             page,
@@ -106,6 +106,12 @@ export default function CustomersPage() {
                     </div>
                 </CardHeader>
                 <CardContent>
+                    {isError ? (
+                        <div className="flex items-center justify-between gap-4 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                            <span>{error instanceof Error ? error.message : 'AR customers could not be loaded.'}</span>
+                            <Button variant="outline" size="sm" onClick={() => void refetch()}>Retry</Button>
+                        </div>
+                    ) : (
                     <div className="rounded-md border">
                         <Table>
                             <TableHeader>
@@ -218,6 +224,7 @@ export default function CustomersPage() {
                             </TableBody>
                         </Table>
                     </div>
+                    )}
 
                     {/* Pagination Controls */}
                     {customersData && customersData.totalPages > 1 && (

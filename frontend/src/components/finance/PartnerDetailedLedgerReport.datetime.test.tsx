@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { formatLedgerDateTime, resolveLedgerDisplayDateTime } from './PartnerDetailedLedgerReport';
+import {
+  formatLedgerBusinessDate,
+  formatLedgerDateTime,
+  resolveLedgerPostedDateTime,
+} from './PartnerDetailedLedgerReport';
 
 describe('customer detailed-ledger date/time', () => {
   it('renders the transaction time instead of truncating the ISO value to a date', () => {
@@ -13,15 +17,16 @@ describe('customer detailed-ledger date/time', () => {
     expect(formatLedgerDateTime('legacy-date')).toBe('legacy-date');
   });
 
-  it('prefers the authoritative posting timestamp while retaining the business date as fallback', () => {
-    expect(resolveLedgerDisplayDateTime({
-      transactionDate: '2026-10-01T00:00:00',
+  it('renders the business date independently from the posting timestamp', () => {
+    expect(formatLedgerBusinessDate('2026-10-01T00:00:00')).toBe('01 Oct 2026');
+    expect(resolveLedgerPostedDateTime({
       postedAt: '2026-10-02T07:15:00',
     })).toMatch(/02 Oct 2026.*07:15/i);
+  });
 
-    expect(resolveLedgerDisplayDateTime({
-      transactionDate: '2026-10-01T09:30:00',
+  it('does not disguise a missing posting timestamp as the business date', () => {
+    expect(resolveLedgerPostedDateTime({
       postedAt: null,
-    })).toMatch(/01 Oct 2026.*09:30/i);
+    })).toBe('-');
   });
 });

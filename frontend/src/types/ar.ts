@@ -218,6 +218,7 @@ export interface CustomerPayment {
     withholdingCertificateNumber?: string;
     withholdingCertificateDate?: string;
     isCreditNote: boolean;
+    isCustomerAdvance: boolean;
     notes?: string;
     clearedDate?: string;
     journalEntryId?: string;

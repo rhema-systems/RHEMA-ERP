@@ -108,6 +108,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string Status { get; set; } = string.Empty;
         public DateTime? ClearedDate { get; set; }
         public bool IsCreditNote { get; set; }
+        public bool IsCustomerAdvance { get; set; }
         public Guid? JournalEntryId { get; set; }
         public Guid? ReversalJournalEntryId { get; set; }
         public Guid? ReversalPostingEventId { get; set; }

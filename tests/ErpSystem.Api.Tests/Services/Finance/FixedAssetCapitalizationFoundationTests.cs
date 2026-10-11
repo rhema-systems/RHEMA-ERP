@@ -567,6 +567,35 @@ public sealed class FixedAssetCapitalizationFoundationTests
     [Fact]
     [Trait("Batch", "FinanceWorkflowApprovalHardening")]
     [Trait("Category", "Workflow")]
+    public void DirectCapitalizationSubmissionStartsTransactionInsideRetryingExecutionStrategy()
+    {
+        var source = ReadSource("src/ErpSystem.Api/Services/Finance/FixedAssets/FixedAssetService.cs");
+        var publicMethod = source.IndexOf(
+            "public async Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(",
+            StringComparison.Ordinal);
+        var coreMethod = source.IndexOf(
+            "private async Task<FixedAssetDto> SubmitCapitalizationForApprovalCoreAsync(",
+            StringComparison.Ordinal);
+        publicMethod.Should().BeGreaterThanOrEqualTo(0);
+        coreMethod.Should().BeGreaterThan(publicMethod);
+
+        var wrapper = source[publicMethod..coreMethod];
+        wrapper.Should().Contain("_context.Database.CreateExecutionStrategy()")
+            .And.Contain("executionStrategy.ExecuteAsync")
+            .And.Contain("SubmitCapitalizationForApprovalCoreAsync(id, dto, cancellationToken)")
+            .And.NotContain("BeginTransactionAsync");
+
+        var nextMethod = source.IndexOf(
+            "public async Task<FixedAssetDto> CapitalizeAsync(",
+            coreMethod,
+            StringComparison.Ordinal);
+        var core = source[coreMethod..nextMethod];
+        core.Should().Contain("BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceWorkflowApprovalHardening")]
+    [Trait("Category", "Workflow")]
     public async Task DirectCapitalization_ShouldFailClosedWhenApprovalSnapshotIsTampered()
     {
         var tenantId = Guid.NewGuid();
@@ -903,6 +932,22 @@ public sealed class FixedAssetCapitalizationFoundationTests
             .Options;
 
         return new ApplicationDbContext(options);
+    }
+
+    private static string ReadSource(string relativePath)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            var path = Path.Combine(
+                directory.FullName,
+                relativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(path))
+                return File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
+        }
+
+        throw new FileNotFoundException(relativePath);
     }
 
     private static ServiceFixture CreateServices(

@@ -41,4 +41,18 @@ describe('AR receipt destination contract', () => {
     expect(paymentMethod).toBeLessThan(bankDestination);
     expect(paymentMethod).toBeLessThan(holdingDestination);
   });
+
+  it('labels the displayed invoice date as the due date', () => {
+    expect(pageSource).toContain('<th className="p-3 text-left">Due date</th>');
+    expect(pageSource).toContain("inv.dueDate ? format(new Date(inv.dueDate), 'MMM dd, yyyy') : '-'");
+    expect(pageSource).not.toContain('<th className="p-3 text-left">Date</th>');
+  });
+
+  it('separates recording new money from applying an existing on-account advance', () => {
+    expect(pageSource).toContain("type ReceiptMode = 'new-receipt' | 'apply-account'");
+    expect(pageSource).toContain('Apply payment on account');
+    expect(pageSource).toContain('<CustomerAdvanceSelector');
+    expect(pageSource).toContain('customerPaymentId: existingAdvancePaymentId');
+    expect(pageSource).toContain("router.push(`/finance/ar/receipts/${existingAdvancePaymentId}`)");
+  });
 });

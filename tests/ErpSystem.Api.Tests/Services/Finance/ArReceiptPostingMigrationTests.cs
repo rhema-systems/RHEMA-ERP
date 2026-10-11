@@ -333,6 +333,59 @@ public sealed partial class ArReceiptPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
     [Trait("Category", "AccountsReceivable")]
+    public async Task PaymentQuery_ShouldExposeOnlyEligibleCustomerAdvanceLots()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        db.Remove(fixture.Allocation);
+        fixture.Payment.AllocatedAmount = 0m;
+        fixture.Payment.IsCustomerAdvance = true;
+        fixture.Payment.Status = "Posted";
+
+        db.Set<CustomerPayment>().Add(new CustomerPayment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PaymentNumber = "CP-2026-LEGACY-UNAPPLIED",
+            BusinessPartnerId = fixture.Payment.BusinessPartnerId,
+            BusinessPartnerRoleId = fixture.Payment.BusinessPartnerRoleId,
+            BusinessPartnerArProfileVersionId = fixture.Payment.BusinessPartnerArProfileVersionId,
+            BusinessPartnerCode = fixture.Payment.BusinessPartnerCode,
+            BusinessPartnerName = fixture.Payment.BusinessPartnerName,
+            PaymentDate = fixture.Payment.PaymentDate,
+            TotalAmount = 50m,
+            AllocatedAmount = 0m,
+            IsCustomerAdvance = false,
+            PaymentMethod = "BankTransfer",
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            BankAccountId = fixture.Payment.BankAccountId,
+            Status = "Posted",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.GetAllAsync(new PaymentQueryDto
+        {
+            BusinessPartnerId = fixture.Customer.Id,
+            Status = "Posted",
+            HasUnallocatedAmount = true,
+            IsCustomerAdvance = true,
+            PageSize = 100
+        });
+
+        result.Items.Should().ContainSingle();
+        result.Items.Single().Id.Should().Be(fixture.Payment.Id);
+        result.Items.Single().IsCustomerAdvance.Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
+    [Trait("Category", "AccountsReceivable")]
     public async Task ForeignCustomerAdvance_ShouldApplyAtFrozenLotAndCurrentInvoiceRatesThenReverseImmutably()
     {
         var tenantId = Guid.NewGuid();

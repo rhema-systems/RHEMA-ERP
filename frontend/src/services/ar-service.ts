@@ -59,6 +59,8 @@ export interface PaymentQuery {
     status?: string;
     paymentMethod?: string;
     paymentMethodId?: string;
+    hasUnallocatedAmount?: boolean;
+    isCustomerAdvance?: boolean;
 }
 
 export type EstateArSource = 'facilities' | 'property-management';
@@ -167,6 +169,8 @@ class ArService {
         if (query.status) params.append('Status', query.status);
         if (query.paymentMethod) params.append('PaymentMethod', query.paymentMethod);
         if (query.paymentMethodId) params.append('PaymentMethodId', query.paymentMethodId);
+        if (query.hasUnallocatedAmount !== undefined) params.append('HasUnallocatedAmount', query.hasUnallocatedAmount.toString());
+        if (query.isCustomerAdvance !== undefined) params.append('IsCustomerAdvance', query.isCustomerAdvance.toString());
 
         return apiService.get<PagedResult<CustomerPayment>>(`${this.baseUrl}/payments?${params.toString()}`);
     }

@@ -127,6 +127,7 @@
     <Compile Include="Controllers\Finance\ChequesControllerTests.cs" />
     <Compile Include="Controllers\Finance\BankStatementsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\BusinessPartnersControllerContactRouteTests.cs" />
+    <Compile Include="Services\Procurement\BusinessPartnerLifecycleGovernanceTests.cs" />
     <Compile Include="Controllers\Procurement\TenderBidDocumentBoundaryTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementConfigurationProfilesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementComplianceDecisionsControllerTests.cs" />
