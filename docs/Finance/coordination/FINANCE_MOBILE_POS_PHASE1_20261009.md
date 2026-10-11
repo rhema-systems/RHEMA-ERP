@@ -425,6 +425,17 @@ Complete the remaining Phase 2 acceptance evidence: physical Android secure-stor
 
 The user authorized proceeding with the mobile implementation plan and Phase 1 architecture work. Read-only audits, documentation, tests, and isolated branch commits are authorized. Production deployment, live database migration, provider enrollment, payment capture, device enrollment, and physical Z92S certification require their relevant implementation stage and evidence.
 
+## HQ Mobile POS administration integration - 2026-10-11
+
+- Objective: consolidate the governed store setup, till concurrency correction, Finance-dimension and customer-credit rules, and Sales Point of Sales navigation into one publishable HQ change set.
+- Branch and base: `codex/mobile-pos-administration-integration`, based on exact `origin/master` commit `ed768bc0f5cd1177c4a60af66fa35791555aae67`.
+- Integrated commits: `ad6614a9e6b` (store setup), `b456754e11c` (till concurrency), `249aad0ca10` (Finance dimensions and customer credit limits), and `c7a0da5fb9d` (Sales Point of Sales pages).
+- Application status: no database migration is required. The branch is source-complete and remained four commits ahead of the unchanged `origin/master` after a fresh fetch on 2026-10-11.
+- Verification: `git diff --check` passed. The focused Mobile POS and Finance-profile API run passed 47/47 tests. The customer credit-authority Core run passed 3/3 tests. Frontend TypeScript completed successfully, and the focused administration, navigation, route-guard, Settings, and Finance-profile Vitest run passed 52/52 tests across six files.
+- Known unrelated failure: an intentionally broader API test attempt included the existing `ArInvoicePostingMigrationTests` suite and reported 38 failures because the suite's Finance source-book authority fixture is not configured for current posting requirements; 76 other tests passed. The focused Mobile POS/API gate was rerun independently and passed 47/47.
+- Remaining work: publish this branch through its own pull request, merge after repository checks, and include the resulting `master` commit in the user-authorized Windows VPS deployment after the separate Procurement UAT policy-set pull request is also merged.
+- Authorization boundary: the user authorized commit, push, pull-request merge, and deployment workflow dispatch for this integrated change. The separate `.NET 10` migration audit remains excluded from publication and deployment.
+
 ## Sales Point of Sales operational navigation split (2026-10-11)
 
 - Objective: separate HQ Mobile POS operations from administration setup by moving Day End, Till Report, and Devices into a `Sales -> Point of Sales` submenu with dedicated pages, while retaining Stores, Tills and payment-method mappings, Offline policies, and User assignments under Mobile POS Administration.
