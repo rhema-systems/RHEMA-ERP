@@ -180,7 +180,14 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
         var definitions = await _db.FinanceDimensionDefinitions.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.IsActive)
             .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Name)
-            .Select(item => new { item.Id, item.Code, item.Name })
+            .Select(item => new
+            {
+                item.Id,
+                item.Code,
+                item.Name,
+                item.Description,
+                item.ValueSourceType
+            })
             .ToListAsync(cancellationToken);
         var dimensionValues = await _db.FinanceDimensionValues.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.IsActive &&
@@ -212,6 +219,8 @@ public sealed class MobilePosFoundationService : IMobilePosFoundationService
                 DefinitionId = definition.Id,
                 Code = definition.Code,
                 Name = definition.Name,
+                Description = definition.Description,
+                ValueSourceType = definition.ValueSourceType,
                 Values = dimensionValues
                     .Where(value => value.FinanceDimensionDefinitionId == definition.Id)
                     .Select(value => value.Option)

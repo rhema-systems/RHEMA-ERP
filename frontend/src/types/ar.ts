@@ -11,6 +11,7 @@ export interface Customer {
     city?: string;
     country?: string;
     creditLimit: number;
+    isUnlimitedCredit: boolean;
     outstandingBalance: number;
     customerCreditBalance: number;
     paymentTermsDays: number;

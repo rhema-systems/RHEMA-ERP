@@ -132,6 +132,9 @@ public sealed class MobilePosFoundationServiceTests
         var exception = await action.Should().ThrowAsync<BusinessRuleException>();
         exception.Which.Code.Should().Be("MOBILE_POS_VERSION_CONFLICT");
         exception.Which.StatusCode.Should().Be(409);
+    }
+
+    [Fact]
     public async Task SaveTillAsync_ShouldUpdateConfigurationWithoutReplacingAnUnchangedPaymentMethod()
     {
         await using var fixture = Fixture.Create();
@@ -239,6 +242,48 @@ public sealed class MobilePosFoundationServiceTests
         till.LastHeartbeatAtUtc.Should().BeNull("heartbeat telemetry must not mutate the till configuration row");
         tillRead.LastHeartbeatAtUtc.Should().Be(device.LastSeenAtUtc,
             "the administration read model derives the till heartbeat from its assigned device");
+    }
+
+    [Fact]
+    public async Task AdministrationReferences_ShouldExposeAllActiveEffectiveFinanceDimensionValues()
+    {
+        await using var fixture = Fixture.Create();
+        var now = DateTime.UtcNow;
+        var definition = new FinanceDimensionDefinition
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "DEPARTMENT",
+            Name = "Department / Cost Centre", Description = "Transaction cost ownership.",
+            Classification = "Analytical", ValueSourceType = "Lookup", IsActive = true
+        };
+        fixture.Db.FinanceDimensionDefinitions.Add(definition);
+        fixture.Db.FinanceDimensionValues.AddRange(
+            DimensionValue("FIN", "Finance", true, now.AddDays(-10), null),
+            DimensionValue("OPS", "Operations", true, now.AddDays(-5), now.AddDays(5)),
+            DimensionValue("OLD", "Expired", true, now.AddDays(-10), now.AddDays(-1)),
+            DimensionValue("FUTURE", "Future", true, now.AddDays(1), null),
+            DimensionValue("OFF", "Inactive", false, now.AddDays(-10), null));
+        await fixture.Db.SaveChangesAsync();
+
+        var references = await fixture.Service.GetAdministrationReferencesAsync(CancellationToken.None);
+
+        var costCentre = references.Dimensions.Should().ContainSingle().Subject;
+        costCentre.Code.Should().Be("DEPARTMENT");
+        costCentre.ValueSourceType.Should().Be("Lookup");
+        costCentre.Description.Should().Be("Transaction cost ownership.");
+        costCentre.Values.Select(item => item.Code).Should().BeEquivalentTo("FIN", "OPS");
+
+        FinanceDimensionValue DimensionValue(
+            string code,
+            string name,
+            bool active,
+            DateTime effective,
+            DateTime? expiry) => new()
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            FinanceDimensionDefinitionId = definition.Id, FinanceDimensionDefinition = definition,
+            Code = code, Name = name, IsActive = active,
+            EffectiveDate = effective, ExpiryDate = expiry
+        };
     }
 
     [Fact]

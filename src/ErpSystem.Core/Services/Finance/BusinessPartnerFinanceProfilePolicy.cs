@@ -16,6 +16,13 @@ public sealed record BusinessPartnerFinanceProfileReadiness(
 /// </summary>
 public static class BusinessPartnerFinanceProfilePolicy
 {
+    /// <summary>
+    /// A customer credit ceiling exists only when Finance records a positive amount.
+    /// Null and zero deliberately mean unlimited credit; credit hold and partner/profile
+    /// readiness remain independent controls and continue to apply.
+    /// </summary>
+    public static bool IsCreditLimitEnforced(decimal? creditLimit) => creditLimit is > 0m;
+
     public static BusinessPartnerFinanceProfileReadiness ResolveAp(
         BusinessPartner partner,
         BusinessPartnerRole? role,

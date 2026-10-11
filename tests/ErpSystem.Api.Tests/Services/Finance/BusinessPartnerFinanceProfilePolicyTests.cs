@@ -7,6 +7,21 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class BusinessPartnerFinanceProfilePolicyTests
 {
+    [Theory]
+    [MemberData(nameof(CreditLimitEnforcementCases))]
+    public void Credit_limit_is_enforced_only_for_positive_values(decimal? creditLimit, bool expected)
+    {
+        BusinessPartnerFinanceProfilePolicy.IsCreditLimitEnforced(creditLimit).Should().Be(expected);
+    }
+
+    public static TheoryData<decimal?, bool> CreditLimitEnforcementCases => new()
+    {
+        { null, false },
+        { 0m, false },
+        { 1m, true },
+        { 500m, true }
+    };
+
     [Fact]
     public void ResolveAp_AcceptsWorkflowApprovedActivePartner()
     {

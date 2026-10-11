@@ -138,6 +138,7 @@ describe('canonical Finance profiles regression', () => {
 
   it('preserves customer credit, terms and withholding-agent settings on AR save', async () => {
     render(<BusinessPartnerFinanceProfilesPanel {...props} />); await ready();
+    expect(screen.getByText(/leave blank or enter 0 for unlimited credit/i)).toBeInTheDocument();
     fireEvent.change(input('AR reference'), { target: { value: 'AR-123' } });
     const arCard = screen.getByRole('region', { name: 'Accounts Receivable profile' });
     fireEvent.click(within(arCard).getByRole('button', { name: 'Save draft' }));

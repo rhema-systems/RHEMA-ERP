@@ -275,7 +275,7 @@ export function BusinessPartnerFinanceProfilesPanel({ businessPartnerId, payment
               <Field label="Effective through (optional)"><Input type="date" value={arTo} onChange={(e) => setArTo(e.target.value)} disabled={arReadOnly} /></Field>
               <Field label="AR reference"><Input value={arReference} onChange={(e) => setArReference(e.target.value)} disabled={arReadOnly} /></Field>
               <Field label="Payment terms"><PaymentTermSelect value={arPaymentTermId} onChange={setArPaymentTermId} terms={paymentTerms} disabled={arReadOnly} /></Field>
-              <Field label="Credit limit"><Input type="number" min="0" step="0.01" value={creditLimit} onChange={(e) => setCreditLimit(e.target.value)} disabled={arReadOnly} /></Field>
+              <Field label="Credit limit"><Input type="number" min="0" step="0.01" value={creditLimit} onChange={(e) => setCreditLimit(e.target.value)} disabled={arReadOnly} /><p className="text-xs text-muted-foreground">Leave blank or enter 0 for unlimited credit. Only a value greater than 0 is enforced.</p></Field>
               <div className="flex items-center gap-3"><Switch id="ar-agent" checked={isWithholdingAgent} onCheckedChange={setIsWithholdingAgent} disabled={arReadOnly} /><Label htmlFor="ar-agent">Customer is a withholding agent</Label></div>
             </div>
             <ProfileActions ledger="ar" profile={arProfile} busy={busy || arRole?.status !== 'Active'} dirty={arDirty} reason={decisionReason} onReason={setDecisionReason} onSave={saveAr} onDecision={decision}

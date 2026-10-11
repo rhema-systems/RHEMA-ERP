@@ -41,6 +41,32 @@ public sealed class CanonicalCustomerProfileReadTests
     }
 
     [Theory]
+    [MemberData(nameof(NonEnforcedCreditLimits))]
+    public async Task Null_or_zero_profile_credit_limit_is_reported_and_checked_as_unlimited(decimal? creditLimit)
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync();
+        fixture.Profile.CreditLimit = creditLimit;
+        await fixture.Context.SaveChangesAsync();
+
+        var customer = await fixture.Service.GetByIdAsync(fixture.Partner.Id);
+        var balance = await fixture.Service.GetBalanceAsync(fixture.Partner.Id);
+        var credit = await fixture.Service.CheckCreditLimitAsync(fixture.Partner.Id, 1_000_000m);
+
+        customer!.IsUnlimitedCredit.Should().BeTrue();
+        balance.IsUnlimitedCredit.Should().BeTrue();
+        credit.IsUnlimitedCredit.Should().BeTrue();
+        credit.IsApproved.Should().BeTrue();
+        credit.Message.Should().Contain("No numeric credit limit");
+    }
+
+    public static TheoryData<decimal?> NonEnforcedCreditLimits => new()
+    {
+        null,
+        0m
+    };
+
+    [Theory]
     [InlineData("draft")]
     [InlineData("future")]
     [InlineData("inactive-role")]

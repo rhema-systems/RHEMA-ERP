@@ -24,6 +24,8 @@ export interface MobilePosDimensionReference {
   definitionId: string;
   code: string;
   name: string;
+  description?: string;
+  valueSourceType: string;
   values: MobilePosReferenceOption[];
 }
 

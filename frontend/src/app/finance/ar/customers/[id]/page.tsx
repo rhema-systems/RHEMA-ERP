@@ -176,17 +176,21 @@ export default function CustomerDetailsPage() {
                         <div className="space-y-1">
                             <p className="text-sm font-medium text-muted-foreground">Credit Limit (Base: ₵)</p>
                             <p className="text-lg font-semibold">
-                                {formatCurrency(customer.creditLimit, customer.currencyCode)}
+                                {customer.isUnlimitedCredit ? 'Unlimited' : formatCurrency(customer.creditLimit, customer.currencyCode)}
                             </p>
-                            <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                                <div
-                                    className={`h-full ${customer.outstandingBalance > customer.creditLimit ? 'bg-red-500' : 'bg-blue-500'}`}
-                                    style={{ width: `${Math.min(100, (customer.outstandingBalance / (customer.creditLimit || 1)) * 100)}%` }}
-                                />
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-1">
-                                {((customer.outstandingBalance / (customer.creditLimit || 1)) * 100).toFixed(1)}% utilized
-                            </p>
+                            {customer.isUnlimitedCredit ? (
+                                <p className="text-xs text-muted-foreground mt-1">No numeric credit ceiling is enforced.</p>
+                            ) : (<>
+                                <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+                                    <div
+                                        className={`h-full ${customer.outstandingBalance > customer.creditLimit ? 'bg-red-500' : 'bg-blue-500'}`}
+                                        style={{ width: `${Math.min(100, (customer.outstandingBalance / customer.creditLimit) * 100)}%` }}
+                                    />
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    {((customer.outstandingBalance / customer.creditLimit) * 100).toFixed(1)}% utilized
+                                </p>
+                            </>)}
                         </div>
                         <div className="space-y-1 pt-2 border-t">
                             <div className="flex justify-between text-sm">

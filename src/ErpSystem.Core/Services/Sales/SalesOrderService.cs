@@ -934,7 +934,7 @@ public class SalesOrderService : ISalesOrderService
             // The governed AR profile is the only credit-limit authority. The similarly named
             // BusinessPartner column is retained for historical compatibility and is ignored.
             var creditLimit = readiness.ArProfile!.CreditLimit;
-            if (!creditLimit.HasValue || creditLimit.Value == 0)
+            if (!BusinessPartnerFinanceProfilePolicy.IsCreditLimitEnforced(creditLimit))
                 return true;
 
             var outstandingBalance = await GetCustomerOutstandingBalanceAsync(businessPartnerId);

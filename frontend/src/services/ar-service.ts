@@ -107,7 +107,7 @@ class ArService {
         return apiService.put<Customer>(`${this.baseUrl}/customers/${id}`, data);
     }
 
-    public async checkCreditLimit(customerId: string, amount: number): Promise<{ isApproved: boolean; currentBalance: number; newBalance: number; creditLimit: number; message: string }> {
+    public async checkCreditLimit(customerId: string, amount: number): Promise<{ isApproved: boolean; requestedAmount: number; currentOutstanding: number; creditLimit: number; availableCredit: number; isUnlimitedCredit: boolean; message?: string }> {
         return apiService.post(`${this.baseUrl}/customers/${customerId}/check-credit`, { amount });
     }
 
